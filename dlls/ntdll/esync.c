@@ -48,6 +48,7 @@
 
 #include "ntdll_misc.h"
 #include "esync.h"
+#include "fsync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(esync);
 
@@ -57,7 +58,7 @@ int do_esync(void)
     static int do_esync_cached = -1;
 
     if (do_esync_cached == -1)
-        do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC"));
+        do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC")) && !do_fsync();
 
     return do_esync_cached;
 #else
@@ -277,6 +278,13 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
     {
         /* We can deal with pseudo-handles, but it's just easier this way */
         return STATUS_NOT_IMPLEMENTED;
+    }
+
+    if (!handle)
+    {
+        /* Shadow of the Tomb Raider really likes passing in NULL handles to
+         * various functions. Concerning, but let's avoid a server call. */
+        return STATUS_INVALID_HANDLE;
     }
 
     /* We need to try grabbing it from the server. */

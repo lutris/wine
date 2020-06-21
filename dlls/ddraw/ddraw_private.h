@@ -335,6 +335,10 @@ struct d3d_device
     struct d3d_viewport *current_viewport;
     D3DVIEWPORT7 active_viewport;
 
+    /* Pick data */
+    D3DPICKRECORD* pick_records;
+    DWORD pick_record_count;
+
     /* Required to keep track which of two available texture blending modes in d3ddevice3 is used */
     BOOL legacyTextureBlending;
     D3DTEXTUREBLEND texture_map_blend;
@@ -568,7 +572,7 @@ struct d3d_execute_buffer *unsafe_impl_from_IDirect3DExecuteBuffer(IDirect3DExec
 
 /* The execute function */
 HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *execute_buffer,
-        struct d3d_device *device) DECLSPEC_HIDDEN;
+        struct d3d_device *device, D3DRECT* pick_rect) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * IDirect3DVertexBuffer

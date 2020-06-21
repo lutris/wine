@@ -13369,6 +13369,129 @@ done:
     DestroyWindow(window);
 }
 
+static void test_pick(void)
+{
+    static D3DTLVERTEX tquad[] =
+    {
+        {{320.0f}, {480.0f}, { 1.5f}, {1.0f}, {0xff00ff00}, {0x00000000}, {0.0f}, {0.0f}},
+        {{  0.0f}, {480.0f}, {-0.5f}, {1.0f}, {0xff00ff00}, {0x00000000}, {0.0f}, {0.0f}},
+        {{320.0f}, {  0.0f}, { 1.5f}, {1.0f}, {0xff00ff00}, {0x00000000}, {0.0f}, {0.0f}},
+        {{  0.0f}, {  0.0f}, {-0.5f}, {1.0f}, {0xff00ff00}, {0x00000000}, {0.0f}, {0.0f}},
+    };
+    IDirect3DExecuteBuffer *execute_buffer;
+    D3DEXECUTEBUFFERDESC exec_desc;
+    IDirect3DViewport *viewport;
+    IDirect3DDevice *device;
+    IDirectDraw *ddraw;
+    UINT inst_length;
+    HWND window;
+    HRESULT hr;
+    void *ptr;
+    DWORD rec_count;
+    D3DRECT pick_rect;
+    UINT screen_width = 640;
+    UINT screen_height = 480;
+    UINT hits = 0;
+    UINT nohits = 0;
+
+    window = create_window();
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
+    {
+        skip("Failed to create a 3D device, skipping test.\n");
+        IDirectDraw_Release(ddraw);
+        DestroyWindow(window);
+        return;
+    }
+
+    viewport = create_viewport(device, 0, 0, screen_width, screen_height);
+
+    memset(&exec_desc, 0, sizeof(exec_desc));
+    exec_desc.dwSize = sizeof(exec_desc);
+    exec_desc.dwFlags = D3DDEB_BUFSIZE | D3DDEB_CAPS;
+    exec_desc.dwBufferSize = 1024;
+    exec_desc.dwCaps = D3DDEBCAPS_SYSTEMMEMORY;
+
+    hr = IDirect3DDevice_CreateExecuteBuffer(device, &exec_desc, &execute_buffer, NULL);
+    ok(SUCCEEDED(hr), "Failed to create execute buffer, hr %#x.\n", hr);
+    hr = IDirect3DExecuteBuffer_Lock(execute_buffer, &exec_desc);
+    ok(SUCCEEDED(hr), "Failed to lock execute buffer, hr %#x.\n", hr);
+    memcpy(exec_desc.lpData, tquad, sizeof(tquad));
+    ptr = ((BYTE *)exec_desc.lpData) + sizeof(tquad);
+    emit_process_vertices(&ptr, D3DPROCESSVERTICES_COPY, 0, 4);
+    emit_tquad(&ptr, 0);
+    emit_end(&ptr);
+    inst_length = (BYTE *)ptr - (BYTE *)exec_desc.lpData;
+    inst_length -= sizeof(tquad);
+    hr = IDirect3DExecuteBuffer_Unlock(execute_buffer);
+    ok(SUCCEEDED(hr), "Failed to unlock execute buffer, hr %#x.\n", hr);
+
+    set_execute_data(execute_buffer, 4, sizeof(tquad), inst_length);
+
+    /* Perform a number of picks, we should have a specific amount by the end */
+    for (int i=0;i<screen_width;i+=80)
+    {
+        for (int j=0;j<screen_height;j+=60)
+        {
+            pick_rect.x1 = i;
+            pick_rect.y1 = j;
+
+            hr = IDirect3DDevice_Pick(device, execute_buffer, viewport, 0, &pick_rect);
+            ok(SUCCEEDED(hr), "Failed to perform pick, hr %#x.\n", hr);
+            hr = IDirect3DDevice_GetPickRecords(device, &rec_count, NULL);
+            ok(SUCCEEDED(hr), "Failed to get pick records, hr %#x.\n", hr);
+            if (rec_count > 0)
+                hits++;
+            else
+                nohits++;
+        }
+    }
+
+    /*
+        We should have gotten precisely equal numbers of hits and no hits since our quad
+        covers exactly half the screen
+    */
+    ok(hits == nohits, "Got a non-equal amount of pick successes/failures: %i vs %i.\n", hits, nohits);
+
+    /* Try some specific pixel picks */
+    pick_rect.x1 = 480;
+    pick_rect.y1 = 360;
+    hr = IDirect3DDevice_Pick(device, execute_buffer, viewport, 0, &pick_rect);
+    ok(SUCCEEDED(hr), "Failed to perform pick, hr %#x.\n", hr);
+    hr = IDirect3DDevice_GetPickRecords(device, &rec_count, NULL);
+    ok(SUCCEEDED(hr), "Failed to get pick records, hr %#x.\n", hr);
+    ok(rec_count == 0, "Got incorrect number of pick records (expected 0): %i.\n", rec_count);
+
+    pick_rect.x1 = 240;
+    pick_rect.y1 = 120;
+    hr = IDirect3DDevice_Pick(device, execute_buffer, viewport, 0, &pick_rect);
+    ok(SUCCEEDED(hr), "Failed to perform pick, hr %#x.\n", hr);
+    hr = IDirect3DDevice_GetPickRecords(device, &rec_count, NULL);
+    ok(SUCCEEDED(hr), "Failed to get pick records, hr %#x.\n", hr);
+    ok(rec_count == 1, "Got incorrect number of pick records (expected 1): %i.\n", rec_count);
+
+    if (rec_count == 1)
+    {
+        D3DPICKRECORD record;
+
+        hr = IDirect3DDevice_GetPickRecords(device, &rec_count, &record);
+        ok(SUCCEEDED(hr), "Failed to get pick records, hr %#x.\n", hr);
+
+        /* Tests D3DPICKRECORD for correct information */
+        ok(record.bOpcode == 3, "Got incorrect bOpcode: %i.\n", record.bOpcode);
+        ok(record.bPad == 0, "Got incorrect bPad: %i.\n", record.bPad);
+        ok(record.dwOffset == 24, "Got incorrect dwOffset: %i.\n", record.dwOffset);
+        ok(record.dvZ > 0.99 && record.dvZ < 1.01, "Got incorrect dvZ: %f.\n", record.dvZ);
+    }
+
+    destroy_viewport(device, viewport);
+    IDirect3DExecuteBuffer_Release(execute_buffer);
+    IDirect3DDevice_Release(device);
+    IDirectDraw_Release(ddraw);
+    DestroyWindow(window);
+}
+
 START_TEST(ddraw1)
 {
     DDDEVICEIDENTIFIER identifier;
@@ -13481,5 +13604,6 @@ START_TEST(ddraw1)
     test_clipper_refcount();
     test_caps();
     test_d32_support();
+    test_pick();
     test_cursor_clipping();
 }

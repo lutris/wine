@@ -344,6 +344,11 @@ static ULONG WINAPI d3d_device_inner_Release(IUnknown *iface)
             IDirect3DDevice3_DeleteViewport(&This->IDirect3DDevice3_iface, &vp->IDirect3DViewport3_iface);
         }
 
+        /* Free pick records array if any are allocated */
+        if (This->pick_record_count > 0) {
+            free(This->pick_records);
+        }
+
         TRACE("Releasing render target %p.\n", This->rt_iface);
         rt_iface = This->rt_iface;
         This->rt_iface = NULL;
@@ -753,7 +758,7 @@ static HRESULT WINAPI d3d_device1_Execute(IDirect3DDevice *iface,
 
     /* Execute... */
     wined3d_mutex_lock();
-    hr = d3d_execute_buffer_execute(buffer, device);
+    hr = d3d_execute_buffer_execute(buffer, device, NULL);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1020,16 +1025,36 @@ static HRESULT WINAPI d3d_device1_NextViewport(IDirect3DDevice *iface,
  *        x2 and y2 are ignored.
  *
  * Returns:
- *  D3D_OK because it's a stub
+ *  D3D_OK on success
+ *  DDERR_INVALIDPARAMS if any of the parameters == NULL
  *
  *****************************************************************************/
 static HRESULT WINAPI d3d_device1_Pick(IDirect3DDevice *iface, IDirect3DExecuteBuffer *buffer,
         IDirect3DViewport *viewport, DWORD flags, D3DRECT *rect)
 {
-    FIXME("iface %p, buffer %p, viewport %p, flags %#x, rect %s stub!\n",
+    struct d3d_device *device = impl_from_IDirect3DDevice(iface);
+    struct d3d_execute_buffer *buffer_impl = unsafe_impl_from_IDirect3DExecuteBuffer(buffer);
+    struct d3d_viewport *viewport_impl = unsafe_impl_from_IDirect3DViewport(viewport);
+    HRESULT hr;
+
+    TRACE("iface %p, buffer %p, viewport %p, flags %#x, rect %s.\n",
             iface, buffer, viewport, flags, wine_dbgstr_rect((RECT *)rect));
 
-    return D3D_OK;
+    /* Sanity checks */
+    if (!iface || !buffer || !viewport) {
+        return DDERR_INVALIDPARAMS;
+    }
+
+    if (FAILED(hr = IDirect3DDevice3_SetCurrentViewport
+            (&device->IDirect3DDevice3_iface, &viewport_impl->IDirect3DViewport3_iface)))
+        return hr;
+
+    /* Execute the pick */
+    wined3d_mutex_lock();
+    hr = d3d_execute_buffer_execute(buffer_impl, device, rect);
+    wined3d_mutex_unlock();
+
+    return hr;
 }
 
 /*****************************************************************************
@@ -1045,13 +1070,36 @@ static HRESULT WINAPI d3d_device1_Pick(IDirect3DDevice *iface, IDirect3DExecuteB
  *  D3DPickRec: Address to store the resulting D3DPICKRECORD array.
  *
  * Returns:
- *  D3D_OK, because it's a stub
+ *  D3D_OK always
  *
  *****************************************************************************/
 static HRESULT WINAPI d3d_device1_GetPickRecords(IDirect3DDevice *iface,
         DWORD *count, D3DPICKRECORD *records)
 {
-    FIXME("iface %p, count %p, records %p stub!\n", iface, count, records);
+    struct d3d_device *device;
+
+    TRACE("iface %p, count %p, records %p.\n", iface, count, records);
+
+    wined3d_mutex_lock();
+
+    device = impl_from_IDirect3DDevice(iface);
+
+    /* Set count to the number of pick records we have */
+    *count = device->pick_record_count;
+
+    /* It is correct usage according to documentation to call this function with records == NULL
+       to retrieve _just_ the record count, which the caller can then use to allocate an
+       appropriately sized array, then call this function again to fill that array with data. */
+    if (records && count) {
+        /* If we have a destination array and records to copy, copy them now */
+        memcpy(records, device->pick_records, sizeof(D3DPICKRECORD) * device->pick_record_count);
+
+        /* We're now done with the old pick records and can free them */
+        free(device->pick_records);
+        device->pick_record_count = 0;
+    }
+
+    wined3d_mutex_unlock();
 
     return D3D_OK;
 }
@@ -6997,6 +7045,9 @@ static HRESULT d3d_device_init(struct d3d_device *device, struct ddraw *ddraw, B
         IUnknown_AddRef(device->rt_iface);
 
     ddraw->d3ddevice = device;
+
+    /* Initialize pick records array */
+    device->pick_record_count = 0;
 
     wined3d_stateblock_set_render_state(ddraw->state, WINED3D_RS_ZENABLE,
             d3d_device_update_depth_stencil(device));

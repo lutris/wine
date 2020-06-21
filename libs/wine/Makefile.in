@@ -100,7 +100,7 @@ libwine_LDFLAGS = $(LIBWINE_LDFLAGS)
 libwine_DEPS = $(LIBWINE_DEPENDS)
 
 version.c: dummy
-	version=`(GIT_DIR=$(top_srcdir)/.git git describe HEAD 2>/dev/null || echo "wine-$(PACKAGE_VERSION)") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1  (Staging)";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || (rm -f $@ && exit 1)
+	version=`(echo "wine-5.6.1.r0.g4c160ec8") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1  ( TkG Staging Esync Fsync Vkd3d DXVK-Compatible )";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || (rm -f $@ && exit 1)
 
 dummy:
 .PHONY: dummy

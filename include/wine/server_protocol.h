@@ -53,6 +53,18 @@ struct request_max_size
 #define FIRST_USER_HANDLE 0x0020
 #define LAST_USER_HANDLE  0xffef
 
+typedef struct
+{
+    unsigned int last_input_time;
+} shmglobal_t;
+
+typedef struct
+{
+    int             queue_bits;
+    user_handle_t   input_focus;
+    user_handle_t   input_capture;
+    user_handle_t   input_active;
+} shmlocal_t;
 
 
 typedef union
@@ -296,6 +308,13 @@ struct hardware_msg_data
             int            y;
             unsigned int   data;
         } mouse;
+        struct
+        {
+            int            type;
+            obj_handle_t   device;
+            unsigned int   length;
+
+        } hid;
     } rawinput;
 };
 
@@ -342,7 +361,19 @@ typedef union
         unsigned int   msg;
         lparam_t       lparam;
     } hw;
+    struct
+    {
+        int            type;
+        obj_handle_t   device;
+        unsigned char  usage_page;
+        unsigned char  usage;
+        unsigned int   length;
+    } hid;
 } hw_input_t;
+#define HW_INPUT_MOUSE    0
+#define HW_INPUT_KEYBOARD 1
+#define HW_INPUT_HARDWARE 2
+#define HW_INPUT_HID      3
 
 typedef union
 {
@@ -780,10 +811,10 @@ struct new_process_request
     unsigned int access;
     client_cpu_t cpu;
     data_size_t  info_size;
+    obj_handle_t token;
     /* VARARG(objattr,object_attributes); */
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
-    char __pad_44[4];
 };
 struct new_process_reply
 {
@@ -1029,6 +1060,8 @@ struct get_thread_times_reply
     struct reply_header __header;
     timeout_t    creation_time;
     timeout_t    exit_time;
+    int          unix_pid;
+    int          unix_tid;
 };
 
 
@@ -1170,6 +1203,16 @@ struct close_handle_reply
     struct reply_header __header;
 };
 
+
+struct socket_cleanup_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct socket_cleanup_reply
+{
+    struct reply_header __header;
+};
 
 
 struct set_handle_info_request
@@ -1599,6 +1642,18 @@ struct get_directory_cache_entry_reply
 
 
 
+struct get_shared_memory_request
+{
+    struct request_header __header;
+    thread_id_t tid;
+};
+struct get_shared_memory_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct flush_request
 {
     struct request_header __header;
@@ -1723,6 +1778,18 @@ struct accept_into_socket_reply
 
 
 
+struct reuse_socket_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct reuse_socket_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct set_socket_event_request
 {
     struct request_header __header;
@@ -1770,6 +1837,7 @@ struct get_socket_info_reply
     int type;
     int protocol;
     char __pad_20[4];
+    timeout_t connect_time;
 };
 
 
@@ -2380,6 +2448,21 @@ struct unmap_view_reply
 
 
 
+struct get_mapping_file_request
+{
+    struct request_header __header;
+    obj_handle_t process;
+    client_ptr_t addr;
+};
+struct get_mapping_file_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+
 struct get_mapping_committed_range_request
 {
     struct request_header __header;
@@ -2461,8 +2544,9 @@ struct next_process_reply
     int          priority;
     int          handles;
     int          unix_pid;
-    /* VARARG(filename,unicode_str); */
     char __pad_36[4];
+    timeout_t    start_time;
+    /* VARARG(filename,unicode_str); */
 };
 
 
@@ -2480,9 +2564,12 @@ struct next_thread_reply
     int          count;
     process_id_t pid;
     thread_id_t  tid;
+    char __pad_20[4];
+    timeout_t    creation_time;
     int          base_pri;
     int          delta_pri;
-    char __pad_28[4];
+    int          unix_tid;
+    char __pad_44[4];
 };
 
 
@@ -3167,6 +3254,7 @@ struct send_hardware_message_request
     user_handle_t   win;
     hw_input_t      input;
     unsigned int    flags;
+    /* VARARG(data,bytes); */
     char __pad_52[4];
 };
 struct send_hardware_message_reply
@@ -3181,6 +3269,8 @@ struct send_hardware_message_reply
     char __pad_28[4];
 };
 #define SEND_HWMSG_INJECTED    0x01
+#define SEND_HWMSG_RAWINPUT    0x02
+#define SEND_HWMSG_WINDOW      0x04
 
 
 
@@ -3861,6 +3951,19 @@ struct set_window_region_request
     char __pad_20[4];
 };
 struct set_window_region_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct set_layer_region_request
+{
+    struct request_header __header;
+    user_handle_t  window;
+    /* VARARG(region,rectangles); */
+};
+struct set_layer_region_reply
 {
     struct reply_header __header;
 };
@@ -4884,6 +4987,22 @@ struct duplicate_token_reply
     char __pad_12[4];
 };
 
+struct filter_token_request
+{
+    struct request_header __header;
+    obj_handle_t  handle;
+    unsigned int  flags;
+    data_size_t   privileges_size;
+    /* VARARG(privileges,LUID_AND_ATTRIBUTES,privileges_size); */
+    /* VARARG(disable_sids,SID); */
+};
+struct filter_token_reply
+{
+    struct reply_header __header;
+    obj_handle_t  new_handle;
+    char __pad_12[4];
+};
+
 struct access_check_request
 {
     struct request_header __header;
@@ -4914,6 +5033,19 @@ struct get_token_sid_request
     char __pad_20[4];
 };
 struct get_token_sid_reply
+{
+    struct reply_header __header;
+    data_size_t     sid_len;
+    /* VARARG(sid,SID); */
+    char __pad_12[4];
+};
+
+struct get_token_integrity_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+};
+struct get_token_integrity_reply
 {
     struct reply_header __header;
     data_size_t     sid_len;
@@ -4992,6 +5124,7 @@ struct handle_info
     process_id_t owner;
     obj_handle_t handle;
     unsigned int access;
+    unsigned int type;
 };
 
 
@@ -5168,6 +5301,21 @@ struct get_object_type_request
     obj_handle_t   handle;
 };
 struct get_object_type_reply
+{
+    struct reply_header __header;
+    unsigned int   index;
+    data_size_t    total;
+    /* VARARG(type,unicode_str); */
+};
+
+
+
+struct get_object_type_by_index_request
+{
+    struct request_header __header;
+    unsigned int   index;
+};
+struct get_object_type_by_index_reply
 {
     struct reply_header __header;
     data_size_t    total;
@@ -5387,6 +5535,46 @@ struct get_token_statistics_reply
 
 
 
+struct get_token_elevation_type_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+};
+struct get_token_elevation_type_reply
+{
+    struct reply_header __header;
+    unsigned int   elevation;
+    char __pad_12[4];
+};
+
+
+
+struct create_token_request
+{
+    struct request_header __header;
+    unsigned int  admin;
+};
+struct create_token_reply
+{
+    struct reply_header __header;
+    obj_handle_t  token;
+    char __pad_12[4];
+};
+
+
+
+struct replace_process_token_request
+{
+    struct request_header __header;
+    obj_handle_t  token;
+};
+struct replace_process_token_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct create_completion_request
 {
     struct request_header __header;
@@ -5545,6 +5733,19 @@ struct set_fd_name_info_reply
 
 
 
+struct set_fd_eof_info_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    file_pos_t   eof;
+};
+struct set_fd_eof_info_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct get_window_layered_info_request
 {
     struct request_header __header;
@@ -5634,6 +5835,92 @@ struct set_cursor_reply
 #define SET_CURSOR_CLIP   0x08
 #define SET_CURSOR_NOCLIP 0x10
 
+enum fsync_type
+{
+    FSYNC_SEMAPHORE = 1,
+    FSYNC_AUTO_EVENT,
+    FSYNC_MANUAL_EVENT,
+    FSYNC_MUTEX,
+    FSYNC_AUTO_SERVER,
+    FSYNC_MANUAL_SERVER,
+    FSYNC_QUEUE,
+};
+
+
+struct create_fsync_request
+{
+    struct request_header __header;
+    unsigned int access;
+    int low;
+    int high;
+    int type;
+    /* VARARG(objattr,object_attributes); */
+    char __pad_28[4];
+};
+struct create_fsync_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    int type;
+    unsigned int shm_idx;
+    char __pad_20[4];
+};
+
+
+struct open_fsync_request
+{
+    struct request_header __header;
+    unsigned int access;
+    unsigned int attributes;
+    obj_handle_t rootdir;
+    int          type;
+    /* VARARG(name,unicode_str); */
+    char __pad_28[4];
+};
+struct open_fsync_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    int          type;
+    unsigned int shm_idx;
+    char __pad_20[4];
+};
+
+
+struct get_fsync_idx_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_fsync_idx_reply
+{
+    struct reply_header __header;
+    int          type;
+    unsigned int shm_idx;
+};
+
+struct fsync_msgwait_request
+{
+    struct request_header __header;
+    int          in_msgwait;
+};
+struct fsync_msgwait_reply
+{
+    struct reply_header __header;
+};
+
+struct get_fsync_apc_idx_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_fsync_apc_idx_reply
+{
+    struct reply_header __header;
+    unsigned int shm_idx;
+    char __pad_12[4];
+};
+
 
 
 struct update_rawinput_devices_request
@@ -5647,6 +5934,19 @@ struct update_rawinput_devices_reply
     struct reply_header __header;
 };
 
+
+struct get_rawinput_devices_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_rawinput_devices_reply
+{
+    struct reply_header __header;
+    unsigned int device_count;
+    /* VARARG(devices,rawinput_devices); */
+    char __pad_12[4];
+};
 
 
 struct get_suspend_context_request
@@ -5763,6 +6063,19 @@ struct set_job_completion_port_reply
 };
 
 
+struct get_job_info_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_job_info_reply
+{
+    struct reply_header __header;
+    unsigned int total_processes;
+    unsigned int active_processes;
+};
+
+
 
 struct terminate_job_request
 {
@@ -5801,6 +6114,107 @@ struct resume_process_reply
 };
 
 
+struct get_system_info_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_system_info_reply
+{
+    struct reply_header __header;
+    unsigned int processes;
+    unsigned int threads;
+    unsigned int handles;
+    char __pad_20[4];
+};
+
+
+struct create_esync_request
+{
+    struct request_header __header;
+    unsigned int access;
+    int          initval;
+    int          type;
+    int          max;
+    /* VARARG(objattr,object_attributes); */
+    char __pad_28[4];
+};
+struct create_esync_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    int          type;
+    unsigned int shm_idx;
+    char __pad_20[4];
+};
+
+
+struct open_esync_request
+{
+    struct request_header __header;
+    unsigned int access;
+    unsigned int attributes;
+    obj_handle_t rootdir;
+    int          type;
+    /* VARARG(name,unicode_str); */
+    char __pad_28[4];
+};
+struct open_esync_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    int          type;
+    unsigned int shm_idx;
+    char __pad_20[4];
+};
+
+
+struct get_esync_fd_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_esync_fd_reply
+{
+    struct reply_header __header;
+    int          type;
+    unsigned int shm_idx;
+};
+
+
+struct get_esync_apc_fd_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_esync_apc_fd_reply
+{
+    struct reply_header __header;
+};
+
+
+struct esync_msgwait_request
+{
+    struct request_header __header;
+    int          in_msgwait;
+};
+struct esync_msgwait_reply
+{
+    struct reply_header __header;
+};
+
+enum esync_type
+{
+    ESYNC_SEMAPHORE = 1,
+    ESYNC_AUTO_EVENT,
+    ESYNC_MANUAL_EVENT,
+    ESYNC_MUTEX,
+    ESYNC_AUTO_SERVER,
+    ESYNC_MANUAL_SERVER,
+    ESYNC_QUEUE,
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -5826,6 +6240,7 @@ enum request
     REQ_queue_apc,
     REQ_get_apc_result,
     REQ_close_handle,
+    REQ_socket_cleanup,
     REQ_set_handle_info,
     REQ_dup_handle,
     REQ_open_process,
@@ -5851,6 +6266,7 @@ enum request
     REQ_get_handle_unix_name,
     REQ_get_handle_fd,
     REQ_get_directory_cache_entry,
+    REQ_get_shared_memory,
     REQ_flush,
     REQ_get_file_info,
     REQ_get_volume_info,
@@ -5859,6 +6275,7 @@ enum request
     REQ_create_socket,
     REQ_accept_socket,
     REQ_accept_into_socket,
+    REQ_reuse_socket,
     REQ_set_socket_event,
     REQ_get_socket_event,
     REQ_get_socket_info,
@@ -5893,6 +6310,7 @@ enum request
     REQ_get_mapping_info,
     REQ_map_view,
     REQ_unmap_view,
+    REQ_get_mapping_file,
     REQ_get_mapping_committed_range,
     REQ_add_mapping_committed_range,
     REQ_is_same_mapping,
@@ -5981,6 +6399,7 @@ enum request
     REQ_get_surface_region,
     REQ_get_window_region,
     REQ_set_window_region,
+    REQ_set_layer_region,
     REQ_get_update_region,
     REQ_update_window_zorder,
     REQ_redraw_window,
@@ -6041,8 +6460,10 @@ enum request
     REQ_get_token_privileges,
     REQ_check_token_privileges,
     REQ_duplicate_token,
+    REQ_filter_token,
     REQ_access_check,
     REQ_get_token_sid,
+    REQ_get_token_integrity,
     REQ_get_token_groups,
     REQ_get_token_default_dacl,
     REQ_set_token_default_dacl,
@@ -6059,6 +6480,7 @@ enum request
     REQ_query_symlink,
     REQ_get_object_info,
     REQ_get_object_type,
+    REQ_get_object_type_by_index,
     REQ_unlink_object,
     REQ_get_token_impersonation_level,
     REQ_allocate_locally_unique_id,
@@ -6073,6 +6495,9 @@ enum request
     REQ_get_kernel_object_handle,
     REQ_make_process_system,
     REQ_get_token_statistics,
+    REQ_get_token_elevation_type,
+    REQ_create_token,
+    REQ_replace_process_token,
     REQ_create_completion,
     REQ_open_completion,
     REQ_add_completion,
@@ -6083,12 +6508,19 @@ enum request
     REQ_set_fd_completion_mode,
     REQ_set_fd_disp_info,
     REQ_set_fd_name_info,
+    REQ_set_fd_eof_info,
     REQ_get_window_layered_info,
     REQ_set_window_layered_info,
     REQ_alloc_user_handle,
     REQ_free_user_handle,
     REQ_set_cursor,
+    REQ_create_fsync,
+    REQ_open_fsync,
+    REQ_get_fsync_idx,
+    REQ_fsync_msgwait,
+    REQ_get_fsync_apc_idx,
     REQ_update_rawinput_devices,
+    REQ_get_rawinput_devices,
     REQ_get_suspend_context,
     REQ_set_suspend_context,
     REQ_create_job,
@@ -6097,9 +6529,16 @@ enum request
     REQ_process_in_job,
     REQ_set_job_limits,
     REQ_set_job_completion_port,
+    REQ_get_job_info,
     REQ_terminate_job,
     REQ_suspend_process,
     REQ_resume_process,
+    REQ_get_system_info,
+    REQ_create_esync,
+    REQ_open_esync,
+    REQ_get_esync_fd,
+    REQ_get_esync_apc_fd,
+    REQ_esync_msgwait,
     REQ_NB_REQUESTS
 };
 
@@ -6130,6 +6569,7 @@ union generic_request
     struct queue_apc_request queue_apc_request;
     struct get_apc_result_request get_apc_result_request;
     struct close_handle_request close_handle_request;
+    struct socket_cleanup_request socket_cleanup_request;
     struct set_handle_info_request set_handle_info_request;
     struct dup_handle_request dup_handle_request;
     struct open_process_request open_process_request;
@@ -6155,6 +6595,7 @@ union generic_request
     struct get_handle_unix_name_request get_handle_unix_name_request;
     struct get_handle_fd_request get_handle_fd_request;
     struct get_directory_cache_entry_request get_directory_cache_entry_request;
+    struct get_shared_memory_request get_shared_memory_request;
     struct flush_request flush_request;
     struct get_file_info_request get_file_info_request;
     struct get_volume_info_request get_volume_info_request;
@@ -6163,6 +6604,7 @@ union generic_request
     struct create_socket_request create_socket_request;
     struct accept_socket_request accept_socket_request;
     struct accept_into_socket_request accept_into_socket_request;
+    struct reuse_socket_request reuse_socket_request;
     struct set_socket_event_request set_socket_event_request;
     struct get_socket_event_request get_socket_event_request;
     struct get_socket_info_request get_socket_info_request;
@@ -6197,6 +6639,7 @@ union generic_request
     struct get_mapping_info_request get_mapping_info_request;
     struct map_view_request map_view_request;
     struct unmap_view_request unmap_view_request;
+    struct get_mapping_file_request get_mapping_file_request;
     struct get_mapping_committed_range_request get_mapping_committed_range_request;
     struct add_mapping_committed_range_request add_mapping_committed_range_request;
     struct is_same_mapping_request is_same_mapping_request;
@@ -6285,6 +6728,7 @@ union generic_request
     struct get_surface_region_request get_surface_region_request;
     struct get_window_region_request get_window_region_request;
     struct set_window_region_request set_window_region_request;
+    struct set_layer_region_request set_layer_region_request;
     struct get_update_region_request get_update_region_request;
     struct update_window_zorder_request update_window_zorder_request;
     struct redraw_window_request redraw_window_request;
@@ -6345,8 +6789,10 @@ union generic_request
     struct get_token_privileges_request get_token_privileges_request;
     struct check_token_privileges_request check_token_privileges_request;
     struct duplicate_token_request duplicate_token_request;
+    struct filter_token_request filter_token_request;
     struct access_check_request access_check_request;
     struct get_token_sid_request get_token_sid_request;
+    struct get_token_integrity_request get_token_integrity_request;
     struct get_token_groups_request get_token_groups_request;
     struct get_token_default_dacl_request get_token_default_dacl_request;
     struct set_token_default_dacl_request set_token_default_dacl_request;
@@ -6363,6 +6809,7 @@ union generic_request
     struct query_symlink_request query_symlink_request;
     struct get_object_info_request get_object_info_request;
     struct get_object_type_request get_object_type_request;
+    struct get_object_type_by_index_request get_object_type_by_index_request;
     struct unlink_object_request unlink_object_request;
     struct get_token_impersonation_level_request get_token_impersonation_level_request;
     struct allocate_locally_unique_id_request allocate_locally_unique_id_request;
@@ -6377,6 +6824,9 @@ union generic_request
     struct get_kernel_object_handle_request get_kernel_object_handle_request;
     struct make_process_system_request make_process_system_request;
     struct get_token_statistics_request get_token_statistics_request;
+    struct get_token_elevation_type_request get_token_elevation_type_request;
+    struct create_token_request create_token_request;
+    struct replace_process_token_request replace_process_token_request;
     struct create_completion_request create_completion_request;
     struct open_completion_request open_completion_request;
     struct add_completion_request add_completion_request;
@@ -6387,12 +6837,19 @@ union generic_request
     struct set_fd_completion_mode_request set_fd_completion_mode_request;
     struct set_fd_disp_info_request set_fd_disp_info_request;
     struct set_fd_name_info_request set_fd_name_info_request;
+    struct set_fd_eof_info_request set_fd_eof_info_request;
     struct get_window_layered_info_request get_window_layered_info_request;
     struct set_window_layered_info_request set_window_layered_info_request;
     struct alloc_user_handle_request alloc_user_handle_request;
     struct free_user_handle_request free_user_handle_request;
     struct set_cursor_request set_cursor_request;
+    struct create_fsync_request create_fsync_request;
+    struct open_fsync_request open_fsync_request;
+    struct get_fsync_idx_request get_fsync_idx_request;
+    struct fsync_msgwait_request fsync_msgwait_request;
+    struct get_fsync_apc_idx_request get_fsync_apc_idx_request;
     struct update_rawinput_devices_request update_rawinput_devices_request;
+    struct get_rawinput_devices_request get_rawinput_devices_request;
     struct get_suspend_context_request get_suspend_context_request;
     struct set_suspend_context_request set_suspend_context_request;
     struct create_job_request create_job_request;
@@ -6401,9 +6858,16 @@ union generic_request
     struct process_in_job_request process_in_job_request;
     struct set_job_limits_request set_job_limits_request;
     struct set_job_completion_port_request set_job_completion_port_request;
+    struct get_job_info_request get_job_info_request;
     struct terminate_job_request terminate_job_request;
     struct suspend_process_request suspend_process_request;
     struct resume_process_request resume_process_request;
+    struct get_system_info_request get_system_info_request;
+    struct create_esync_request create_esync_request;
+    struct open_esync_request open_esync_request;
+    struct get_esync_fd_request get_esync_fd_request;
+    struct get_esync_apc_fd_request get_esync_apc_fd_request;
+    struct esync_msgwait_request esync_msgwait_request;
 };
 union generic_reply
 {
@@ -6432,6 +6896,7 @@ union generic_reply
     struct queue_apc_reply queue_apc_reply;
     struct get_apc_result_reply get_apc_result_reply;
     struct close_handle_reply close_handle_reply;
+    struct socket_cleanup_reply socket_cleanup_reply;
     struct set_handle_info_reply set_handle_info_reply;
     struct dup_handle_reply dup_handle_reply;
     struct open_process_reply open_process_reply;
@@ -6457,6 +6922,7 @@ union generic_reply
     struct get_handle_unix_name_reply get_handle_unix_name_reply;
     struct get_handle_fd_reply get_handle_fd_reply;
     struct get_directory_cache_entry_reply get_directory_cache_entry_reply;
+    struct get_shared_memory_reply get_shared_memory_reply;
     struct flush_reply flush_reply;
     struct get_file_info_reply get_file_info_reply;
     struct get_volume_info_reply get_volume_info_reply;
@@ -6465,6 +6931,7 @@ union generic_reply
     struct create_socket_reply create_socket_reply;
     struct accept_socket_reply accept_socket_reply;
     struct accept_into_socket_reply accept_into_socket_reply;
+    struct reuse_socket_reply reuse_socket_reply;
     struct set_socket_event_reply set_socket_event_reply;
     struct get_socket_event_reply get_socket_event_reply;
     struct get_socket_info_reply get_socket_info_reply;
@@ -6499,6 +6966,7 @@ union generic_reply
     struct get_mapping_info_reply get_mapping_info_reply;
     struct map_view_reply map_view_reply;
     struct unmap_view_reply unmap_view_reply;
+    struct get_mapping_file_reply get_mapping_file_reply;
     struct get_mapping_committed_range_reply get_mapping_committed_range_reply;
     struct add_mapping_committed_range_reply add_mapping_committed_range_reply;
     struct is_same_mapping_reply is_same_mapping_reply;
@@ -6587,6 +7055,7 @@ union generic_reply
     struct get_surface_region_reply get_surface_region_reply;
     struct get_window_region_reply get_window_region_reply;
     struct set_window_region_reply set_window_region_reply;
+    struct set_layer_region_reply set_layer_region_reply;
     struct get_update_region_reply get_update_region_reply;
     struct update_window_zorder_reply update_window_zorder_reply;
     struct redraw_window_reply redraw_window_reply;
@@ -6647,8 +7116,10 @@ union generic_reply
     struct get_token_privileges_reply get_token_privileges_reply;
     struct check_token_privileges_reply check_token_privileges_reply;
     struct duplicate_token_reply duplicate_token_reply;
+    struct filter_token_reply filter_token_reply;
     struct access_check_reply access_check_reply;
     struct get_token_sid_reply get_token_sid_reply;
+    struct get_token_integrity_reply get_token_integrity_reply;
     struct get_token_groups_reply get_token_groups_reply;
     struct get_token_default_dacl_reply get_token_default_dacl_reply;
     struct set_token_default_dacl_reply set_token_default_dacl_reply;
@@ -6665,6 +7136,7 @@ union generic_reply
     struct query_symlink_reply query_symlink_reply;
     struct get_object_info_reply get_object_info_reply;
     struct get_object_type_reply get_object_type_reply;
+    struct get_object_type_by_index_reply get_object_type_by_index_reply;
     struct unlink_object_reply unlink_object_reply;
     struct get_token_impersonation_level_reply get_token_impersonation_level_reply;
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
@@ -6679,6 +7151,9 @@ union generic_reply
     struct get_kernel_object_handle_reply get_kernel_object_handle_reply;
     struct make_process_system_reply make_process_system_reply;
     struct get_token_statistics_reply get_token_statistics_reply;
+    struct get_token_elevation_type_reply get_token_elevation_type_reply;
+    struct create_token_reply create_token_reply;
+    struct replace_process_token_reply replace_process_token_reply;
     struct create_completion_reply create_completion_reply;
     struct open_completion_reply open_completion_reply;
     struct add_completion_reply add_completion_reply;
@@ -6689,12 +7164,19 @@ union generic_reply
     struct set_fd_completion_mode_reply set_fd_completion_mode_reply;
     struct set_fd_disp_info_reply set_fd_disp_info_reply;
     struct set_fd_name_info_reply set_fd_name_info_reply;
+    struct set_fd_eof_info_reply set_fd_eof_info_reply;
     struct get_window_layered_info_reply get_window_layered_info_reply;
     struct set_window_layered_info_reply set_window_layered_info_reply;
     struct alloc_user_handle_reply alloc_user_handle_reply;
     struct free_user_handle_reply free_user_handle_reply;
     struct set_cursor_reply set_cursor_reply;
+    struct create_fsync_reply create_fsync_reply;
+    struct open_fsync_reply open_fsync_reply;
+    struct get_fsync_idx_reply get_fsync_idx_reply;
+    struct fsync_msgwait_reply fsync_msgwait_reply;
+    struct get_fsync_apc_idx_reply get_fsync_apc_idx_reply;
     struct update_rawinput_devices_reply update_rawinput_devices_reply;
+    struct get_rawinput_devices_reply get_rawinput_devices_reply;
     struct get_suspend_context_reply get_suspend_context_reply;
     struct set_suspend_context_reply set_suspend_context_reply;
     struct create_job_reply create_job_reply;
@@ -6703,14 +7185,21 @@ union generic_reply
     struct process_in_job_reply process_in_job_reply;
     struct set_job_limits_reply set_job_limits_reply;
     struct set_job_completion_port_reply set_job_completion_port_reply;
+    struct get_job_info_reply get_job_info_reply;
     struct terminate_job_reply terminate_job_reply;
     struct suspend_process_reply suspend_process_reply;
     struct resume_process_reply resume_process_reply;
+    struct get_system_info_reply get_system_info_reply;
+    struct create_esync_reply create_esync_reply;
+    struct open_esync_reply open_esync_reply;
+    struct get_esync_fd_reply get_esync_fd_reply;
+    struct get_esync_apc_fd_reply get_esync_apc_fd_reply;
+    struct esync_msgwait_reply esync_msgwait_reply;
 };
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 597
+#define SERVER_PROTOCOL_VERSION 599
 
 /* ### protocol_version end ### */
 
