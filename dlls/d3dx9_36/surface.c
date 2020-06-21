@@ -421,6 +421,14 @@ static HRESULT d3dformat_to_dds_pixel_format(struct dds_pixel_format *pixel_form
         }
     }
 
+    /* Reuse dds_fourcc_to_d3dformat as D3DFORMAT and FOURCC are DWORD with same values */
+    if (dds_fourcc_to_d3dformat(d3dformat) != D3DFMT_UNKNOWN)
+    {
+        pixel_format->flags |= DDS_PF_FOURCC;
+        pixel_format->fourcc = d3dformat;
+        return D3D_OK;
+    }
+
     WARN("Unknown pixel format %#x\n", d3dformat);
     return E_NOTIMPL;
 }
@@ -630,6 +638,68 @@ static HRESULT save_dds_surface_to_memory(ID3DXBuffer **dst_buffer, IDirect3DSur
     return D3D_OK;
 }
 
+static HRESULT get_surface(D3DRESOURCETYPE type, struct IDirect3DBaseTexture9 *tex,
+        int face, UINT level, struct IDirect3DSurface9 **surf)
+{
+    switch (type)
+    {
+        case D3DRTYPE_TEXTURE:
+            return IDirect3DTexture9_GetSurfaceLevel((IDirect3DTexture9*) tex, level, surf);
+        case D3DRTYPE_CUBETEXTURE:
+            return IDirect3DCubeTexture9_GetCubeMapSurface((IDirect3DCubeTexture9*) tex, face, level, surf);
+        default:
+            ERR("Unexpected texture type\n");
+            return E_NOTIMPL;
+    }
+}
+
+HRESULT save_dds_texture_to_memory(ID3DXBuffer **dst_buffer, IDirect3DBaseTexture9 *src_texture, const PALETTEENTRY *src_palette)
+{
+    HRESULT hr;
+    D3DRESOURCETYPE type;
+    UINT mip_levels;
+    IDirect3DSurface9 *surface;
+
+    type = IDirect3DBaseTexture9_GetType(src_texture);
+
+    if ((type !=  D3DRTYPE_TEXTURE) && (type != D3DRTYPE_CUBETEXTURE) && (type != D3DRTYPE_VOLUMETEXTURE))
+        return D3DERR_INVALIDCALL;
+
+    if (type == D3DRTYPE_CUBETEXTURE)
+    {
+        FIXME("Cube texture not supported yet\n");
+        return E_NOTIMPL;
+    }
+    else if (type == D3DRTYPE_VOLUMETEXTURE)
+    {
+        FIXME("Volume texture not supported yet\n");
+        return E_NOTIMPL;
+    }
+
+    mip_levels = IDirect3DTexture9_GetLevelCount(src_texture);
+
+    if (mip_levels > 1)
+    {
+        FIXME("Mipmap not supported yet\n");
+        return E_NOTIMPL;
+    }
+
+    if (src_palette)
+    {
+        FIXME("Saving surfaces with palettized pixel formats not implemented yet\n");
+        return E_NOTIMPL;
+    }
+
+    hr = get_surface(type, src_texture, D3DCUBEMAP_FACE_POSITIVE_X, 0, &surface);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = save_dds_surface_to_memory(dst_buffer, surface, NULL);
+        IDirect3DSurface9_Release(surface);
+    }
+
+    return hr;
+}
 HRESULT load_volume_from_dds(IDirect3DVolume9 *dst_volume, const PALETTEENTRY *dst_palette,
     const D3DBOX *dst_box, const void *src_data, const D3DBOX *src_box, DWORD filter, D3DCOLOR color_key,
     const D3DXIMAGE_INFO *src_info)
@@ -992,6 +1062,24 @@ HRESULT WINAPI D3DXGetImageInfoFromFileInMemory(const void *data, UINT datasize,
                         hr = D3DXERR_INVALIDDATA;
                     }
                 }
+            }
+
+            /* For 32 bpp BMP, windowscodecs.dll never returns a format with alpha while
+             * d3dx9_xx.dll returns one if at least 1 pixel has a non zero alpha component */
+            if (SUCCEEDED(hr) && (info->Format == D3DFMT_X8R8G8B8) && (info->ImageFileFormat == D3DXIFF_BMP)) {
+                DWORD size = sizeof(DWORD) * info->Width * info->Height;
+                BYTE *buffer = HeapAlloc(GetProcessHeap(), 0, size);
+                hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, sizeof(DWORD) * info->Width, size, buffer);
+                if (SUCCEEDED(hr)) {
+                    DWORD i;
+                    for (i = 0; i < info->Width * info->Height; i++) {
+                        if (buffer[i*4+3]) {
+                            info->Format = D3DFMT_A8R8G8B8;
+                            break;
+                        }
+                    }
+                }
+                HeapFree(GetProcessHeap(), 0, buffer);
             }
 
             if (frame)

@@ -106,7 +106,7 @@ BOOL add_drive(char letter, const char *targetpath, const char *device, const WC
                wine_dbgstr_w(label), serial, type);
 
     drives[driveIndex].letter   = toupper(letter);
-    drives[driveIndex].unixpath = strdupA(targetpath);
+    drives[driveIndex].unixpath = targetpath ? strdupA(targetpath) : NULL;
     drives[driveIndex].device   = device ? strdupA(device) : NULL;
     drives[driveIndex].label    = label ? strdupW(label) : NULL;
     drives[driveIndex].serial   = serial;
@@ -290,8 +290,7 @@ BOOL load_drives(void)
                 volname[0] = 0;
                 serial = 0;
             }
-            if (unixpath)  /* FIXME: handle unmounted drives too */
-                add_drive( root[0], unixpath, device, volname, serial, get_drive_type(root[0]) );
+            add_drive( root[0], unixpath, device, volname, serial, get_drive_type(root[0]) );
             root[0]++;
         }
         else
@@ -331,31 +330,32 @@ void apply_drive_changes(void)
         len = sizeof(*ioctl);
         if (drives[i].in_use)
         {
-            len += strlen(drives[i].unixpath) + 1;
+            if (drives[i].unixpath) len += strlen(drives[i].unixpath) + 1;
             if (drives[i].device) len += strlen(drives[i].device) + 1;
         }
         if (!(ioctl = HeapAlloc( GetProcessHeap(), 0, len ))) continue;
         ioctl->size = len;
+        ioctl->type = DRIVE_NO_ROOT_DIR;
         ioctl->letter = 'a' + i;
+        ioctl->mount_point_offset = 0;
         ioctl->device_offset = 0;
         if (drives[i].in_use)
         {
             char *ptr = (char *)(ioctl + 1);
 
             ioctl->type = drives[i].type;
-            strcpy( ptr, drives[i].unixpath );
-            ioctl->mount_point_offset = ptr - (char *)ioctl;
+            if (drives[i].unixpath)
+            {
+                strcpy( ptr, drives[i].unixpath );
+                ioctl->mount_point_offset = ptr - (char *)ioctl;
+                ptr += strlen(ptr) + 1;
+            }
+
             if (drives[i].device)
             {
-                ptr += strlen(ptr) + 1;
                 strcpy( ptr, drives[i].device );
                 ioctl->device_offset = ptr - (char *)ioctl;
             }
-        }
-        else
-        {
-            ioctl->type = DRIVE_NO_ROOT_DIR;
-            ioctl->mount_point_offset = 0;
         }
 
         if (DeviceIoControl( mgr, IOCTL_MOUNTMGR_DEFINE_UNIX_DRIVE, ioctl, len, NULL, 0, NULL, NULL ))

@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdarg.h>
 
 #include "windef.h"
@@ -29,6 +31,7 @@
 #include "tmschema.h"
 
 #include "msstyles.h"
+#include "uxthemedll.h"
 
 #include "wine/debug.h"
 
@@ -44,6 +47,10 @@ BOOL WINAPI GetThemeSysBool(HTHEME hTheme, int iBoolID)
     BOOL ret;
 
     TRACE("(%p, %d)\n", hTheme, iBoolID);
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeSysBool(hTheme, iBoolID);
+
     SetLastError(0);
     if(hTheme) {
         if((tp = MSSTYLES_FindMetric(TMT_BOOL, iBoolID))) {
@@ -74,6 +81,10 @@ COLORREF WINAPI GetThemeSysColor(HTHEME hTheme, int iColorID)
     PTHEME_PROPERTY tp;
 
     TRACE("(%p, %d)\n", hTheme, iColorID);
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeSysColor(hTheme, iColorID);
+
     SetLastError(0);
     if(hTheme) {
         if((tp = MSSTYLES_FindMetric(TMT_COLOR, iColorID))) {
@@ -106,6 +117,10 @@ HRESULT WINAPI GetThemeSysFont(HTHEME hTheme, int iFontID, LOGFONTW *plf)
     PTHEME_PROPERTY tp;
 
     TRACE("(%p, %d)\n", hTheme, iFontID);
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeSysFont(hTheme, iFontID, plf);
+
     if(hTheme) {
         if((tp = MSSTYLES_FindMetric(TMT_FONT, iFontID))) {
             HDC hdc = GetDC(NULL);
@@ -149,6 +164,10 @@ HRESULT WINAPI GetThemeSysInt(HTHEME hTheme, int iIntID, int *piValue)
     TRACE("(%p, %d)\n", hTheme, iIntID);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeSysInt(hTheme, iIntID, piValue);
+
     if(iIntID < TMT_FIRSTINT || iIntID > TMT_LASTINT) {
         WARN("Unknown IntID: %d\n", iIntID);
         return STG_E_INVALIDPARAMETER;
@@ -177,6 +196,9 @@ int WINAPI GetThemeSysSize(HTHEME hTheme, int iSizeID)
     };
     PTHEME_PROPERTY tp;
     int i, id = -1;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeSysSize(hTheme, iSizeID);
 
     if(hTheme) {
         for(i=0; i<ARRAY_SIZE(metricMap); i+=2) {
@@ -213,6 +235,10 @@ HRESULT WINAPI GetThemeSysString(HTHEME hTheme, int iStringID,
     TRACE("(%p, %d)\n", hTheme, iStringID);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeSysString(hTheme, iStringID, pszStringBuff, cchMaxStringChars);
+
     if(iStringID < TMT_FIRSTSTRING || iStringID > TMT_LASTSTRING) {
         WARN("Unknown StringID: %d\n", iStringID);
         return STG_E_INVALIDPARAMETER;

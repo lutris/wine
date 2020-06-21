@@ -54,6 +54,7 @@ static BOOLEAN (WINAPI *pTryAcquireSRWLockShared)(PSRWLOCK);
 
 static NTSTATUS (WINAPI *pNtAllocateVirtualMemory)(HANDLE, PVOID *, ULONG_PTR, SIZE_T *, ULONG, ULONG);
 static NTSTATUS (WINAPI *pNtFreeVirtualMemory)(HANDLE, PVOID *, SIZE_T *, ULONG);
+static NTSTATUS (WINAPI *pNtQuerySystemTime)(LARGE_INTEGER *);
 static NTSTATUS (WINAPI *pNtWaitForSingleObject)(HANDLE, BOOLEAN, const LARGE_INTEGER *);
 static NTSTATUS (WINAPI *pNtWaitForMultipleObjects)(ULONG,const HANDLE*,BOOLEAN,BOOLEAN,const LARGE_INTEGER*);
 static PSLIST_ENTRY (__fastcall *pRtlInterlockedPushListSList)(PSLIST_HEADER list, PSLIST_ENTRY first,
@@ -177,8 +178,23 @@ static void test_signalandwait(void)
     CloseHandle(file);
 }
 
+static HANDLE mutex, mutex2, mutices[2];
+
+static DWORD WINAPI mutex_thread( void *param )
+{
+    DWORD expect = (DWORD)(DWORD_PTR)param;
+    DWORD ret;
+
+    ret = WaitForSingleObject( mutex, 0 );
+    ok(ret == expect, "expected %u, got %u\n", expect, ret);
+
+    if (!ret) ReleaseMutex( mutex );
+    return 0;
+}
+
 static void test_mutex(void)
 {
+    HANDLE thread;
     DWORD wait_ret;
     BOOL ret;
     HANDLE hCreated;
@@ -218,7 +234,8 @@ todo_wine
     SetLastError(0xdeadbeef);
     hOpened = OpenMutexA(GENERIC_READ | GENERIC_WRITE, FALSE, "WineTestMutex");
     ok(hOpened != NULL, "OpenMutex failed with error %d\n", GetLastError());
-    wait_ret = WaitForSingleObject(hOpened, INFINITE);
+    wait_ret = WaitForSingleObject(hOpened, 0);
+todo_wine_if(getenv("WINEESYNC"))   /* XFAIL: validation is not implemented */
     ok(wait_ret == WAIT_FAILED, "WaitForSingleObject succeeded\n");
     CloseHandle(hOpened);
 
@@ -249,6 +266,7 @@ todo_wine
 
     SetLastError(0xdeadbeef);
     ret = ReleaseMutex(hCreated);
+todo_wine_if(getenv("WINEESYNC"))   /* XFAIL: due to the above */
     ok(!ret && (GetLastError() == ERROR_NOT_OWNER),
         "ReleaseMutex should have failed with ERROR_NOT_OWNER instead of %d\n", GetLastError());
 
@@ -287,6 +305,85 @@ todo_wine
     CloseHandle(hOpened);
 
     CloseHandle(hCreated);
+
+    mutex = CreateMutexA( NULL, FALSE, NULL );
+    ok(!!mutex, "got error %u\n", GetLastError());
+
+    ret = ReleaseMutex( mutex );
+    ok(!ret, "got %d\n", ret);
+    ok(GetLastError() == ERROR_NOT_OWNER, "got error %u\n", GetLastError());
+
+    for (i = 0; i < 100; i++)
+    {
+        ret = WaitForSingleObject( mutex, 0 );
+        ok(ret == 0, "got %u\n", ret);
+    }
+
+    for (i = 0; i < 100; i++)
+    {
+        ret = ReleaseMutex( mutex );
+        ok(ret, "got error %u\n", GetLastError());
+    }
+
+    ret = ReleaseMutex( mutex );
+    ok(!ret, "got %d\n", ret);
+    ok(GetLastError() == ERROR_NOT_OWNER, "got error %u\n", GetLastError());
+
+    thread = CreateThread( NULL, 0, mutex_thread, (void *)0, 0, NULL );
+    ret = WaitForSingleObject( thread, 2000 );
+    ok(ret == 0, "wait failed: %u\n", ret);
+
+    WaitForSingleObject( mutex, 0 );
+
+    thread = CreateThread( NULL, 0, mutex_thread, (void *)WAIT_TIMEOUT, 0, NULL );
+    ret = WaitForSingleObject( thread, 2000 );
+    ok(ret == 0, "wait failed: %u\n", ret);
+
+    ret = ReleaseMutex( mutex );
+        ok(ret, "got error %u\n", GetLastError());
+
+    thread = CreateThread( NULL, 0, mutex_thread, (void *)0, 0, NULL );
+    ret = WaitForSingleObject( thread, 2000 );
+    ok(ret == 0, "wait failed: %u\n", ret);
+
+    mutex2 = CreateMutexA( NULL, TRUE, NULL );
+    ok(!!mutex2, "got error %u\n", GetLastError());
+
+    ret = ReleaseMutex( mutex2 );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = ReleaseMutex( mutex2 );
+    ok(!ret, "got %d\n", ret);
+    ok(GetLastError() == ERROR_NOT_OWNER, "got error %u\n", GetLastError());
+
+    mutices[0] = mutex;
+    mutices[1] = mutex2;
+
+    ret = WaitForMultipleObjects( 2, mutices, FALSE, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = ReleaseMutex( mutex );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = ReleaseMutex( mutex2 );
+    ok(!ret, "got %d\n", ret);
+    ok(GetLastError() == ERROR_NOT_OWNER, "got error %u\n", GetLastError());
+
+    ret = WaitForMultipleObjects( 2, mutices, TRUE, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = ReleaseMutex( mutex );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = ReleaseMutex( mutex2 );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = CloseHandle( mutex );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = CloseHandle( mutex2 );
+    ok(ret, "got error %u\n", GetLastError());
+
 }
 
 static void test_slist(void)
@@ -462,12 +559,13 @@ static void test_slist(void)
 
 static void test_event(void)
 {
-    HANDLE handle, handle2;
+    HANDLE handle, handle2, handles[2];
     SECURITY_ATTRIBUTES sa;
     SECURITY_DESCRIPTOR sd;
     ACL acl;
     DWORD ret;
     BOOL val;
+    int i;
 
     /* no sd */
     handle = CreateEventA(NULL, FALSE, FALSE, __FILE__ ": Test Event");
@@ -571,11 +669,130 @@ static void test_event(void)
     ok( ret, "QueryMemoryResourceNotification failed err %u\n", GetLastError() );
     ok( val == FALSE || val == TRUE, "wrong value %u\n", val );
     CloseHandle( handle );
+
+    handle = CreateEventA( NULL, TRUE, FALSE, NULL );
+    ok(!!handle, "got error %u\n", GetLastError());
+
+    ret = WaitForSingleObject( handle, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    ret = SetEvent( handle );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = SetEvent( handle );
+    ok(ret, "got error %u\n", GetLastError());
+
+    for (i = 0; i < 100; i++)
+    {
+        ret = WaitForSingleObject( handle, 0 );
+        ok(ret == 0, "got %u\n", ret);
+    }
+
+    ret = ResetEvent( handle );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = ResetEvent( handle );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = WaitForSingleObject( handle, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    handle2 = CreateEventA( NULL, FALSE, TRUE, NULL );
+    ok(!!handle2, "got error %u\n", GetLastError());
+
+    ret = WaitForSingleObject( handle2, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = WaitForSingleObject( handle2, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    ret = SetEvent( handle2 );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = SetEvent( handle2 );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = ResetEvent( handle2 );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = ResetEvent( handle2 );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = WaitForSingleObject( handle2, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    handles[0] = handle;
+    handles[1] = handle2;
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    SetEvent( handle );
+    SetEvent( handle2 );
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = WaitForSingleObject( handle2, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ResetEvent( handle );
+    SetEvent( handle2 );
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == 1, "got %u\n", ret);
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    SetEvent( handle );
+    SetEvent( handle2 );
+
+    ret = WaitForMultipleObjects( 2, handles, TRUE, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = WaitForMultipleObjects( 2, handles, TRUE, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    SetEvent( handle2 );
+    ResetEvent( handle );
+
+    ret = WaitForMultipleObjects( 2, handles, TRUE, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    ret = WaitForSingleObject( handle2, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    handles[0] = handle2;
+    handles[1] = handle;
+    SetEvent( handle );
+    SetEvent( handle2 );
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == 1, "got %u\n", ret);
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == 1, "got %u\n", ret);
+
+    ret = CloseHandle( handle );
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = CloseHandle( handle2 );
+    ok(ret, "got error %u\n", GetLastError());
 }
 
 static void test_semaphore(void)
 {
-    HANDLE handle, handle2;
+    HANDLE handle, handle2, handles[2];
+    DWORD ret;
+    LONG prev;
+    int i;
 
     /* test case sensitivity */
 
@@ -617,6 +834,99 @@ static void test_semaphore(void)
     ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError());
 
     CloseHandle( handle );
+
+    handle = CreateSemaphoreA( NULL, 0, 5, NULL );
+    ok(!!handle, "CreateSemaphore failed: %u\n", GetLastError());
+
+    ret = WaitForSingleObject( handle, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    ret = ReleaseSemaphore( handle, 1, &prev );
+    ok(ret, "got error %u\n", GetLastError());
+    ok(prev == 0, "got prev %d\n", prev);
+
+    ret = ReleaseSemaphore( handle, 1, &prev );
+    ok(ret, "got error %u\n", GetLastError());
+    ok(prev == 1, "got prev %d\n", prev);
+
+    ret = ReleaseSemaphore( handle, 5, &prev );
+    ok(!ret, "got %d\n", ret);
+    ok(GetLastError() == ERROR_TOO_MANY_POSTS, "got error %u\n", GetLastError());
+    ok(prev == 1, "got prev %d\n", prev);
+
+    ret = ReleaseSemaphore( handle, 2, &prev );
+    ok(ret, "got error %u\n", GetLastError());
+    ok(prev == 2, "got prev %d\n", prev);
+
+    ret = ReleaseSemaphore( handle, 1, &prev );
+    ok(ret, "got error %u\n", GetLastError());
+    ok(prev == 4, "got prev %d\n", prev);
+
+    for (i = 0; i < 5; i++)
+    {
+        ret = WaitForSingleObject( handle, 0 );
+        ok(ret == 0, "got %u\n", ret);
+    }
+
+    ret = WaitForSingleObject( handle, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    handle2 = CreateSemaphoreA( NULL, 3, 5, NULL );
+    ok(!!handle2, "CreateSemaphore failed: %u\n", GetLastError());
+
+    ret = ReleaseSemaphore( handle2, 1, &prev );
+    ok(ret, "got error %u\n", GetLastError());
+    ok(prev == 3, "got prev %d\n", prev);
+
+    for (i = 0; i < 4; i++)
+    {
+        ret = WaitForSingleObject( handle2, 0 );
+        ok(ret == 0, "got %u\n", ret);
+    }
+
+    ret = WaitForSingleObject( handle2, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    handles[0] = handle;
+    handles[1] = handle2;
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    ReleaseSemaphore( handle, 1, NULL );
+    ReleaseSemaphore( handle2, 1, NULL );
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == 1, "got %u\n", ret);
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    ReleaseSemaphore( handle, 1, NULL );
+    ReleaseSemaphore( handle2, 1, NULL );
+
+    ret = WaitForMultipleObjects( 2, handles, TRUE, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = WaitForMultipleObjects( 2, handles, FALSE, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    ReleaseSemaphore( handle, 1, NULL );
+
+    ret = WaitForMultipleObjects( 2, handles, TRUE, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    ret = WaitForSingleObject( handle, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = CloseHandle( handle );
+    ok(ret, "got error %u\n", ret);
+
+    ret = CloseHandle( handle2 );
+    ok(ret, "got error %u\n", ret);
 }
 
 static void test_waitable_timer(void)
@@ -1171,11 +1481,15 @@ static HANDLE modify_handle(HANDLE handle, DWORD modify)
     return ULongToHandle(tmp);
 }
 
+#define TIMEOUT_INFINITE (((LONGLONG)0x7fffffff) << 32 | 0xffffffff)
+
 static void test_WaitForSingleObject(void)
 {
     HANDLE signaled, nonsignaled, invalid;
+    LARGE_INTEGER ntnow, ntthen;
     LARGE_INTEGER timeout;
     NTSTATUS status;
+    DWORD now, then;
     DWORD ret;
 
     signaled = CreateEventW(NULL, TRUE, TRUE, NULL);
@@ -1259,6 +1573,68 @@ static void test_WaitForSingleObject(void)
     timeout.QuadPart = -1000000;
     status = pNtWaitForSingleObject(GetCurrentThread(), FALSE, &timeout);
     ok(status == STATUS_TIMEOUT, "expected STATUS_TIMEOUT, got %08x\n", status);
+
+    ret = WaitForSingleObject( signaled, 0 );
+    ok(ret == 0, "got %u\n", ret);
+
+    ret = WaitForSingleObject( nonsignaled, 0 );
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+
+    /* test that a timed wait actually does wait */
+    now = GetTickCount();
+    ret = WaitForSingleObject( nonsignaled, 100 );
+    then = GetTickCount();
+    ok(ret == WAIT_TIMEOUT, "got %u\n", ret);
+    ok(abs((then - now) - 100) < 5, "got %u ms\n", then - now);
+
+    now = GetTickCount();
+    ret = WaitForSingleObject( signaled, 100 );
+    then = GetTickCount();
+    ok(ret == 0, "got %u\n", ret);
+    ok(abs(then - now) < 5, "got %u ms\n", then - now);
+
+    ret = WaitForSingleObject( signaled, INFINITE );
+    ok(ret == 0, "got %u\n", ret);
+
+    /* test NT timeouts */
+    pNtQuerySystemTime( &ntnow );
+    timeout.QuadPart = ntnow.QuadPart + 100 * 10000;
+    status = pNtWaitForSingleObject( nonsignaled, FALSE, &timeout );
+    pNtQuerySystemTime( &ntthen );
+    ok(status == STATUS_TIMEOUT, "got %#x\n", status);
+    ok(abs(((ntthen.QuadPart - ntnow.QuadPart) / 10000) - 100) < 5, "got %s ns\n",
+        wine_dbgstr_longlong((ntthen.QuadPart - ntnow.QuadPart) * 100));
+
+    pNtQuerySystemTime( &ntnow );
+    timeout.QuadPart = -100 * 10000;
+    status = pNtWaitForSingleObject( nonsignaled, FALSE, &timeout );
+    pNtQuerySystemTime( &ntthen );
+    ok(status == STATUS_TIMEOUT, "got %#x\n", status);
+    ok(abs(((ntthen.QuadPart - ntnow.QuadPart) / 10000) - 100) < 5, "got %s ns\n",
+        wine_dbgstr_longlong((ntthen.QuadPart - ntnow.QuadPart) * 100));
+
+    status = pNtWaitForSingleObject( signaled, FALSE, NULL );
+    ok(status == 0, "got %#x\n", status);
+
+    timeout.QuadPart = TIMEOUT_INFINITE;
+    status = pNtWaitForSingleObject( signaled, FALSE, &timeout );
+    ok(status == 0, "got %#x\n", status);
+
+    pNtQuerySystemTime( &ntnow );
+    timeout.QuadPart = ntnow.QuadPart;
+    status = pNtWaitForSingleObject( nonsignaled, FALSE, &timeout );
+    pNtQuerySystemTime( &ntthen );
+    ok(status == STATUS_TIMEOUT, "got %#x\n", status);
+    ok(abs((ntthen.QuadPart - ntnow.QuadPart) / 10000) < 5, "got %s ns\n",
+        wine_dbgstr_longlong((ntthen.QuadPart - ntnow.QuadPart) * 100));
+
+    pNtQuerySystemTime( &ntnow );
+    timeout.QuadPart = ntnow.QuadPart - 100 * 10000;
+    status = pNtWaitForSingleObject( nonsignaled, FALSE, &timeout );
+    pNtQuerySystemTime( &ntthen );
+    ok(status == STATUS_TIMEOUT, "got %#x\n", status);
+    ok(abs((ntthen.QuadPart - ntnow.QuadPart) / 10000) < 5, "got %s ns\n",
+        wine_dbgstr_longlong((ntthen.QuadPart - ntnow.QuadPart) * 100));
 
     CloseHandle(signaled);
     CloseHandle(nonsignaled);
@@ -1717,9 +2093,17 @@ static void test_condvars_consumer_producer(void)
 
 /* Sample test for some sequence of events happening, sequenced using "condvar_seq" */
 static DWORD condvar_seq = 0;
-static CONDITION_VARIABLE condvar_base = CONDITION_VARIABLE_INIT;
+static CONDITION_VARIABLE aligned_cv;
 static CRITICAL_SECTION condvar_crit;
 static SRWLOCK condvar_srwlock;
+
+#include "pshpack1.h"
+static struct
+{
+    char c;
+    CONDITION_VARIABLE cv;
+} unaligned_cv;
+#include "poppack.h"
 
 /* Sequence of wake/sleep to check boundary conditions:
  * 0: init
@@ -1740,28 +2124,31 @@ static SRWLOCK condvar_srwlock;
  * 12: producer (shared) wakes up consumer (shared)
  * 13: end
  */
-static DWORD WINAPI condvar_base_producer(LPVOID x) {
+static DWORD WINAPI condvar_base_producer(void *arg)
+{
+    CONDITION_VARIABLE *cv = arg;
+
     while (condvar_seq < 1) Sleep(1);
 
-    pWakeConditionVariable (&condvar_base);
+    pWakeConditionVariable(cv);
     condvar_seq = 2;
 
     while (condvar_seq < 3) Sleep(1);
-    pWakeAllConditionVariable (&condvar_base);
+    pWakeAllConditionVariable(cv);
     condvar_seq = 4;
 
     while (condvar_seq < 5) Sleep(1);
     EnterCriticalSection (&condvar_crit);
-    pWakeConditionVariable (&condvar_base);
+    pWakeConditionVariable(cv);
     LeaveCriticalSection (&condvar_crit);
     while (condvar_seq < 6) Sleep(1);
     EnterCriticalSection (&condvar_crit);
-    pWakeAllConditionVariable (&condvar_base);
+    pWakeAllConditionVariable(cv);
     LeaveCriticalSection (&condvar_crit);
 
     while (condvar_seq < 8) Sleep(1);
     EnterCriticalSection (&condvar_crit);
-    pWakeConditionVariable (&condvar_base);
+    pWakeConditionVariable(cv);
     Sleep(50);
     LeaveCriticalSection (&condvar_crit);
 
@@ -1771,36 +2158,38 @@ static DWORD WINAPI condvar_base_producer(LPVOID x) {
 
     while (condvar_seq < 9) Sleep(1);
     pAcquireSRWLockExclusive(&condvar_srwlock);
-    pWakeConditionVariable(&condvar_base);
+    pWakeConditionVariable(cv);
     pReleaseSRWLockExclusive(&condvar_srwlock);
 
     while (condvar_seq < 10) Sleep(1);
     pAcquireSRWLockExclusive(&condvar_srwlock);
-    pWakeConditionVariable(&condvar_base);
+    pWakeConditionVariable(cv);
     pReleaseSRWLockExclusive(&condvar_srwlock);
 
     while (condvar_seq < 11) Sleep(1);
     pAcquireSRWLockShared(&condvar_srwlock);
-    pWakeConditionVariable(&condvar_base);
+    pWakeConditionVariable(cv);
     pReleaseSRWLockShared(&condvar_srwlock);
 
     while (condvar_seq < 12) Sleep(1);
     Sleep(50); /* ensure that consumer waits for cond variable */
     pAcquireSRWLockShared(&condvar_srwlock);
-    pWakeConditionVariable(&condvar_base);
+    pWakeConditionVariable(cv);
     pReleaseSRWLockShared(&condvar_srwlock);
 
     return 0;
 }
 
-static DWORD WINAPI condvar_base_consumer(LPVOID x) {
+static DWORD WINAPI condvar_base_consumer(void *arg)
+{
+    CONDITION_VARIABLE *cv = arg;
     BOOL ret;
 
     while (condvar_seq < 2) Sleep(1);
 
     /* wake was emitted, but we were not sleeping */
     EnterCriticalSection (&condvar_crit);
-    ret = pSleepConditionVariableCS(&condvar_base, &condvar_crit, 10);
+    ret = pSleepConditionVariableCS(cv, &condvar_crit, 10);
     LeaveCriticalSection (&condvar_crit);
     ok (!ret, "SleepConditionVariableCS should return FALSE on out of band wake\n");
     ok (GetLastError() == ERROR_TIMEOUT, "SleepConditionVariableCS should return ERROR_TIMEOUT on out of band wake, not %d\n", GetLastError());
@@ -1810,33 +2199,33 @@ static DWORD WINAPI condvar_base_consumer(LPVOID x) {
 
     /* wake all was emitted, but we were not sleeping */
     EnterCriticalSection (&condvar_crit);
-    ret = pSleepConditionVariableCS(&condvar_base, &condvar_crit, 10);
+    ret = pSleepConditionVariableCS(cv, &condvar_crit, 10);
     LeaveCriticalSection (&condvar_crit);
     ok (!ret, "SleepConditionVariableCS should return FALSE on out of band wake\n");
     ok (GetLastError() == ERROR_TIMEOUT, "SleepConditionVariableCS should return ERROR_TIMEOUT on out of band wake, not %d\n", GetLastError());
 
     EnterCriticalSection (&condvar_crit);
     condvar_seq = 5;
-    ret = pSleepConditionVariableCS(&condvar_base, &condvar_crit, 200);
+    ret = pSleepConditionVariableCS(cv, &condvar_crit, 200);
     LeaveCriticalSection (&condvar_crit);
     ok (ret, "SleepConditionVariableCS should return TRUE on good wake\n");
 
     EnterCriticalSection (&condvar_crit);
     condvar_seq = 6;
-    ret = pSleepConditionVariableCS(&condvar_base, &condvar_crit, 200);
+    ret = pSleepConditionVariableCS(cv, &condvar_crit, 200);
     LeaveCriticalSection (&condvar_crit);
     ok (ret, "SleepConditionVariableCS should return TRUE on good wakeall\n");
     condvar_seq = 7;
 
     EnterCriticalSection (&condvar_crit);
-    ret = pSleepConditionVariableCS(&condvar_base, &condvar_crit, 10);
+    ret = pSleepConditionVariableCS(cv, &condvar_crit, 10);
     LeaveCriticalSection (&condvar_crit);
     ok (!ret, "SleepConditionVariableCS should return FALSE on out of band wake\n");
     ok (GetLastError() == ERROR_TIMEOUT, "SleepConditionVariableCS should return ERROR_TIMEOUT on out of band wake, not %d\n", GetLastError());
 
     EnterCriticalSection (&condvar_crit);
     condvar_seq = 8;
-    ret = pSleepConditionVariableCS(&condvar_base, &condvar_crit, 20);
+    ret = pSleepConditionVariableCS(cv, &condvar_crit, 20);
     LeaveCriticalSection (&condvar_crit);
     ok (ret, "SleepConditionVariableCS should still return TRUE on crit unlock delay\n");
 
@@ -1850,25 +2239,25 @@ static DWORD WINAPI condvar_base_consumer(LPVOID x) {
 
     pAcquireSRWLockExclusive(&condvar_srwlock);
     condvar_seq = 9;
-    ret = pSleepConditionVariableSRW(&condvar_base, &condvar_srwlock, 200, 0);
+    ret = pSleepConditionVariableSRW(cv, &condvar_srwlock, 200, 0);
     pReleaseSRWLockExclusive(&condvar_srwlock);
     ok (ret, "pSleepConditionVariableSRW should return TRUE on good wake\n");
 
     pAcquireSRWLockShared(&condvar_srwlock);
     condvar_seq = 10;
-    ret = pSleepConditionVariableSRW(&condvar_base, &condvar_srwlock, 200, CONDITION_VARIABLE_LOCKMODE_SHARED);
+    ret = pSleepConditionVariableSRW(cv, &condvar_srwlock, 200, CONDITION_VARIABLE_LOCKMODE_SHARED);
     pReleaseSRWLockShared(&condvar_srwlock);
     ok (ret, "pSleepConditionVariableSRW should return TRUE on good wake\n");
 
     pAcquireSRWLockExclusive(&condvar_srwlock);
     condvar_seq = 11;
-    ret = pSleepConditionVariableSRW(&condvar_base, &condvar_srwlock, 200, 0);
+    ret = pSleepConditionVariableSRW(cv, &condvar_srwlock, 200, 0);
     pReleaseSRWLockExclusive(&condvar_srwlock);
     ok (ret, "pSleepConditionVariableSRW should return TRUE on good wake\n");
 
     pAcquireSRWLockShared(&condvar_srwlock);
     condvar_seq = 12;
-    ret = pSleepConditionVariableSRW(&condvar_base, &condvar_srwlock, 200, CONDITION_VARIABLE_LOCKMODE_SHARED);
+    ret = pSleepConditionVariableSRW(cv, &condvar_srwlock, 200, CONDITION_VARIABLE_LOCKMODE_SHARED);
     pReleaseSRWLockShared(&condvar_srwlock);
     ok (ret, "pSleepConditionVariableSRW should return TRUE on good wake\n");
 
@@ -1876,11 +2265,11 @@ static DWORD WINAPI condvar_base_consumer(LPVOID x) {
     return 0;
 }
 
-static void test_condvars_base(void) {
+static void test_condvars_base(RTL_CONDITION_VARIABLE *cv)
+{
     HANDLE hp, hc;
     DWORD dummy;
     BOOL ret;
-
 
     if (!pInitializeConditionVariable) {
         /* function is not yet in XP, only in newer Windows */
@@ -1894,7 +2283,7 @@ static void test_condvars_base(void) {
         pInitializeSRWLock(&condvar_srwlock);
 
     EnterCriticalSection (&condvar_crit);
-    ret = pSleepConditionVariableCS(&condvar_base, &condvar_crit, 10);
+    ret = pSleepConditionVariableCS(cv, &condvar_crit, 10);
     LeaveCriticalSection (&condvar_crit);
 
     ok (!ret, "SleepConditionVariableCS should return FALSE on untriggered condvar\n");
@@ -1903,23 +2292,23 @@ static void test_condvars_base(void) {
     if (pInitializeSRWLock)
     {
         pAcquireSRWLockExclusive(&condvar_srwlock);
-        ret = pSleepConditionVariableSRW(&condvar_base, &condvar_srwlock, 10, 0);
+        ret = pSleepConditionVariableSRW(cv, &condvar_srwlock, 10, 0);
         pReleaseSRWLockExclusive(&condvar_srwlock);
 
         ok(!ret, "SleepConditionVariableSRW should return FALSE on untriggered condvar\n");
         ok(GetLastError() == ERROR_TIMEOUT, "SleepConditionVariableSRW should return ERROR_TIMEOUT on untriggered condvar, not %d\n", GetLastError());
 
         pAcquireSRWLockShared(&condvar_srwlock);
-        ret = pSleepConditionVariableSRW(&condvar_base, &condvar_srwlock, 10, CONDITION_VARIABLE_LOCKMODE_SHARED);
+        ret = pSleepConditionVariableSRW(cv, &condvar_srwlock, 10, CONDITION_VARIABLE_LOCKMODE_SHARED);
         pReleaseSRWLockShared(&condvar_srwlock);
 
         ok(!ret, "SleepConditionVariableSRW should return FALSE on untriggered condvar\n");
         ok(GetLastError() == ERROR_TIMEOUT, "SleepConditionVariableSRW should return ERROR_TIMEOUT on untriggered condvar, not %d\n", GetLastError());
     }
 
-
-    hp = CreateThread(NULL, 0, condvar_base_producer, NULL, 0, &dummy);
-    hc = CreateThread(NULL, 0, condvar_base_consumer, NULL, 0, &dummy);
+    condvar_seq = 0;
+    hp = CreateThread(NULL, 0, condvar_base_producer, cv, 0, &dummy);
+    hc = CreateThread(NULL, 0, condvar_base_consumer, cv, 0, &dummy);
 
     condvar_seq = 1; /* go */
 
@@ -1930,7 +2319,7 @@ static void test_condvars_base(void) {
 }
 
 static LONG srwlock_seq = 0;
-static SRWLOCK srwlock_base;
+static SRWLOCK aligned_srwlock;
 static struct
 {
     LONG wrong_execution_order;
@@ -1942,6 +2331,14 @@ static struct
     LONG trylock_excl;
     LONG trylock_shared;
 } srwlock_base_errors;
+
+#include "pshpack1.h"
+struct
+{
+    char c;
+    SRWLOCK lock;
+} unaligned_srwlock;
+#include "poppack.h"
 
 /* Sequence of acquire/release to check boundary conditions:
  *  0: init
@@ -2014,49 +2411,51 @@ static struct
  * 31: end
  */
 
-static DWORD WINAPI srwlock_base_thread1(LPVOID x)
+static DWORD WINAPI srwlock_base_thread1(void *arg)
 {
+    SRWLOCK *lock = arg;
+
     /* seq 2 */
     while (srwlock_seq < 2) Sleep(1);
     Sleep(100);
     if (InterlockedIncrement(&srwlock_seq) != 3)
         InterlockedIncrement(&srwlock_base_errors.samethread_excl_excl);
-    pReleaseSRWLockExclusive(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
 
     /* seq 4 */
     while (srwlock_seq < 4) Sleep(1);
     Sleep(100);
     if (InterlockedIncrement(&srwlock_seq) != 5)
         InterlockedIncrement(&srwlock_base_errors.samethread_excl_shared);
-    pReleaseSRWLockExclusive(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
 
     /* seq 6 */
     while (srwlock_seq < 6) Sleep(1);
     Sleep(100);
     if (InterlockedIncrement(&srwlock_seq) != 7)
         InterlockedIncrement(&srwlock_base_errors.samethread_shared_excl);
-    pReleaseSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
 
     /* seq 8 */
     while (srwlock_seq < 8) Sleep(1);
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pAcquireSRWLockExclusive(lock);
     if (InterlockedIncrement(&srwlock_seq) != 9)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
     Sleep(100);
     if (InterlockedIncrement(&srwlock_seq) != 10)
         InterlockedIncrement(&srwlock_base_errors.multithread_excl_excl);
-    pReleaseSRWLockExclusive(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
 
     /* seq 11 */
     while (srwlock_seq < 11) Sleep(1);
-    pAcquireSRWLockShared(&srwlock_base);
+    pAcquireSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 12)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 13 */
     while (srwlock_seq < 13) Sleep(1);
-    pReleaseSRWLockShared(&srwlock_base);
-    pAcquireSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
+    pAcquireSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 14)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
@@ -2065,7 +2464,7 @@ static DWORD WINAPI srwlock_base_thread1(LPVOID x)
     Sleep(50); /* ensure that both the exclusive and shared access thread are queued */
     if (InterlockedIncrement(&srwlock_seq) != 17)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
-    pReleaseSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
 
     /* skip over remaining tests if TryAcquireSRWLock* is not available */
     if (!pTryAcquireSRWLockExclusive)
@@ -2073,125 +2472,127 @@ static DWORD WINAPI srwlock_base_thread1(LPVOID x)
 
     /* seq 19 */
     while (srwlock_seq < 19) Sleep(1);
-    if (pTryAcquireSRWLockExclusive(&srwlock_base))
+    if (pTryAcquireSRWLockExclusive(lock))
     {
-        if (pTryAcquireSRWLockShared(&srwlock_base))
+        if (pTryAcquireSRWLockShared(lock))
             InterlockedIncrement(&srwlock_base_errors.trylock_shared);
-        if (pTryAcquireSRWLockExclusive(&srwlock_base))
+        if (pTryAcquireSRWLockExclusive(lock))
             InterlockedIncrement(&srwlock_base_errors.trylock_excl);
-        pReleaseSRWLockExclusive(&srwlock_base);
+        pReleaseSRWLockExclusive(lock);
     }
     else
         InterlockedIncrement(&srwlock_base_errors.trylock_excl);
 
-    if (pTryAcquireSRWLockShared(&srwlock_base))
+    if (pTryAcquireSRWLockShared(lock))
     {
-        if (pTryAcquireSRWLockShared(&srwlock_base))
-            pReleaseSRWLockShared(&srwlock_base);
+        if (pTryAcquireSRWLockShared(lock))
+            pReleaseSRWLockShared(lock);
         else
             InterlockedIncrement(&srwlock_base_errors.trylock_shared);
-        if (pTryAcquireSRWLockExclusive(&srwlock_base))
+        if (pTryAcquireSRWLockExclusive(lock))
             InterlockedIncrement(&srwlock_base_errors.trylock_excl);
-        pReleaseSRWLockShared(&srwlock_base);
+        pReleaseSRWLockShared(lock);
     }
     else
         InterlockedIncrement(&srwlock_base_errors.trylock_shared);
 
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pAcquireSRWLockExclusive(lock);
     if (InterlockedIncrement(&srwlock_seq) != 20)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 21 */
     while (srwlock_seq < 21) Sleep(1);
-    pReleaseSRWLockExclusive(&srwlock_base);
-    pAcquireSRWLockShared(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
+    pAcquireSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 22)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 23 */
     while (srwlock_seq < 23) Sleep(1);
-    pReleaseSRWLockShared(&srwlock_base);
-    pAcquireSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
+    pAcquireSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 24)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 25 */
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pAcquireSRWLockExclusive(lock);
     if (srwlock_seq != 25)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
-    pReleaseSRWLockExclusive(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
 
-    pAcquireSRWLockShared(&srwlock_base);
-    pAcquireSRWLockShared(&srwlock_base);
+    pAcquireSRWLockShared(lock);
+    pAcquireSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 26)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 27 */
     while (srwlock_seq < 27) Sleep(1);
-    pReleaseSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 28)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 29 */
     while (srwlock_seq < 29) Sleep(1);
-    pReleaseSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 30)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     return 0;
 }
 
-static DWORD WINAPI srwlock_base_thread2(LPVOID x)
+static DWORD WINAPI srwlock_base_thread2(void *arg)
 {
+    SRWLOCK *lock = arg;
+
     /* seq 1 */
     while (srwlock_seq < 1) Sleep(1);
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pAcquireSRWLockExclusive(lock);
     if (InterlockedIncrement(&srwlock_seq) != 2)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 3 */
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pAcquireSRWLockExclusive(lock);
     if (srwlock_seq != 3)
         InterlockedIncrement(&srwlock_base_errors.samethread_excl_excl);
-    pReleaseSRWLockExclusive(&srwlock_base);
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
+    pAcquireSRWLockExclusive(lock);
     if (InterlockedIncrement(&srwlock_seq) != 4)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 5 */
-    pAcquireSRWLockShared(&srwlock_base);
+    pAcquireSRWLockShared(lock);
     if (srwlock_seq != 5)
         InterlockedIncrement(&srwlock_base_errors.samethread_excl_shared);
-    pReleaseSRWLockShared(&srwlock_base);
-    pAcquireSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
+    pAcquireSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 6)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 7 */
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pAcquireSRWLockExclusive(lock);
     if (srwlock_seq != 7)
         InterlockedIncrement(&srwlock_base_errors.samethread_shared_excl);
-    pReleaseSRWLockExclusive(&srwlock_base);
-    pAcquireSRWLockShared(&srwlock_base);
-    pAcquireSRWLockShared(&srwlock_base);
-    pReleaseSRWLockShared(&srwlock_base);
-    pReleaseSRWLockShared(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
+    pAcquireSRWLockShared(lock);
+    pAcquireSRWLockShared(lock);
+    pReleaseSRWLockShared(lock);
+    pReleaseSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 8)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 9, 10 */
     while (srwlock_seq < 9) Sleep(1);
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pAcquireSRWLockExclusive(lock);
     if (srwlock_seq != 10)
         InterlockedIncrement(&srwlock_base_errors.multithread_excl_excl);
-    pReleaseSRWLockExclusive(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
     if (InterlockedIncrement(&srwlock_seq) != 11)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 12 */
     while (srwlock_seq < 12) Sleep(1);
-    pAcquireSRWLockShared(&srwlock_base);
-    pReleaseSRWLockShared(&srwlock_base);
+    pAcquireSRWLockShared(lock);
+    pReleaseSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 13)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
@@ -2201,12 +2602,12 @@ static DWORD WINAPI srwlock_base_thread2(LPVOID x)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 17 */
-    pAcquireSRWLockExclusive(&srwlock_base);
+    pAcquireSRWLockExclusive(lock);
     if (srwlock_seq != 17)
         InterlockedIncrement(&srwlock_base_errors.excl_not_preferred);
     if (InterlockedIncrement(&srwlock_seq) != 18)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
-    pReleaseSRWLockExclusive(&srwlock_base);
+    pReleaseSRWLockExclusive(lock);
 
     /* skip over remaining tests if TryAcquireSRWLock* is not available */
     if (!pTryAcquireSRWLockExclusive)
@@ -2214,20 +2615,20 @@ static DWORD WINAPI srwlock_base_thread2(LPVOID x)
 
     /* seq 20 */
     while (srwlock_seq < 20) Sleep(1);
-    if (pTryAcquireSRWLockShared(&srwlock_base))
+    if (pTryAcquireSRWLockShared(lock))
         InterlockedIncrement(&srwlock_base_errors.trylock_shared);
-    if (pTryAcquireSRWLockExclusive(&srwlock_base))
+    if (pTryAcquireSRWLockExclusive(lock))
         InterlockedIncrement(&srwlock_base_errors.trylock_excl);
     if (InterlockedIncrement(&srwlock_seq) != 21)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 22 */
     while (srwlock_seq < 22) Sleep(1);
-    if (pTryAcquireSRWLockShared(&srwlock_base))
-        pReleaseSRWLockShared(&srwlock_base);
+    if (pTryAcquireSRWLockShared(lock))
+        pReleaseSRWLockShared(lock);
     else
         InterlockedIncrement(&srwlock_base_errors.trylock_shared);
-    if (pTryAcquireSRWLockExclusive(&srwlock_base))
+    if (pTryAcquireSRWLockExclusive(lock))
         InterlockedIncrement(&srwlock_base_errors.trylock_excl);
     if (InterlockedIncrement(&srwlock_seq) != 23)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
@@ -2235,47 +2636,47 @@ static DWORD WINAPI srwlock_base_thread2(LPVOID x)
     /* seq 24 */
     while (srwlock_seq < 24) Sleep(1);
     Sleep(50); /* ensure that exclusive access request is queued */
-    if (pTryAcquireSRWLockShared(&srwlock_base))
+    if (pTryAcquireSRWLockShared(lock))
     {
-        pReleaseSRWLockShared(&srwlock_base);
+        pReleaseSRWLockShared(lock);
         InterlockedIncrement(&srwlock_base_errors.excl_not_preferred);
     }
-    if (pTryAcquireSRWLockExclusive(&srwlock_base))
+    if (pTryAcquireSRWLockExclusive(lock))
         InterlockedIncrement(&srwlock_base_errors.trylock_excl);
     if (InterlockedIncrement(&srwlock_seq) != 25)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
-    pReleaseSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
 
     /* seq 26 */
     while (srwlock_seq < 26) Sleep(1);
-    if (pTryAcquireSRWLockShared(&srwlock_base))
-        pReleaseSRWLockShared(&srwlock_base);
+    if (pTryAcquireSRWLockShared(lock))
+        pReleaseSRWLockShared(lock);
     else
         InterlockedIncrement(&srwlock_base_errors.trylock_shared);
-    if (pTryAcquireSRWLockExclusive(&srwlock_base))
+    if (pTryAcquireSRWLockExclusive(lock))
         InterlockedIncrement(&srwlock_base_errors.trylock_excl);
     if (InterlockedIncrement(&srwlock_seq) != 27)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 28 */
     while (srwlock_seq < 28) Sleep(1);
-    if (pTryAcquireSRWLockShared(&srwlock_base))
-        pReleaseSRWLockShared(&srwlock_base);
+    if (pTryAcquireSRWLockShared(lock))
+        pReleaseSRWLockShared(lock);
     else
         InterlockedIncrement(&srwlock_base_errors.trylock_shared);
-    if (pTryAcquireSRWLockExclusive(&srwlock_base))
+    if (pTryAcquireSRWLockExclusive(lock))
         InterlockedIncrement(&srwlock_base_errors.trylock_excl);
     if (InterlockedIncrement(&srwlock_seq) != 29)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 30 */
     while (srwlock_seq < 30) Sleep(1);
-    if (pTryAcquireSRWLockShared(&srwlock_base))
-        pReleaseSRWLockShared(&srwlock_base);
+    if (pTryAcquireSRWLockShared(lock))
+        pReleaseSRWLockShared(lock);
     else
         InterlockedIncrement(&srwlock_base_errors.trylock_shared);
-    if (pTryAcquireSRWLockExclusive(&srwlock_base))
-        pReleaseSRWLockExclusive(&srwlock_base);
+    if (pTryAcquireSRWLockExclusive(lock))
+        pReleaseSRWLockExclusive(lock);
     else
         InterlockedIncrement(&srwlock_base_errors.trylock_excl);
     if (InterlockedIncrement(&srwlock_seq) != 31)
@@ -2284,8 +2685,10 @@ static DWORD WINAPI srwlock_base_thread2(LPVOID x)
     return 0;
 }
 
-static DWORD WINAPI srwlock_base_thread3(LPVOID x)
+static DWORD WINAPI srwlock_base_thread3(void *arg)
 {
+    SRWLOCK *lock = arg;
+
     /* seq 15 */
     while (srwlock_seq < 15) Sleep(1);
     Sleep(50); /* some delay, so that thread2 can try to acquire a second exclusive lock */
@@ -2293,10 +2696,10 @@ static DWORD WINAPI srwlock_base_thread3(LPVOID x)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
     /* seq 18 */
-    pAcquireSRWLockShared(&srwlock_base);
+    pAcquireSRWLockShared(lock);
     if (srwlock_seq != 18)
         InterlockedIncrement(&srwlock_base_errors.excl_not_preferred);
-    pReleaseSRWLockShared(&srwlock_base);
+    pReleaseSRWLockShared(lock);
     if (InterlockedIncrement(&srwlock_seq) != 19)
         InterlockedIncrement(&srwlock_base_errors.wrong_execution_order);
 
@@ -2312,7 +2715,7 @@ static DWORD WINAPI srwlock_base_thread3(LPVOID x)
     return 0;
 }
 
-static void test_srwlock_base(void)
+static void test_srwlock_base(SRWLOCK *lock)
 {
     HANDLE h1, h2, h3;
     DWORD dummy;
@@ -2324,12 +2727,13 @@ static void test_srwlock_base(void)
         return;
     }
 
-    pInitializeSRWLock(&srwlock_base);
+    pInitializeSRWLock(lock);
     memset(&srwlock_base_errors, 0, sizeof(srwlock_base_errors));
+    srwlock_seq = 0;
 
-    h1 = CreateThread(NULL, 0, srwlock_base_thread1, NULL, 0, &dummy);
-    h2 = CreateThread(NULL, 0, srwlock_base_thread2, NULL, 0, &dummy);
-    h3 = CreateThread(NULL, 0, srwlock_base_thread3, NULL, 0, &dummy);
+    h1 = CreateThread(NULL, 0, srwlock_base_thread1, lock, 0, &dummy);
+    h2 = CreateThread(NULL, 0, srwlock_base_thread2, lock, 0, &dummy);
+    h3 = CreateThread(NULL, 0, srwlock_base_thread3, lock, 0, &dummy);
 
     srwlock_seq = 1; /* go */
     while (srwlock_seq < 31)
@@ -2674,6 +3078,84 @@ static void test_crit_section(void)
     ok(cs.DebugInfo == NULL, "Unexpected debug info pointer %p.\n", cs.DebugInfo);
 }
 
+static int zigzag_state, zigzag_count[2], zigzag_stop;
+
+static DWORD CALLBACK zigzag_event0(void *arg)
+{
+    HANDLE *events = arg;
+
+    while (!zigzag_stop)
+    {
+        WaitForSingleObject(events[0], INFINITE);
+        ResetEvent(events[0]);
+        ok(zigzag_state == 0, "got wrong state %d\n", zigzag_state);
+        zigzag_state++;
+        SetEvent(events[1]);
+        zigzag_count[0]++;
+    }
+    trace("thread 0 got done\n");
+    return 0;
+}
+
+static DWORD CALLBACK zigzag_event1(void *arg)
+{
+    HANDLE *events = arg;
+
+    while (!zigzag_stop)
+    {
+        WaitForSingleObject(events[1], INFINITE);
+        ResetEvent(events[1]);
+        ok(zigzag_state == 1, "got wrong state %d\n", zigzag_state);
+        zigzag_state--;
+        SetEvent(events[0]);
+        zigzag_count[1]++;
+    }
+    trace("thread 1 got done\n");
+    return 0;
+}
+
+static void test_zigzag_event(void)
+{
+    /* The basic idea is to test SetEvent/Wait back and forth between two
+     * threads. Each thread clears their own event, sets some common data,
+     * signals the other's, then waits on their own. We make sure the common
+     * data is always in the right state. We also print performance data. */
+
+    HANDLE threads[2], events[2];
+    BOOL ret;
+
+    events[0] = CreateEventA(NULL, FALSE, FALSE, NULL);
+    events[1] = CreateEventA(NULL, FALSE, FALSE, NULL);
+
+    threads[0] = CreateThread(NULL, 0, zigzag_event0, events, 0, NULL);
+    threads[1] = CreateThread(NULL, 0, zigzag_event1, events, 0, NULL);
+
+    zigzag_state = 0;
+    zigzag_count[0] = zigzag_count[1] = 0;
+    zigzag_stop = 0;
+
+    trace("starting zigzag test (events)\n");
+    SetEvent(events[0]);
+    Sleep(2000);
+    zigzag_stop = 1;
+    ret = WaitForMultipleObjects(2, threads, FALSE, INFINITE);
+    trace("%d\n", ret);
+    ok(ret == 0 || ret == 1, "wait failed: %u\n", ret);
+
+    ok(zigzag_count[0] == zigzag_count[1] || zigzag_count[0] == zigzag_count[1] + 1,
+        "count did not match: %d != %d\n", zigzag_count[0], zigzag_count[1]);
+
+    /* signal the other thread to finish, if it didn't already
+     * (in theory they both would at the same time, but there's a slight race on teardown if we get
+     * thread 1 SetEvent -> thread 0 ResetEvent -> thread 0 Wait -> thread 1 exits */
+    zigzag_state = 1-ret;
+    SetEvent(events[1-ret]);
+    ret = WaitForSingleObject(threads[1-ret], 1000);
+    ok(!ret, "wait failed: %u\n", ret);
+
+    trace("count: %d\n", zigzag_count[0]);
+}
+
 START_TEST(sync)
 {
     char **argv;
@@ -2700,6 +3182,7 @@ START_TEST(sync)
     pTryAcquireSRWLockShared = (void *)GetProcAddress(hdll, "TryAcquireSRWLockShared");
     pNtAllocateVirtualMemory = (void *)GetProcAddress(hntdll, "NtAllocateVirtualMemory");
     pNtFreeVirtualMemory = (void *)GetProcAddress(hntdll, "NtFreeVirtualMemory");
+    pNtQuerySystemTime = (void *)GetProcAddress(hntdll, "NtQuerySystemTime");
     pNtWaitForSingleObject = (void *)GetProcAddress(hntdll, "NtWaitForSingleObject");
     pNtWaitForMultipleObjects = (void *)GetProcAddress(hntdll, "NtWaitForMultipleObjects");
     pRtlInterlockedPushListSList = (void *)GetProcAddress(hntdll, "RtlInterlockedPushListSList");
@@ -2727,11 +3210,14 @@ START_TEST(sync)
     test_WaitForSingleObject();
     test_WaitForMultipleObjects();
     test_initonce();
-    test_condvars_base();
+    test_condvars_base(&aligned_cv);
+    test_condvars_base(&unaligned_cv.cv);
     test_condvars_consumer_producer();
-    test_srwlock_base();
+    test_srwlock_base(&aligned_srwlock);
+    test_srwlock_base(&unaligned_srwlock.lock);
     test_srwlock_example();
     test_alertable_wait();
     test_apc_deadlock();
+    test_zigzag_event();
     test_crit_section();
 }

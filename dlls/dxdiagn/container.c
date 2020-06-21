@@ -167,7 +167,7 @@ static HRESULT WINAPI IDxDiagContainerImpl_GetChildContainer(IDxDiagContainer *i
     TRACE("Trying to get parent container %s\n", debugstr_w(tmp));
     hr = IDxDiagContainerImpl_GetChildContainerInternal(pContainer, tmp, &pContainer);
     if (FAILED(hr))
-      goto on_error;
+      goto out;
     cur++; /* go after '.' (just replaced by \0) */
     tmp = cur;
     cur = wcschr(tmp, '.');
@@ -181,7 +181,7 @@ static HRESULT WINAPI IDxDiagContainerImpl_GetChildContainer(IDxDiagContainer *i
         TRACE("Succeeded in getting the container instance\n");
   }
 
-on_error:
+out:
   HeapFree(GetProcessHeap(), 0, orig_tmp);
   return hr;
 }

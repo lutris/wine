@@ -1,7 +1,7 @@
 EXTRADEFS = -D_SHELL32_
 MODULE    = shell32.dll
 IMPORTLIB = shell32
-IMPORTS   = uuid shlwapi user32 gdi32 advapi32
+IMPORTS   = uuid shlwapi user32 gdi32 advapi32 aclui
 DELAYIMPORTS = ole32 oleaut32 shdocvw version comctl32 gdiplus
 # AUTHORS file is in the top-level directory
 EXTRAINCL = -I$(top_srcdir)
@@ -31,6 +31,7 @@ C_SRCS = \
 	shelldispatch.c \
 	shellitem.c \
 	shelllink.c \
+	shellnew.c \
 	shellole.c \
 	shellord.c \
 	shellpath.c \
@@ -75,6 +76,8 @@ SVG_SRCS = \
 	resources/folder.svg \
 	resources/folder_open.svg \
 	resources/help.svg \
+	resources/ietoolbar.svg \
+	resources/ietoolbar_small.svg \
 	resources/image.svg \
 	resources/internet.svg \
 	resources/log_off.svg \

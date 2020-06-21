@@ -120,7 +120,33 @@ static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, LPVOID event_
 
 static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
 {
+    static const WCHAR ntoskrnlW[] = {'n','t','o','s','k','r','n','l','.','e','x','e',0};
+    static const WCHAR win32kW[]   = {'w','i','n','3','2','k','.','s','y','s',0};
+    static const WCHAR dxgkrnlW[]  = {'d','x','g','k','r','n','l','.','s','y','s',0};
+    static const WCHAR dxgmms1W[]  = {'d','x','g','m','m','s','1','.','s','y','s',0};
+    static const WCHAR *stubs[] = { win32kW, dxgkrnlW, dxgmms1W };
     const WCHAR *service_group = (argc >= 2) ? argv[1] : argv[0];
+    LDR_MODULE *ldr;
+    ULONG_PTR magic;
+    int i;
+
+    /* Load some default drivers (required by anticheat drivers) */
+    for (i = 0; i < sizeof(stubs)/sizeof(stubs[0]); i++)
+    {
+        if (!LoadLibraryW( stubs[i] ))
+            ERR( "Failed to load %s\n", debugstr_w( stubs[i] ) );
+    }
+
+    /* ntoskrnl.exe must be the first module */
+    LdrLockLoaderLock( 0, NULL, &magic );
+    if (!LdrFindEntryForAddress( GetModuleHandleW( ntoskrnlW ), &ldr ))
+    {
+        RemoveEntryList( &ldr->InLoadOrderModuleList );
+        InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList, &ldr->InLoadOrderModuleList );
+        RemoveEntryList( &ldr->InMemoryOrderModuleList);
+        InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList, &ldr->InMemoryOrderModuleList );
+    }
+    LdrUnlockLoaderLock( 0, magic );
 
     if (!(stop_event = CreateEventW( NULL, TRUE, FALSE, NULL )))
         return;

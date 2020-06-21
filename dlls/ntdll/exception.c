@@ -328,7 +328,6 @@ LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr )
     return unhandled_exception_filter( eptr );
 }
 
-
 #if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 
 struct dynamic_unwind_entry
@@ -666,6 +665,16 @@ PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG_PTR pc, ULONG_PTR *base,
 }
 
 #endif  /* __x86_64__ || __arm__ || __aarch64__ */
+
+/*********************************************************************
+ *         NtContinue   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtContinue( CONTEXT *context, BOOLEAN alert )
+{
+    TRACE( "(%p, %d) stub!\n", context, alert );
+
+    return NtSetContextThread( GetCurrentThread(), context );
+}
 
 /*************************************************************
  *            __wine_spec_unimplemented_stub

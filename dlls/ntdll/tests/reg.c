@@ -1879,7 +1879,7 @@ static void test_notify(void)
     pRtlFreeUnicodeString(&str);
 
     status = pNtWaitForSingleObject(events[0], FALSE, &timeout);
-    todo_wine ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
+    ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
     status = pNtWaitForSingleObject(events[1], FALSE, &timeout);
     ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
 
@@ -1892,7 +1892,7 @@ static void test_notify(void)
     ok(status == STATUS_SUCCESS, "NtDeleteSubkey failed: %x\n", status);
 
     status = pNtWaitForSingleObject(events[0], FALSE, &timeout);
-    todo_wine ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
+    ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
     status = pNtWaitForSingleObject(events[1], FALSE, &timeout);
     ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
 
@@ -1906,7 +1906,7 @@ static void test_notify(void)
     pNtClose(key);
 
     status = pNtWaitForSingleObject(events[0], FALSE, &timeout);
-    todo_wine ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
+    ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
     status = pNtWaitForSingleObject(events[1], FALSE, &timeout);
     ok(status == STATUS_SUCCESS, "NtWaitForSingleObject returned %x\n", status);
 
