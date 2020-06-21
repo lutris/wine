@@ -15,6 +15,7 @@ C_SRCS = \
 	pread.c \
 	pwrite.c \
 	readlink.c \
+	renameat2.c \
 	rint.c \
 	spawn.c \
 	statvfs.c \
@@ -23,4 +24,5 @@ C_SRCS = \
 	stubs.c \
 	symlink.c \
 	usleep.c \
-	wctype.c
+	wctype.c \
+	xattr.c

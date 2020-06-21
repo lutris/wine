@@ -449,8 +449,24 @@ HRESULT SHELL32_GetItemAttributes (IShellFolder2 *psf, LPCITEMIDLIST pidl, LPDWO
         *pdwAttributes |= SFGAO_FILESYSTEM | SFGAO_DROPTARGET | SFGAO_HASPROPSHEET | SFGAO_CANDELETE | 
                           SFGAO_CANRENAME | SFGAO_CANLINK | SFGAO_CANMOVE | SFGAO_CANCOPY;
 
-	if (dwAttributes & FILE_ATTRIBUTE_DIRECTORY)
-	    *pdwAttributes |=  (SFGAO_FOLDER | SFGAO_HASSUBFOLDER | SFGAO_FILESYSANCESTOR);
+        if (dwAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            IEnumIDList *enum_list;
+            IShellFolder *child;
+
+            *pdwAttributes |= (SFGAO_FOLDER | SFGAO_FILESYSANCESTOR);
+
+            if (SUCCEEDED(IShellFolder2_BindToObject(psf, pidl, NULL, &IID_IShellFolder, (void **)&child)))
+            {
+                if (IShellFolder_EnumObjects(child, NULL, SHCONTF_FOLDERS|SHCONTF_INCLUDEHIDDEN, &enum_list) == S_OK)
+                {
+                    if (IEnumIDList_Skip(enum_list, 1) != S_OK)
+                        *pdwAttributes &= ~SFGAO_HASSUBFOLDER;
+                    IEnumIDList_Release(enum_list);
+                }
+                IShellFolder_Release(child);
+            }
+        }
 	else
 	    *pdwAttributes &= ~(SFGAO_FOLDER | SFGAO_HASSUBFOLDER | SFGAO_FILESYSANCESTOR);
 

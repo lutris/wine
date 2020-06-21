@@ -479,6 +479,7 @@ struct ws2_async_io
 {
     async_callback_t *callback; /* must be the first field */
     struct ws2_async_io *next;
+    DWORD                size;
 };
 
 struct ws2_async_shutdown
@@ -554,17 +555,30 @@ static struct ws2_async_io *alloc_async_io( DWORD size, async_callback_t callbac
 {
     /* first free remaining previous fileinfos */
 
-    struct ws2_async_io *io = InterlockedExchangePointer( (void **)&async_io_freelist, NULL );
+    struct ws2_async_io *old_io = InterlockedExchangePointer( (void **)&async_io_freelist, NULL );
+    struct ws2_async_io *io = NULL;
 
-    while (io)
+    while (old_io)
     {
-        struct ws2_async_io *next = io->next;
-        HeapFree( GetProcessHeap(), 0, io );
-        io = next;
+        if (!io && old_io->size >= size && old_io->size <= max(4096, 4 * size))
+        {
+            io     = old_io;
+            size   = old_io->size;
+            old_io = old_io->next;
+        }
+        else
+        {
+            struct ws2_async_io *next = old_io->next;
+            HeapFree( GetProcessHeap(), 0, old_io );
+            old_io = next;
+        }
     }
 
-    io = HeapAlloc( GetProcessHeap(), 0, size );
-    if (io) io->callback = callback;
+    if (io || (io = HeapAlloc( GetProcessHeap(), 0, size )))
+    {
+        io->callback = callback;
+        io->size = size;
+    }
     return io;
 }
 
@@ -1184,6 +1198,21 @@ static DWORD sock_is_blocking(SOCKET s, BOOL *ret)
     return err;
 }
 
+static DWORD _get_connect_time(SOCKET s)
+{
+    NTSTATUS status;
+    DWORD connect_time = ~0u;
+    SERVER_START_REQ( get_socket_info )
+    {
+        req->handle  = wine_server_obj_handle( SOCKET2HANDLE(s) );
+        status = wine_server_call( req );
+        if (!status)
+            connect_time = reply->connect_time / -10000000;
+    }
+    SERVER_END_REQ;
+    return connect_time;
+}
+
 static unsigned int _get_sock_mask(SOCKET s)
 {
     unsigned int ret;
@@ -1719,13 +1748,24 @@ int WINAPI WSAStartup(WORD wVersionRequested, LPWSADATA lpWSAData)
  */
 INT WINAPI WSACleanup(void)
 {
-    if (num_startup) {
-        num_startup--;
-        TRACE("pending cleanups: %d\n", num_startup);
-        return 0;
+    if (!num_startup)
+    {
+        SetLastError(WSANOTINITIALISED);
+        return SOCKET_ERROR;
     }
-    SetLastError(WSANOTINITIALISED);
-    return SOCKET_ERROR;
+
+    if (!--num_startup)
+    {
+        wine_server_close_fds_by_type( FD_TYPE_SOCKET );
+        SERVER_START_REQ(socket_cleanup)
+        {
+            wine_server_call( req );
+        }
+        SERVER_END_REQ;
+    }
+
+    TRACE("pending cleanups: %d\n", num_startup);
+    return 0;
 }
 
 
@@ -3088,7 +3128,27 @@ static NTSTATUS WS2_transmitfile_base( int fd, struct ws2_transmitfile_async *ws
             return wsaErrStatus();
     }
 
-    return status;
+    if (status != STATUS_SUCCESS)
+        return status;
+
+    if (wsa->flags & TF_REUSE_SOCKET)
+    {
+        SERVER_START_REQ( reuse_socket )
+        {
+            req->handle = wine_server_obj_handle( wsa->write.hSocket );
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        if (status != STATUS_SUCCESS)
+            return status;
+    }
+    if (wsa->flags & TF_DISCONNECT)
+    {
+        /* we can't use WS_closesocket because it modifies the last error */
+        NtClose( SOCKET2HANDLE(wsa->write.hSocket) );
+    }
+
+    return STATUS_SUCCESS;
 }
 
 /***********************************************************************
@@ -3124,6 +3184,7 @@ static BOOL WINAPI WS2_TransmitFile( SOCKET s, HANDLE h, DWORD file_bytes, DWORD
                                      LPOVERLAPPED overlapped, LPTRANSMIT_FILE_BUFFERS buffers,
                                      DWORD flags )
 {
+    DWORD unsupported_flags = flags & ~(TF_DISCONNECT|TF_REUSE_SOCKET);
     union generic_unix_sockaddr uaddr;
     socklen_t uaddrlen = sizeof(uaddr);
     struct ws2_transmitfile_async *wsa;
@@ -3145,8 +3206,8 @@ static BOOL WINAPI WS2_TransmitFile( SOCKET s, HANDLE h, DWORD file_bytes, DWORD
         WSASetLastError( WSAENOTCONN );
         return FALSE;
     }
-    if (flags)
-        FIXME("Flags are not currently supported (0x%x).\n", flags);
+    if (unsupported_flags)
+        FIXME("Flags are not currently supported (0x%x).\n", unsupported_flags);
 
     if (h && GetFileType( h ) != FILE_TYPE_DISK)
     {
@@ -3865,6 +3926,14 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
                 SetLastError(wsaErrno());
                 ret = SOCKET_ERROR;
             }
+        #ifdef __linux__
+            else if (optname == SO_RCVBUF || optname == SO_SNDBUF)
+            {
+                /* For SO_RCVBUF / SO_SNDBUF, the Linux kernel always sets twice the value.
+                 * Divide by two to ensure applications do not get confused by the result. */
+                *(int *)optval /= 2;
+            }
+        #endif
             release_sock_fd( s, fd );
             return ret;
         case WS_SO_ACCEPTCONN:
@@ -3984,7 +4053,6 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
 
         case WS_SO_CONNECT_TIME:
         {
-            static int pretendtime = 0;
             struct WS_sockaddr addr;
             int len = sizeof(addr);
 
@@ -3996,10 +4064,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if (WS_getpeername(s, &addr, &len) == SOCKET_ERROR)
                 *(DWORD *)optval = ~0u;
             else
-            {
-                if (!pretendtime) FIXME("WS_SO_CONNECT_TIME - faking results\n");
-                *(DWORD *)optval = pretendtime++;
-            }
+                *(DWORD *)optval = _get_connect_time(s);
             *optlen = sizeof(DWORD);
             return ret;
         }
@@ -6717,6 +6782,22 @@ static int convert_eai_u2w(int unixret) {
     return unixret;
 }
 
+static char *get_hostname(void)
+{
+    char *ret;
+    DWORD size = 0;
+
+    GetComputerNameExA( ComputerNamePhysicalDnsHostname, NULL, &size );
+    if (GetLastError() != ERROR_MORE_DATA) return NULL;
+    if (!(ret = HeapAlloc( GetProcessHeap(), 0, size ))) return NULL;
+    if (!GetComputerNameExA( ComputerNamePhysicalDnsHostname, ret, &size ))
+    {
+        HeapFree( GetProcessHeap(), 0, ret );
+        return NULL;
+    }
+    return ret;
+}
+
 static char *get_fqdn(void)
 {
     char *ret;
@@ -6742,9 +6823,8 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
     struct addrinfo *unixaires = NULL;
     int   result;
     struct addrinfo unixhints, *punixhints = NULL;
-    char *dot, *nodeV6 = NULL, *fqdn;
+    char *nodeV6 = NULL, *hostname, *fqdn;
     const char *node;
-    size_t hostname_len = 0;
 
     *res = NULL;
     if (!nodename && !servname)
@@ -6753,16 +6833,20 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
         return WSAHOST_NOT_FOUND;
     }
 
+    hostname = get_hostname();
+    if (!hostname) return WSA_NOT_ENOUGH_MEMORY;
+
     fqdn = get_fqdn();
-    if (!fqdn) return WSA_NOT_ENOUGH_MEMORY;
-    dot = strchr(fqdn, '.');
-    if (dot)
-        hostname_len = dot - fqdn;
+    if (!fqdn)
+    {
+        HeapFree(GetProcessHeap(), 0, hostname);
+        return WSA_NOT_ENOUGH_MEMORY;
+    }
 
     if (!nodename)
         node = NULL;
     else if (!nodename[0])
-        node = fqdn;
+        node = hostname;
     else
     {
         node = nodename;
@@ -6777,6 +6861,7 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
                 nodeV6 = HeapAlloc(GetProcessHeap(), 0, close_bracket - node);
                 if (!nodeV6)
                 {
+                    HeapFree(GetProcessHeap(), 0, hostname);
                     HeapFree(GetProcessHeap(), 0, fqdn);
                     return WSA_NOT_ENOUGH_MEMORY;
                 }
@@ -6806,6 +6891,7 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
         if (punixhints->ai_socktype < 0)
         {
             SetLastError(WSAESOCKTNOSUPPORT);
+            HeapFree(GetProcessHeap(), 0, hostname);
             HeapFree(GetProcessHeap(), 0, fqdn);
             HeapFree(GetProcessHeap(), 0, nodeV6);
             return SOCKET_ERROR;
@@ -6831,7 +6917,7 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
     result = getaddrinfo(node, servname, punixhints, &unixaires);
 
     if (result && (!hints || !(hints->ai_flags & WS_AI_NUMERICHOST))
-            && (!strcmp(fqdn, node) || (!strncmp(fqdn, node, hostname_len) && !node[hostname_len])))
+            && (!strcmp(node, hostname) || !strcmp(node, fqdn)))
     {
         /* If it didn't work it means the host name IP is not in /etc/hosts, try again
         * by sending a NULL host and avoid sending a NULL servname too because that
@@ -6840,6 +6926,7 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
         result = getaddrinfo(NULL, servname ? servname : "0", punixhints, &unixaires);
     }
     TRACE("%s, %s %p -> %p %d\n", debugstr_a(nodename), debugstr_a(servname), hints, res, result);
+    HeapFree(GetProcessHeap(), 0, hostname);
     HeapFree(GetProcessHeap(), 0, fqdn);
     HeapFree(GetProcessHeap(), 0, nodeV6);
 

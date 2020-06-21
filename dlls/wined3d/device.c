@@ -1226,6 +1226,29 @@ UINT CDECL wined3d_device_get_available_texture_mem(const struct wined3d_device 
 
     driver_info = &device->adapter->driver_info;
 
+    /* We can not acquire the context unless there is a swapchain. */
+    /*
+    if (device->swapchains && gl_info->supported[NVX_GPU_MEMORY_INFO] &&
+            !wined3d_settings.emulated_textureram)
+    {
+        GLint vram_free_kb;
+        UINT64 vram_free;
+
+        struct wined3d_context *context = context_acquire(device, NULL, 0);
+        gl_info->gl_ops.gl.p_glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &vram_free_kb);
+        vram_free = (UINT64)vram_free_kb * 1024;
+        context_release(context);
+
+        TRACE("Total 0x%s bytes. emulation 0x%s left, driver 0x%s left.\n",
+                wine_dbgstr_longlong(device->adapter->vram_bytes),
+                wine_dbgstr_longlong(device->adapter->vram_bytes - device->adapter->vram_bytes_used),
+                wine_dbgstr_longlong(vram_free));
+
+        vram_free = min(vram_free, device->adapter->vram_bytes - device->adapter->vram_bytes_used);
+        return min(UINT_MAX, vram_free);
+    }
+    */
+
     TRACE("Emulating 0x%s bytes. 0x%s used, returning 0x%s left.\n",
             wine_dbgstr_longlong(driver_info->vram_bytes),
             wine_dbgstr_longlong(device->adapter->vram_bytes_used),
@@ -3500,7 +3523,7 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
     const struct wined3d_saved_states *changed = &stateblock->changed;
     const unsigned int word_bit_count = sizeof(DWORD) * CHAR_BIT;
     BOOL set_blend_state = FALSE, set_rasterizer_state = FALSE;
-    unsigned int i, j, start, idx;
+    unsigned int i, j, start, idx, vs_uniform_count;
     struct wined3d_range range;
     uint32_t map;
 
@@ -3511,9 +3534,11 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
     if (changed->pixelShader)
         wined3d_device_set_pixel_shader(device, state->ps);
 
+    vs_uniform_count = wined3d_device_get_vs_uniform_count(device);
+
     for (start = 0; ; start = range.offset + range.size)
     {
-        if (!wined3d_bitmap_get_range(changed->vs_consts_f, WINED3D_MAX_VS_CONSTS_F, start, &range))
+        if (!wined3d_bitmap_get_range(changed->vs_consts_f, vs_uniform_count, start, &range))
             break;
 
         wined3d_device_set_vs_consts_f(device, range.offset, range.size, &state->vs_consts_f[range.offset]);
@@ -3812,9 +3837,22 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
 
 HRESULT CDECL wined3d_device_get_device_caps(const struct wined3d_device *device, struct wined3d_caps *caps)
 {
+    struct wined3d_vertex_caps vertex_caps;
+    HRESULT hr;
+
     TRACE("device %p, caps %p.\n", device, caps);
 
-    return wined3d_get_device_caps(device->adapter, device->create_parms.device_type, caps);
+    if (FAILED(hr = wined3d_get_device_caps(device->adapter, device->create_parms.device_type, caps)))
+        return hr;
+
+    if (device->create_parms.flags & WINED3DCREATE_SOFTWARE_VERTEXPROCESSING)
+        caps->MaxVertexShaderConst = device->adapter->d3d_info.limits.vs_uniform_count_swvp;
+
+    device->adapter->vertex_pipe->vp_get_caps(device->adapter, &vertex_caps);
+    caps->MaxVertexBlendMatrixIndex = vertex_caps.max_vertex_blend_matrix_index;
+    if (!wined3d_device_is_swvp_mode(device))
+        caps->MaxVertexBlendMatrixIndex = min(caps->MaxVertexBlendMatrixIndex, 8);
+    return hr;
 }
 
 HRESULT CDECL wined3d_device_get_display_mode(const struct wined3d_device *device, UINT swapchain_idx,
@@ -4263,6 +4301,14 @@ void CDECL wined3d_device_set_software_vertex_processing(struct wined3d_device *
         warned = TRUE;
     }
 
+    wined3d_cs_finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
+    if (!device->softwareVertexProcessing != !software)
+    {
+        unsigned int i;
+
+        for (i = 0; i < device->context_count; ++i)
+            device->contexts[i]->constant_update_mask |= WINED3D_SHADER_CONST_VS_F;
+    }
     device->softwareVertexProcessing = software;
 }
 
@@ -4619,8 +4665,6 @@ void CDECL wined3d_device_update_sub_resource(struct wined3d_device *device, str
         WARN("Invalid box %s specified.\n", debug_box(box));
         return;
     }
-
-    wined3d_resource_wait_idle(resource);
 
     wined3d_cs_emit_update_sub_resource(device->cs, resource, sub_resource_idx, box, data, row_pitch, depth_pitch);
 }

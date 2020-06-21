@@ -24,6 +24,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -57,6 +58,13 @@
 #endif
 #ifdef __APPLE__
 # include <mach/mach.h>
+#endif
+
+#if defined(HAVE_LINUX_FILTER_H) && defined(HAVE_LINUX_SECCOMP_H) && defined(HAVE_SYS_PRCTL_H)
+#define HAVE_SECCOMP 1
+# include <linux/filter.h>
+# include <linux/seccomp.h>
+# include <sys/prctl.h>
 #endif
 
 #define NONAMELESSUNION
@@ -355,6 +363,7 @@ static inline void set_sigcontext( const CONTEXT *context, ucontext_t *sigcontex
 #endif
 }
 
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 
 /***********************************************************************
  * Definitions for Win32 unwind tables
@@ -1699,11 +1708,6 @@ static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
     context->SegFs  = FS_sig(sigcontext);
     context->SegGs  = GS_sig(sigcontext);
     context->EFlags = EFL_sig(sigcontext);
-#ifdef DS_sig
-    context->SegDs  = DS_sig(sigcontext);
-#else
-    __asm__("movw %%ds,%0" : "=m" (context->SegDs));
-#endif
 #ifdef ES_sig
     context->SegEs  = ES_sig(sigcontext);
 #else
@@ -1714,6 +1718,12 @@ static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
 #else
     __asm__("movw %%ss,%0" : "=m" (context->SegSs));
 #endif
+   /* Legends of Runeterra depends on having SegDs == SegSs in an exception
+    * handler. Testing shows that Windows returns fixed values from
+    * RtlCaptureContext() and NtGetContextThread() for at least %ds and %es,
+    * regardless of their actual values, and never sets them in
+    * NtSetContextThread(). */
+    context->SegDs  = context->SegSs;
     context->Dr0    = amd64_thread_data()->dr0;
     context->Dr1    = amd64_thread_data()->dr1;
     context->Dr2    = amd64_thread_data()->dr2;
@@ -2519,6 +2529,7 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
     return STATUS_UNHANDLED_EXCEPTION;
 }
 
+NTSTATUS WINAPI __syscall_NtContinue( CONTEXT *context, BOOLEAN alert );
 
 static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
 {
@@ -2581,7 +2592,7 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
     }
 
 done:
-    return NtSetContextThread( GetCurrentThread(), context );
+    return __syscall_NtContinue( context, FALSE );
 }
 
 
@@ -3094,6 +3105,38 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *ucontext )
     restore_context( &context, ucontext );
 }
 
+extern unsigned int __wine_nb_syscalls;
+
+#ifdef HAVE_SECCOMP
+static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+{
+    unsigned int thunk_ret_offset;
+    ucontext_t *ctx = sigcontext;
+    unsigned int syscall_nr;
+    void ***rsp;
+
+    WARN("SIGSYS, rax %#llx.\n", ctx->uc_mcontext.gregs[REG_RAX]);
+
+    syscall_nr = ctx->uc_mcontext.gregs[REG_RAX] - 0xf000;
+    if (syscall_nr >= __wine_nb_syscalls)
+    {
+        ERR("Syscall %u is undefined.\n", syscall_nr);
+        return;
+    }
+
+    rsp = (void ***)&ctx->uc_mcontext.gregs[REG_RSP];
+    *rsp -= 1;
+
+#ifdef __APPLE__
+    thunk_ret_offset = 0xb;
+#else
+    thunk_ret_offset = 0xc;
+#endif
+
+    **rsp = (void *)(ctx->uc_mcontext.gregs[REG_RIP] + thunk_ret_offset);
+    ctx->uc_mcontext.gregs[REG_RIP] = (ULONG64)__wine_syscall_dispatcher;
+}
+#endif
 
 /***********************************************************************
  *           __wine_set_signal_handler   (NTDLL.@)
@@ -3133,6 +3176,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
     }
     return status;
 }
@@ -3263,6 +3307,53 @@ void signal_init_thread( TEB *teb )
 #endif
 }
 
+static void install_bpf(struct sigaction *sig_act)
+{
+#ifdef HAVE_SECCOMP
+    static struct sock_filter filter[] =
+    {
+       BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+                (offsetof(struct seccomp_data, nr))),
+       BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0xf000, 0, 1),
+       BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP),
+       BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    };
+    struct sock_fprog prog;
+    int ret;
+
+    memset(&prog, 0, sizeof(prog));
+    prog.len = ARRAY_SIZE(filter);
+    prog.filter = filter;
+
+    if (!(ret = prctl(PR_GET_SECCOMP, 0, NULL, 0, 0)))
+    {
+        if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0))
+        {
+            perror("prctl(PR_SET_NO_NEW_PRIVS, ...)");
+            exit(1);
+        }
+
+        if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0))
+        {
+            perror("prctl(PR_SET_SECCOMP, ...)");
+            exit(1);
+        }
+    }
+    else
+    {
+        if (ret == 2)
+            TRACE("Seccomp filters already installed.\n");
+        else
+            ERR("Seccomp filters cannot be installed, ret %d, error %s.\n", ret, strerror(errno));
+    }
+
+    sig_act->sa_sigaction = sigsys_handler;
+    sigaction(SIGSYS, sig_act, NULL);
+#else
+    WARN("Built without seccomp.\n");
+#endif
+}
+
 /**********************************************************************
  *		signal_init_process
  */
@@ -3295,6 +3386,9 @@ void signal_init_process(void)
     sig_act.sa_sigaction = trap_handler;
     if (sigaction( SIGTRAP, &sig_act, NULL ) == -1) goto error;
 #endif
+
+    install_bpf(&sig_act);
+
     return;
 
  error:
@@ -3302,6 +3396,12 @@ void signal_init_process(void)
     exit(1);
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
 
 static ULONG64 get_int_reg( CONTEXT *context, int reg )
 {

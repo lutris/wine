@@ -797,8 +797,14 @@ typedef struct _MEMORY_BASIC_INFORMATION
 #define RTL_FIELD_SIZE(type, field) (sizeof(((type *)0)->field))
 #define RTL_SIZEOF_THROUGH_FIELD(type, field) (FIELD_OFFSET(type, field) + RTL_FIELD_SIZE(type, field))
 
-#define CONTAINING_RECORD(address, type, field) \
-  ((type *)((PCHAR)(address) - offsetof(type, field)))
+#ifdef __GNUC__
+# define CONTAINING_RECORD(address, type, field) ({     \
+   const typeof(((type *)0)->field) *__ptr = (address); \
+   (type *)((PCHAR)__ptr - offsetof(type, field)); })
+#else
+# define CONTAINING_RECORD(address, type, field) \
+   ((type *)((PCHAR)(address) - offsetof(type, field)))
+#endif
 
 #ifdef __WINESRC__
 # define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
@@ -4225,6 +4231,11 @@ typedef enum _TOKEN_INFORMATION_CLASS {
 					TOKEN_ADJUST_SESSIONID | \
 					TOKEN_ADJUST_DEFAULT )
 
+#define DISABLE_MAX_PRIVILEGE 0x1
+#define SANDBOX_INERT         0x2
+#define LUA_TOKEN             0x4
+#define WRITE_RESTRICTED      0x8
+
 #ifndef _SECURITY_DEFINED
 #define _SECURITY_DEFINED
 
@@ -6513,6 +6524,8 @@ typedef struct _GROUP_AFFINITY
     WORD Group;
     WORD Reserved[3];
 } GROUP_AFFINITY, *PGROUP_AFFINITY;
+
+#define ALL_PROCESSOR_GROUPS 0xffff
 
 typedef struct _PROCESSOR_NUMBER
 {

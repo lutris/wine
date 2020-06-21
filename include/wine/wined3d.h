@@ -28,6 +28,8 @@
 
 #include "wine/list.h"
 
+DEFINE_GUID(IID_IWineD3DDevice, 0xd56e2a4c, 0x5127, 0x8437, 0x65, 0x8a, 0x98, 0xc5, 0xbb, 0x78, 0x94, 0x98);
+
 #define WINED3D_OK                                              S_OK
 
 #define _FACWINED3D                                             0x876
@@ -1335,6 +1337,7 @@ enum wined3d_shader_type
 #define WINED3D_NO_PRIMITIVE_RESTART                            0x00000800
 #define WINED3D_LEGACY_CUBEMAP_FILTERING                        0x00001000
 #define WINED3D_NORMALIZED_DEPTH_BIAS                           0x00002000
+#define WINED3D_LEGACY_SHADER_CONSTANTS                         0x00004000
 
 #define WINED3D_RESZ_CODE                                       0x7fa05000
 
@@ -1601,6 +1604,7 @@ enum wined3d_shader_type
 #define WINED3D_MAX_CONSTS_B                                    16
 #define WINED3D_MAX_CONSTS_I                                    16
 #define WINED3D_MAX_VS_CONSTS_F                                 256
+#define WINED3D_MAX_VS_CONSTS_F_SWVP                            8192
 #define WINED3D_MAX_PS_CONSTS_F                                 224
 #define WINED3D_MAX_RENDER_TARGETS                              8
 
@@ -1848,6 +1852,13 @@ struct wined3d_map_desc
     UINT row_pitch;
     UINT slice_pitch;
     void *data;
+};
+
+struct wined3d_map_info
+{
+    UINT row_pitch;
+    UINT slice_pitch;
+    UINT size;
 };
 
 struct wined3d_sub_resource_data
@@ -2158,7 +2169,7 @@ struct wined3d_stateblock_state
     int base_vertex_index;
 
     struct wined3d_shader *vs;
-    struct wined3d_vec4 vs_consts_f[WINED3D_MAX_VS_CONSTS_F];
+    struct wined3d_vec4 vs_consts_f[WINED3D_MAX_VS_CONSTS_F_SWVP];
     struct wined3d_ivec4 vs_consts_i[WINED3D_MAX_CONSTS_I];
     BOOL vs_consts_b[WINED3D_MAX_CONSTS_B];
 
@@ -2632,10 +2643,14 @@ void * __cdecl wined3d_resource_get_parent(const struct wined3d_resource *resour
 DWORD __cdecl wined3d_resource_get_priority(const struct wined3d_resource *resource);
 HRESULT __cdecl wined3d_resource_map(struct wined3d_resource *resource, unsigned int sub_resource_idx,
         struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags);
+HRESULT __cdecl wined3d_resource_map_info(struct wined3d_resource *resource, unsigned int sub_resource_idx,
+        struct wined3d_map_info *info, DWORD flags);
 void __cdecl wined3d_resource_preload(struct wined3d_resource *resource);
 void __cdecl wined3d_resource_set_parent(struct wined3d_resource *resource, void *parent);
 DWORD __cdecl wined3d_resource_set_priority(struct wined3d_resource *resource, DWORD priority);
 HRESULT __cdecl wined3d_resource_unmap(struct wined3d_resource *resource, unsigned int sub_resource_idx);
+UINT __cdecl wined3d_resource_update_info(struct wined3d_resource *resource, unsigned int sub_resource_idx,
+        const struct wined3d_box *box, unsigned int row_pitch, unsigned int depth_pitch);
 
 HRESULT __cdecl wined3d_rendertarget_view_create(const struct wined3d_view_desc *desc,
         struct wined3d_resource *resource, void *parent, const struct wined3d_parent_ops *parent_ops,

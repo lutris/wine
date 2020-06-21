@@ -197,6 +197,25 @@ static BOOL has_owned_popups( HWND hwnd )
     return result.found;
 }
 
+static BOOL is_actual_window_rect_mapped(const struct x11drv_win_data *data)
+{
+    XWindowAttributes attr;
+    Window child;
+    RECT rect;
+    POINT pt;
+    int x, y;
+
+    /* Query the X server for the actual position of the window,
+       as some WMs tend to mess with it, so we need to make sure
+       we aren't unmapping the window wrongly with a bogus rect */
+    XTranslateCoordinates(data->display, data->whole_window, root_window, 0, 0, &x, &y, &child);
+    XGetWindowAttributes(data->display, data->whole_window, &attr);
+
+    pt = root_to_virtual_screen(x - attr.x, y - attr.y);
+    SetRect(&rect, pt.x, pt.y, pt.x + attr.width, pt.y + attr.height);
+    return is_window_rect_mapped(&rect);
+}
+
 
 /***********************************************************************
  *              alloc_win_data
@@ -293,7 +312,7 @@ static unsigned long get_mwm_decorations( struct x11drv_win_data *data,
     if (data->shaped) return 0;
 
     if (ex_style & WS_EX_TOOLWINDOW) return 0;
-    if (ex_style & WS_EX_LAYERED) return 0;
+    if ((ex_style & (WS_EX_LAYERED | WS_EX_COMPOSITED)) == WS_EX_LAYERED) return 0;
 
     if ((style & WS_CAPTION) == WS_CAPTION)
     {
@@ -407,14 +426,11 @@ static void sync_window_region( struct x11drv_win_data *data, HRGN win_region )
 
 
 /***********************************************************************
- *              sync_window_opacity
+ *              set_window_opacity
  */
-static void sync_window_opacity( Display *display, Window win,
-                                 COLORREF key, BYTE alpha, DWORD flags )
+static void set_window_opacity( Display *display, Window win, BYTE alpha )
 {
-    unsigned long opacity = 0xffffffff;
-
-    if (flags & LWA_ALPHA) opacity = (0xffffffff / 0xff) * alpha;
+    unsigned long opacity = (0xffffffff / 0xff) * alpha;
 
     if (opacity == 0xffffffff)
         XDeleteProperty( display, win, x11drv_atom(_NET_WM_WINDOW_OPACITY) );
@@ -1543,7 +1559,7 @@ static void create_whole_window( struct x11drv_win_data *data )
 
     /* set the window opacity */
     if (!GetLayeredWindowAttributes( data->hwnd, &key, &alpha, &layered_flags )) layered_flags = 0;
-    sync_window_opacity( data->display, data->whole_window, key, alpha, layered_flags );
+    set_window_opacity( data->display, data->whole_window, (layered_flags & LWA_ALPHA) ? alpha : 0xff );
 
     XFlush( data->display );  /* make sure the window exists before we start painting to it */
 
@@ -1675,7 +1691,7 @@ void CDECL X11DRV_SetWindowStyle( HWND hwnd, INT offset, STYLESTRUCT *style )
     {
         data->layered = FALSE;
         set_window_visual( data, &default_visual, FALSE );
-        sync_window_opacity( data->display, data->whole_window, 0, 0, 0 );
+        set_window_opacity( data->display, data->whole_window, 0xff );
         if (data->surface) set_surface_color_key( data->surface, CLR_INVALID );
     }
 done:
@@ -2056,6 +2072,11 @@ XIC X11DRV_get_ic( HWND hwnd )
     XIM xim;
     XIC ret = 0;
 
+    if (!x11drv_thread_data())
+    {
+        release_win_data( data );
+        return NULL;
+    }
     if (data)
     {
         x11drv_thread_data()->last_xic_hwnd = hwnd;
@@ -2417,7 +2438,8 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
     {
         if (((swp_flags & SWP_HIDEWINDOW) && !(new_style & WS_VISIBLE)) ||
             (!event_type && !(new_style & WS_MINIMIZE) &&
-             !is_window_rect_mapped( rectWindow ) && is_window_rect_mapped( &old_window_rect )))
+             !is_window_rect_mapped( rectWindow ) && is_window_rect_mapped( &old_window_rect ) &&
+             !is_actual_window_rect_mapped( data )))
         {
             release_win_data( data );
             unmap_window( hwnd );
@@ -2440,7 +2462,8 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
             BOOL needs_map = TRUE;
 
             /* layered windows are mapped only once their attributes are set */
-            if (GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_LAYERED) needs_map = data->layered;
+            if ((GetWindowLongW( hwnd, GWL_EXSTYLE ) & (WS_EX_LAYERED | WS_EX_COMPOSITED)) == WS_EX_LAYERED)
+                needs_map = data->layered;
             release_win_data( data );
             if (needs_icon) fetch_icon_data( hwnd, 0, 0 );
             if (needs_map) map_window( hwnd, new_style );
@@ -2593,7 +2616,7 @@ void CDECL X11DRV_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alph
         set_window_visual( data, &default_visual, FALSE );
 
         if (data->whole_window)
-            sync_window_opacity( data->display, data->whole_window, key, alpha, flags );
+            set_window_opacity( data->display, data->whole_window, (flags & LWA_ALPHA) ? alpha : 0xff );
         if (data->surface)
             set_surface_color_key( data->surface, (flags & LWA_COLORKEY) ? key : CLR_INVALID );
 
@@ -2617,7 +2640,7 @@ void CDECL X11DRV_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alph
         Window win = X11DRV_get_whole_window( hwnd );
         if (win)
         {
-            sync_window_opacity( gdi_display, win, key, alpha, flags );
+            set_window_opacity( gdi_display, win, (flags & LWA_ALPHA) ? alpha : 0xff );
             if (flags & LWA_COLORKEY)
                 FIXME( "LWA_COLORKEY not supported on foreign process window %p\n", hwnd );
         }
@@ -2633,7 +2656,6 @@ BOOL CDECL X11DRV_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO 
 {
     struct window_surface *surface;
     struct x11drv_win_data *data;
-    BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, 0 };
     COLORREF color_key = (info->dwFlags & ULW_COLORKEY) ? info->crKey : CLR_INVALID;
     char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
     BITMAPINFO *bmi = (BITMAPINFO *)buffer;
@@ -2661,6 +2683,10 @@ BOOL CDECL X11DRV_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO 
     }
     else set_surface_color_key( surface, color_key );
 
+    if (data->whole_window)
+        set_window_opacity( data->display, data->whole_window,
+                            (info->dwFlags & ULW_ALPHA) ? info->pblend->SourceConstantAlpha : 0xff );
+
     if (surface) window_surface_add_ref( surface );
     release_win_data( data );
 
@@ -2684,16 +2710,15 @@ BOOL CDECL X11DRV_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO 
     {
         IntersectRect( &rect, &rect, info->prcDirty );
         memcpy( src_bits, dst_bits, bmi->bmiHeader.biSizeImage );
-        PatBlt( hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, BLACKNESS );
     }
     src_rect = rect;
     if (info->pptSrc) OffsetRect( &src_rect, info->pptSrc->x, info->pptSrc->y );
     DPtoLP( info->hdcSrc, (POINT *)&src_rect, 2 );
 
-    ret = GdiAlphaBlend( hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
-                         info->hdcSrc, src_rect.left, src_rect.top,
-                         src_rect.right - src_rect.left, src_rect.bottom - src_rect.top,
-                         (info->dwFlags & ULW_ALPHA) ? *info->pblend : blend );
+    ret = StretchBlt( hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
+                      info->hdcSrc, src_rect.left, src_rect.top,
+                      src_rect.right - src_rect.left, src_rect.bottom - src_rect.top,
+                      SRCCOPY );
     if (ret)
     {
         memcpy( dst_bits, src_bits, bmi->bmiHeader.biSizeImage );

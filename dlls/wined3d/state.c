@@ -4488,6 +4488,11 @@ static void state_cb(struct wined3d_context *context, const struct wined3d_state
     unsigned int i, base, count;
 
     TRACE("context %p, state %p, state_id %#x.\n", context, state, state_id);
+    if (context->d3d_info->wined3d_creation_flags & WINED3D_LEGACY_SHADER_CONSTANTS)
+    {
+        WARN("Called in legacy shader constant mode.\n");
+        return;
+    }
 
     if (STATE_IS_GRAPHICS_CONSTANT_BUFFER(state_id))
         shader_type = state_id - STATE_GRAPHICS_CONSTANT_BUFFER(0);
@@ -5481,7 +5486,8 @@ static void prune_invalid_states(struct wined3d_state_entry *state_table, const 
         state_table[i].apply = state_undefined;
     }
 
-    start = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(d3d_info->limits.ffp_vertex_blend_matrices));
+    start = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(max(d3d_info->limits.ffp_vertex_blend_matrices,
+            d3d_info->limits.ffp_max_vertex_blend_matrix_index + 1)));
     last = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(255));
     for (i = start; i <= last; ++i)
     {

@@ -61,6 +61,7 @@ static const struct object_ops snapshot_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -72,6 +73,7 @@ static const struct object_ops snapshot_ops =
     NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
+    no_alloc_handle,              /* alloc_handle */
     no_close_handle,              /* close_handle */
     snapshot_destroy              /* destroy */
 };
@@ -114,13 +116,14 @@ static int snapshot_next_process( struct snapshot *snapshot, struct next_process
         return 0;
     }
     ptr = &snapshot->processes[snapshot->process_pos++];
-    reply->count    = ptr->count;
-    reply->pid      = get_process_id( ptr->process );
-    reply->ppid     = ptr->process->parent_id;
-    reply->threads  = ptr->threads;
-    reply->priority = ptr->priority;
-    reply->handles  = ptr->handles;
-    reply->unix_pid = ptr->process->unix_pid;
+    reply->count      = ptr->count;
+    reply->pid        = get_process_id( ptr->process );
+    reply->ppid       = ptr->process->parent_id;
+    reply->threads    = ptr->threads;
+    reply->priority   = ptr->priority;
+    reply->handles    = ptr->handles;
+    reply->unix_pid   = ptr->process->unix_pid;
+    reply->start_time = ptr->process->start_time;
     if ((exe_module = get_process_exe_module( ptr->process )) && exe_module->filename)
     {
         data_size_t len = min( exe_module->namelen, get_reply_max_size() );
@@ -145,11 +148,13 @@ static int snapshot_next_thread( struct snapshot *snapshot, struct next_thread_r
         return 0;
     }
     ptr = &snapshot->threads[snapshot->thread_pos++];
-    reply->count     = ptr->count;
-    reply->pid       = get_process_id( ptr->thread->process );
-    reply->tid       = get_thread_id( ptr->thread );
-    reply->base_pri  = ptr->priority;
-    reply->delta_pri = 0;  /* FIXME */
+    reply->count         = ptr->count;
+    reply->pid           = get_process_id( ptr->thread->process );
+    reply->tid           = get_thread_id( ptr->thread );
+    reply->creation_time = get_thread_creation_time( ptr->thread );
+    reply->base_pri      = ptr->priority;
+    reply->delta_pri     = 0;  /* FIXME */
+    reply->unix_tid      = get_thread_unix_tid( ptr->thread );
     return 1;
 }
 
