@@ -1,0 +1,275 @@
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Subject: [PATCH v3 1/6] dxgi: Create frame latency event for D3D12 swap chain if requested.
+Message-Id: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+Date: Thu, 16 Apr 2020 18:12:42 +0200
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+---
+v2: Don't set manual-reset flag for the event.
+v3: Fix frame_latency_event type.
+
+ dlls/dxgi/swapchain.c | 30 +++++++++++++++++++++++++++++-
+ 1 file changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/dxgi/swapchain.c b/dlls/dxgi/swapchain.c
+index f19b58da2e..58353ec1b7 100644
+--- a/dlls/dxgi/swapchain.c
++++ b/dlls/dxgi/swapchain.c
+@@ -1094,6 +1094,9 @@ struct d3d12_swapchain
+     IDXGIOutput *target;
+     DXGI_SWAP_CHAIN_DESC1 desc;
+     DXGI_SWAP_CHAIN_FULLSCREEN_DESC fullscreen_desc;
++
++    ID3D12Fence *frame_latency_fence;
++    HANDLE frame_latency_event;
+ };
+ 
+ static DXGI_FORMAT dxgi_format_from_vk_format(VkFormat vk_format)
+@@ -1887,6 +1890,12 @@ static void d3d12_swapchain_destroy(struct d3d12_swapchain *swapchain)
+ 
+     d3d12_swapchain_destroy_buffers(swapchain, TRUE);
+ 
++    if (swapchain->frame_latency_event)
++        CloseHandle(swapchain->frame_latency_event);
++
++    if (swapchain->frame_latency_fence)
++        ID3D12Fence_Release(swapchain->frame_latency_fence);
++
+     if (swapchain->command_queue)
+         ID3D12CommandQueue_Release(swapchain->command_queue);
+ 
+@@ -2906,7 +2915,7 @@ static HRESULT d3d12_swapchain_init(struct d3d12_swapchain *swapchain, IWineDXGI
+         FIXME("Ignoring scaling %#x.\n", swapchain_desc->Scaling);
+     if (swapchain_desc->AlphaMode && swapchain_desc->AlphaMode != DXGI_ALPHA_MODE_IGNORE)
+         FIXME("Ignoring alpha mode %#x.\n", swapchain_desc->AlphaMode);
+-    if (swapchain_desc->Flags)
++    if (swapchain_desc->Flags & ~(DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT))
+         FIXME("Ignoring swapchain flags %#x.\n", swapchain_desc->Flags);
+ 
+     if (fullscreen_desc->RefreshRate.Numerator || fullscreen_desc->RefreshRate.Denominator)
+@@ -2983,6 +2992,25 @@ static HRESULT d3d12_swapchain_init(struct d3d12_swapchain *swapchain, IWineDXGI
+         return hresult_from_vk_result(vr);
+     }
+ 
++    if (swapchain_desc->Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
++    {
++        if (FAILED(hr = ID3D12Device_CreateFence(device, DXGI_MAX_SWAP_CHAIN_BUFFERS,
++                0, &IID_ID3D12Fence, (void **)&swapchain->frame_latency_fence)))
++        {
++            WARN("Failed to create D3D12 fence, hr %d.\n", hr);
++            d3d12_swapchain_destroy(swapchain);
++            return hr;
++        }
++
++        if (!(swapchain->frame_latency_event = CreateEventW(NULL, FALSE, TRUE, NULL)))
++        {
++            hr = HRESULT_FROM_WIN32(GetLastError());
++            WARN("Failed to create frame latency event, hr %d.\n", hr);
++            d3d12_swapchain_destroy(swapchain);
++            return hr;
++        }
++    }
++
+     IWineDXGIFactory_AddRef(swapchain->factory = factory);
+ 
+     return S_OK;
+
+-- 
+2.26.0
+
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Subject: [PATCH v3 2/6] dxgi: Signal frame latency event on present as necessary.
+Message-Id: <20200416161247.23320-2-philip.rebohle@tu-dortmund.de>
+Date: Thu, 16 Apr 2020 18:12:43 +0200
+In-Reply-To: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+References: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+---
+v2: Do not manually reset the event.
+v3: FIXME -> ERR
+
+ dlls/dxgi/swapchain.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/dlls/dxgi/swapchain.c b/dlls/dxgi/swapchain.c
+index 58353ec1b7..bab3a7157e 100644
+--- a/dlls/dxgi/swapchain.c
++++ b/dlls/dxgi/swapchain.c
+@@ -1097,6 +1097,9 @@ struct d3d12_swapchain
+ 
+     ID3D12Fence *frame_latency_fence;
+     HANDLE frame_latency_event;
++
++    uint64_t frame_number;
++    uint32_t frame_latency;
+ };
+ 
+ static DXGI_FORMAT dxgi_format_from_vk_format(VkFormat vk_format)
+@@ -2166,6 +2169,25 @@ static HRESULT d3d12_swapchain_present(struct d3d12_swapchain *swapchain,
+         return hresult_from_vk_result(vr);
+     }
+ 
++    if (swapchain->desc.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
++    {
++        ++swapchain->frame_number;
++
++        if (FAILED(hr = ID3D12CommandQueue_Signal(swapchain->command_queue,
++                swapchain->frame_latency_fence, swapchain->frame_number)))
++        {
++            ERR("Failed to signal frame latency fence, hr %#x.\n", hr);
++            return hr;
++        }
++
++        if (FAILED(hr = ID3D12Fence_SetEventOnCompletion(swapchain->frame_latency_fence,
++                swapchain->frame_number - swapchain->frame_latency, swapchain->frame_latency_event)))
++        {
++            ERR("Failed to enqueue frame latency event, hr %#x.\n", hr);
++            return hr;
++        }
++    }
++
+     swapchain->current_buffer_index = (swapchain->current_buffer_index + 1) % swapchain->desc.BufferCount;
+     vr = d3d12_swapchain_acquire_next_back_buffer(swapchain);
+     if (vr == VK_ERROR_OUT_OF_DATE_KHR)
+@@ -2994,6 +3016,9 @@ static HRESULT d3d12_swapchain_init(struct d3d12_swapchain *swapchain, IWineDXGI
+ 
+     if (swapchain_desc->Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
+     {
++        swapchain->frame_number = DXGI_MAX_SWAP_CHAIN_BUFFERS;
++        swapchain->frame_latency = 1;
++
+         if (FAILED(hr = ID3D12Device_CreateFence(device, DXGI_MAX_SWAP_CHAIN_BUFFERS,
+                 0, &IID_ID3D12Fence, (void **)&swapchain->frame_latency_fence)))
+         {
+
+-- 
+2.26.0
+
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Subject: [PATCH v3 3/6] dxgi: Implement d3d12_swapchain_GetFrameLatencyWaitableObject.
+Message-Id: <20200416161247.23320-3-philip.rebohle@tu-dortmund.de>
+Date: Thu, 16 Apr 2020 18:12:44 +0200
+In-Reply-To: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+References: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+---
+ dlls/dxgi/swapchain.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/dxgi/swapchain.c b/dlls/dxgi/swapchain.c
+index bab3a7157e..afe7cac6c3 100644
+--- a/dlls/dxgi/swapchain.c
++++ b/dlls/dxgi/swapchain.c
+@@ -2621,9 +2621,11 @@ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetMaximumFrameLatency(IDXGISwa
+ 
+ static HANDLE STDMETHODCALLTYPE d3d12_swapchain_GetFrameLatencyWaitableObject(IDXGISwapChain3 *iface)
+ {
+-    FIXME("iface %p stub!\n", iface);
++    struct d3d12_swapchain *swapchain = d3d12_swapchain_from_IDXGISwapChain3(iface);
+ 
+-    return NULL;
++    TRACE("iface %p.\n", iface);
++
++    return swapchain->frame_latency_event;
+ }
+ 
+ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_SetMatrixTransform(IDXGISwapChain3 *iface,
+
+-- 
+2.26.0
+
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Subject: [PATCH v3 4/6] dxgi: Implement d3d12_swapchain_SetMaximumFrameLatency.
+Message-Id: <20200416161247.23320-4-philip.rebohle@tu-dortmund.de>
+Date: Thu, 16 Apr 2020 18:12:45 +0200
+In-Reply-To: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+References: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+---
+v2: Do not manually reset the event.
+v3: FIXME -> WARN, also fix incorrect parameter validation.
+
+ dlls/dxgi/swapchain.c | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/dxgi/swapchain.c b/dlls/dxgi/swapchain.c
+index afe7cac6c3..2590c6735a 100644
+--- a/dlls/dxgi/swapchain.c
++++ b/dlls/dxgi/swapchain.c
+@@ -2607,9 +2607,24 @@ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetSourceSize(IDXGISwapChain3 *
+ 
+ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_SetMaximumFrameLatency(IDXGISwapChain3 *iface, UINT max_latency)
+ {
+-    FIXME("iface %p, max_latency %u stub!\n", iface, max_latency);
++    struct d3d12_swapchain *swapchain = d3d12_swapchain_from_IDXGISwapChain3(iface);
+ 
+-    return E_NOTIMPL;
++    TRACE("iface %p, max_latency %u.\n", iface, max_latency);
++
++    if (!(swapchain->desc.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT))
++    {
++        FIXME("DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT not set for swap chain %p.\n", iface);
++        return DXGI_ERROR_INVALID_CALL;
++    }
++
++    if (!max_latency)
++    {
++        WARN("Invalid maximum frame latency %u.\n", max_latency);
++        return DXGI_ERROR_INVALID_CALL;
++    }
++
++    swapchain->frame_latency = max_latency;
++    return S_OK;
+ }
+ 
+ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetMaximumFrameLatency(IDXGISwapChain3 *iface, UINT *max_latency)
+
+-- 
+2.26.0
+
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Subject: [PATCH v3 5/6] dxgi: Implement d3d12_swapchain_GetMaximumFrameLatency.
+Message-Id: <20200416161247.23320-5-philip.rebohle@tu-dortmund.de>
+Date: Thu, 16 Apr 2020 18:12:46 +0200
+In-Reply-To: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+References: <20200416161247.23320-1-philip.rebohle@tu-dortmund.de>
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+---
+v3: FIXME -> WARN
+
+ dlls/dxgi/swapchain.c | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/dxgi/swapchain.c b/dlls/dxgi/swapchain.c
+index 2590c6735a..b0f20e186b 100644
+--- a/dlls/dxgi/swapchain.c
++++ b/dlls/dxgi/swapchain.c
+@@ -2629,9 +2629,18 @@ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_SetMaximumFrameLatency(IDXGISwa
+ 
+ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetMaximumFrameLatency(IDXGISwapChain3 *iface, UINT *max_latency)
+ {
+-    FIXME("iface %p, max_latency %p stub!\n", iface, max_latency);
++    struct d3d12_swapchain *swapchain = d3d12_swapchain_from_IDXGISwapChain3(iface);
+ 
+-    return E_NOTIMPL;
++    TRACE("iface %p, max_latency %p.\n", iface, max_latency);
++
++    if (!(swapchain->desc.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT))
++    {
++        WARN("DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT not set for swap chain %p.\n", iface);
++        return DXGI_ERROR_INVALID_CALL;
++    }
++
++    *max_latency = swapchain->frame_latency;
++    return S_OK;
+ }
+ 
+ static HANDLE STDMETHODCALLTYPE d3d12_swapchain_GetFrameLatencyWaitableObject(IDXGISwapChain3 *iface)
+
+-- 
+2.26.0
+

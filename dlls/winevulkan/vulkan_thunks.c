@@ -43,7 +43,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
 #if defined(USE_STRUCT_CONVERSION)
-static inline void convert_VkAcquireNextImageInfoKHR_win_to_host(const VkAcquireNextImageInfoKHR *in, VkAcquireNextImageInfoKHR_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkAcquireNextImageInfoKHR_win_to_host(const VkAcquireNextImageInfoKHR *in, VkAcquireNextImageInfoKHR_host *out)
 {
     if (!in) return;
 
@@ -56,7 +56,7 @@ static inline void convert_VkAcquireNextImageInfoKHR_win_to_host(const VkAcquire
     out->deviceMask = in->deviceMask;
 }
 
-static inline void convert_VkAcquireProfilingLockInfoKHR_win_to_host(const VkAcquireProfilingLockInfoKHR *in, VkAcquireProfilingLockInfoKHR_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkAcquireProfilingLockInfoKHR_win_to_host(const VkAcquireProfilingLockInfoKHR *in, VkAcquireProfilingLockInfoKHR_host *out)
 {
     if (!in) return;
 
@@ -66,7 +66,7 @@ static inline void convert_VkAcquireProfilingLockInfoKHR_win_to_host(const VkAcq
     out->timeout = in->timeout;
 }
 
-static inline void convert_VkDescriptorSetAllocateInfo_win_to_host(const VkDescriptorSetAllocateInfo *in, VkDescriptorSetAllocateInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkDescriptorSetAllocateInfo_win_to_host(const VkDescriptorSetAllocateInfo *in, VkDescriptorSetAllocateInfo_host *out)
 {
     if (!in) return;
 
@@ -77,7 +77,7 @@ static inline void convert_VkDescriptorSetAllocateInfo_win_to_host(const VkDescr
     out->pSetLayouts = in->pSetLayouts;
 }
 
-static inline void convert_VkMemoryAllocateInfo_win_to_host(const VkMemoryAllocateInfo *in, VkMemoryAllocateInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkMemoryAllocateInfo_win_to_host(const VkMemoryAllocateInfo *in, VkMemoryAllocateInfo_host *out)
 {
     if (!in) return;
 
@@ -87,14 +87,14 @@ static inline void convert_VkMemoryAllocateInfo_win_to_host(const VkMemoryAlloca
     out->memoryTypeIndex = in->memoryTypeIndex;
 }
 
-static inline VkCommandBufferInheritanceInfo_host *convert_VkCommandBufferInheritanceInfo_array_win_to_host(const VkCommandBufferInheritanceInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkCommandBufferInheritanceInfo_host *convert_VkCommandBufferInheritanceInfo_array_win_to_host(const VkCommandBufferInheritanceInfo *in, uint32_t count)
 {
     VkCommandBufferInheritanceInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -110,14 +110,7 @@ static inline VkCommandBufferInheritanceInfo_host *convert_VkCommandBufferInheri
     return out;
 }
 
-static inline void free_VkCommandBufferInheritanceInfo_array(VkCommandBufferInheritanceInfo_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline void convert_VkCommandBufferBeginInfo_win_to_host(const VkCommandBufferBeginInfo *in, VkCommandBufferBeginInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkCommandBufferBeginInfo_win_to_host(const VkCommandBufferBeginInfo *in, VkCommandBufferBeginInfo_host *out)
 {
     if (!in) return;
 
@@ -127,19 +120,14 @@ static inline void convert_VkCommandBufferBeginInfo_win_to_host(const VkCommandB
     out->pInheritanceInfo = convert_VkCommandBufferInheritanceInfo_array_win_to_host(in->pInheritanceInfo, 1);
 }
 
-static inline void free_VkCommandBufferBeginInfo(VkCommandBufferBeginInfo_host *in)
-{
-    free_VkCommandBufferInheritanceInfo_array((VkCommandBufferInheritanceInfo_host *)in->pInheritanceInfo, 1);
-}
-
-static inline VkBindAccelerationStructureMemoryInfoNV_host *convert_VkBindAccelerationStructureMemoryInfoNV_array_win_to_host(const VkBindAccelerationStructureMemoryInfoNV *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkBindAccelerationStructureMemoryInfoNV_host *convert_VkBindAccelerationStructureMemoryInfoNV_array_win_to_host(const VkBindAccelerationStructureMemoryInfoNV *in, uint32_t count)
 {
     VkBindAccelerationStructureMemoryInfoNV_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -154,21 +142,14 @@ static inline VkBindAccelerationStructureMemoryInfoNV_host *convert_VkBindAccele
     return out;
 }
 
-static inline void free_VkBindAccelerationStructureMemoryInfoNV_array(VkBindAccelerationStructureMemoryInfoNV_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkBindBufferMemoryInfo_host *convert_VkBindBufferMemoryInfo_array_win_to_host(const VkBindBufferMemoryInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkBindBufferMemoryInfo_host *convert_VkBindBufferMemoryInfo_array_win_to_host(const VkBindBufferMemoryInfo *in, uint32_t count)
 {
     VkBindBufferMemoryInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -181,21 +162,14 @@ static inline VkBindBufferMemoryInfo_host *convert_VkBindBufferMemoryInfo_array_
     return out;
 }
 
-static inline void free_VkBindBufferMemoryInfo_array(VkBindBufferMemoryInfo_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkBindImageMemoryInfo_host *convert_VkBindImageMemoryInfo_array_win_to_host(const VkBindImageMemoryInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkBindImageMemoryInfo_host *convert_VkBindImageMemoryInfo_array_win_to_host(const VkBindImageMemoryInfo *in, uint32_t count)
 {
     VkBindImageMemoryInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -208,14 +182,7 @@ static inline VkBindImageMemoryInfo_host *convert_VkBindImageMemoryInfo_array_wi
     return out;
 }
 
-static inline void free_VkBindImageMemoryInfo_array(VkBindImageMemoryInfo_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline void convert_VkConditionalRenderingBeginInfoEXT_win_to_host(const VkConditionalRenderingBeginInfoEXT *in, VkConditionalRenderingBeginInfoEXT_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkConditionalRenderingBeginInfoEXT_win_to_host(const VkConditionalRenderingBeginInfoEXT *in, VkConditionalRenderingBeginInfoEXT_host *out)
 {
     if (!in) return;
 
@@ -226,7 +193,7 @@ static inline void convert_VkConditionalRenderingBeginInfoEXT_win_to_host(const 
     out->flags = in->flags;
 }
 
-static inline void convert_VkRenderPassBeginInfo_win_to_host(const VkRenderPassBeginInfo *in, VkRenderPassBeginInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkRenderPassBeginInfo_win_to_host(const VkRenderPassBeginInfo *in, VkRenderPassBeginInfo_host *out)
 {
     if (!in) return;
 
@@ -239,7 +206,7 @@ static inline void convert_VkRenderPassBeginInfo_win_to_host(const VkRenderPassB
     out->pClearValues = in->pClearValues;
 }
 
-static inline void convert_VkGeometryTrianglesNV_win_to_host(const VkGeometryTrianglesNV *in, VkGeometryTrianglesNV_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkGeometryTrianglesNV_win_to_host(const VkGeometryTrianglesNV *in, VkGeometryTrianglesNV_host *out)
 {
     if (!in) return;
 
@@ -258,7 +225,7 @@ static inline void convert_VkGeometryTrianglesNV_win_to_host(const VkGeometryTri
     out->transformOffset = in->transformOffset;
 }
 
-static inline void convert_VkGeometryAABBNV_win_to_host(const VkGeometryAABBNV *in, VkGeometryAABBNV_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkGeometryAABBNV_win_to_host(const VkGeometryAABBNV *in, VkGeometryAABBNV_host *out)
 {
     if (!in) return;
 
@@ -270,7 +237,7 @@ static inline void convert_VkGeometryAABBNV_win_to_host(const VkGeometryAABBNV *
     out->offset = in->offset;
 }
 
-static inline void convert_VkGeometryDataNV_win_to_host(const VkGeometryDataNV *in, VkGeometryDataNV_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkGeometryDataNV_win_to_host(const VkGeometryDataNV *in, VkGeometryDataNV_host *out)
 {
     if (!in) return;
 
@@ -278,14 +245,14 @@ static inline void convert_VkGeometryDataNV_win_to_host(const VkGeometryDataNV *
     convert_VkGeometryAABBNV_win_to_host(&in->aabbs, &out->aabbs);
 }
 
-static inline VkGeometryNV_host *convert_VkGeometryNV_array_win_to_host(const VkGeometryNV *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkGeometryNV_host *convert_VkGeometryNV_array_win_to_host(const VkGeometryNV *in, uint32_t count)
 {
     VkGeometryNV_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -298,14 +265,7 @@ static inline VkGeometryNV_host *convert_VkGeometryNV_array_win_to_host(const Vk
     return out;
 }
 
-static inline void free_VkGeometryNV_array(VkGeometryNV_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline void convert_VkAccelerationStructureInfoNV_win_to_host(const VkAccelerationStructureInfoNV *in, VkAccelerationStructureInfoNV_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkAccelerationStructureInfoNV_win_to_host(const VkAccelerationStructureInfoNV *in, VkAccelerationStructureInfoNV_host *out)
 {
     if (!in) return;
 
@@ -318,19 +278,14 @@ static inline void convert_VkAccelerationStructureInfoNV_win_to_host(const VkAcc
     out->pGeometries = convert_VkGeometryNV_array_win_to_host(in->pGeometries, in->geometryCount);
 }
 
-static inline void free_VkAccelerationStructureInfoNV(VkAccelerationStructureInfoNV_host *in)
-{
-    free_VkGeometryNV_array((VkGeometryNV_host *)in->pGeometries, in->geometryCount);
-}
-
-static inline VkBufferCopy_host *convert_VkBufferCopy_array_win_to_host(const VkBufferCopy *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkBufferCopy_host *convert_VkBufferCopy_array_win_to_host(const VkBufferCopy *in, uint32_t count)
 {
     VkBufferCopy_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].srcOffset = in[i].srcOffset;
@@ -341,21 +296,14 @@ static inline VkBufferCopy_host *convert_VkBufferCopy_array_win_to_host(const Vk
     return out;
 }
 
-static inline void free_VkBufferCopy_array(VkBufferCopy_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkBufferImageCopy_host *convert_VkBufferImageCopy_array_win_to_host(const VkBufferImageCopy *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkBufferImageCopy_host *convert_VkBufferImageCopy_array_win_to_host(const VkBufferImageCopy *in, uint32_t count)
 {
     VkBufferImageCopy_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].bufferOffset = in[i].bufferOffset;
@@ -369,21 +317,14 @@ static inline VkBufferImageCopy_host *convert_VkBufferImageCopy_array_win_to_hos
     return out;
 }
 
-static inline void free_VkBufferImageCopy_array(VkBufferImageCopy_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkBufferMemoryBarrier_host *convert_VkBufferMemoryBarrier_array_win_to_host(const VkBufferMemoryBarrier *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkBufferMemoryBarrier_host *convert_VkBufferMemoryBarrier_array_win_to_host(const VkBufferMemoryBarrier *in, uint32_t count)
 {
     VkBufferMemoryBarrier_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -400,21 +341,14 @@ static inline VkBufferMemoryBarrier_host *convert_VkBufferMemoryBarrier_array_wi
     return out;
 }
 
-static inline void free_VkBufferMemoryBarrier_array(VkBufferMemoryBarrier_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkImageMemoryBarrier_host *convert_VkImageMemoryBarrier_array_win_to_host(const VkImageMemoryBarrier *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkImageMemoryBarrier_host *convert_VkImageMemoryBarrier_array_win_to_host(const VkImageMemoryBarrier *in, uint32_t count)
 {
     VkImageMemoryBarrier_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -432,21 +366,14 @@ static inline VkImageMemoryBarrier_host *convert_VkImageMemoryBarrier_array_win_
     return out;
 }
 
-static inline void free_VkImageMemoryBarrier_array(VkImageMemoryBarrier_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkDescriptorImageInfo_host *convert_VkDescriptorImageInfo_array_win_to_host(const VkDescriptorImageInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkDescriptorImageInfo_host *convert_VkDescriptorImageInfo_array_win_to_host(const VkDescriptorImageInfo *in, uint32_t count)
 {
     VkDescriptorImageInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sampler = in[i].sampler;
@@ -457,21 +384,14 @@ static inline VkDescriptorImageInfo_host *convert_VkDescriptorImageInfo_array_wi
     return out;
 }
 
-static inline void free_VkDescriptorImageInfo_array(VkDescriptorImageInfo_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkDescriptorBufferInfo_host *convert_VkDescriptorBufferInfo_array_win_to_host(const VkDescriptorBufferInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkDescriptorBufferInfo_host *convert_VkDescriptorBufferInfo_array_win_to_host(const VkDescriptorBufferInfo *in, uint32_t count)
 {
     VkDescriptorBufferInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].buffer = in[i].buffer;
@@ -482,21 +402,14 @@ static inline VkDescriptorBufferInfo_host *convert_VkDescriptorBufferInfo_array_
     return out;
 }
 
-static inline void free_VkDescriptorBufferInfo_array(VkDescriptorBufferInfo_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkWriteDescriptorSet_host *convert_VkWriteDescriptorSet_array_win_to_host(const VkWriteDescriptorSet *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkWriteDescriptorSet_host *convert_VkWriteDescriptorSet_array_win_to_host(const VkWriteDescriptorSet *in, uint32_t count)
 {
     VkWriteDescriptorSet_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -514,21 +427,7 @@ static inline VkWriteDescriptorSet_host *convert_VkWriteDescriptorSet_array_win_
     return out;
 }
 
-static inline void free_VkWriteDescriptorSet_array(VkWriteDescriptorSet_host *in, uint32_t count)
-{
-    unsigned int i;
-
-    if (!in) return;
-
-    for (i = 0; i < count; i++)
-    {
-        free_VkDescriptorImageInfo_array((VkDescriptorImageInfo_host *)in[i].pImageInfo, in[i].descriptorCount);
-        free_VkDescriptorBufferInfo_array((VkDescriptorBufferInfo_host *)in[i].pBufferInfo, in[i].descriptorCount);
-    }
-    heap_free(in);
-}
-
-static inline void convert_VkPerformanceMarkerInfoINTEL_win_to_host(const VkPerformanceMarkerInfoINTEL *in, VkPerformanceMarkerInfoINTEL_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPerformanceMarkerInfoINTEL_win_to_host(const VkPerformanceMarkerInfoINTEL *in, VkPerformanceMarkerInfoINTEL_host *out)
 {
     if (!in) return;
 
@@ -537,7 +436,7 @@ static inline void convert_VkPerformanceMarkerInfoINTEL_win_to_host(const VkPerf
     out->marker = in->marker;
 }
 
-static inline void convert_VkPerformanceOverrideInfoINTEL_win_to_host(const VkPerformanceOverrideInfoINTEL *in, VkPerformanceOverrideInfoINTEL_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPerformanceOverrideInfoINTEL_win_to_host(const VkPerformanceOverrideInfoINTEL *in, VkPerformanceOverrideInfoINTEL_host *out)
 {
     if (!in) return;
 
@@ -548,7 +447,7 @@ static inline void convert_VkPerformanceOverrideInfoINTEL_win_to_host(const VkPe
     out->parameter = in->parameter;
 }
 
-static inline void convert_VkAccelerationStructureCreateInfoNV_win_to_host(const VkAccelerationStructureCreateInfoNV *in, VkAccelerationStructureCreateInfoNV_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkAccelerationStructureCreateInfoNV_win_to_host(const VkAccelerationStructureCreateInfoNV *in, VkAccelerationStructureCreateInfoNV_host *out)
 {
     if (!in) return;
 
@@ -558,7 +457,7 @@ static inline void convert_VkAccelerationStructureCreateInfoNV_win_to_host(const
     convert_VkAccelerationStructureInfoNV_win_to_host(&in->info, &out->info);
 }
 
-static inline void convert_VkBufferCreateInfo_win_to_host(const VkBufferCreateInfo *in, VkBufferCreateInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkBufferCreateInfo_win_to_host(const VkBufferCreateInfo *in, VkBufferCreateInfo_host *out)
 {
     if (!in) return;
 
@@ -572,7 +471,7 @@ static inline void convert_VkBufferCreateInfo_win_to_host(const VkBufferCreateIn
     out->pQueueFamilyIndices = in->pQueueFamilyIndices;
 }
 
-static inline void convert_VkBufferViewCreateInfo_win_to_host(const VkBufferViewCreateInfo *in, VkBufferViewCreateInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkBufferViewCreateInfo_win_to_host(const VkBufferViewCreateInfo *in, VkBufferViewCreateInfo_host *out)
 {
     if (!in) return;
 
@@ -585,7 +484,7 @@ static inline void convert_VkBufferViewCreateInfo_win_to_host(const VkBufferView
     out->range = in->range;
 }
 
-static inline void convert_VkPipelineShaderStageCreateInfo_win_to_host(const VkPipelineShaderStageCreateInfo *in, VkPipelineShaderStageCreateInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPipelineShaderStageCreateInfo_win_to_host(const VkPipelineShaderStageCreateInfo *in, VkPipelineShaderStageCreateInfo_host *out)
 {
     if (!in) return;
 
@@ -598,14 +497,14 @@ static inline void convert_VkPipelineShaderStageCreateInfo_win_to_host(const VkP
     out->pSpecializationInfo = in->pSpecializationInfo;
 }
 
-static inline VkComputePipelineCreateInfo_host *convert_VkComputePipelineCreateInfo_array_win_to_host(const VkComputePipelineCreateInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkComputePipelineCreateInfo_host *convert_VkComputePipelineCreateInfo_array_win_to_host(const VkComputePipelineCreateInfo *in, uint32_t count)
 {
     VkComputePipelineCreateInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -620,14 +519,7 @@ static inline VkComputePipelineCreateInfo_host *convert_VkComputePipelineCreateI
     return out;
 }
 
-static inline void free_VkComputePipelineCreateInfo_array(VkComputePipelineCreateInfo_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline void convert_VkDescriptorUpdateTemplateCreateInfo_win_to_host(const VkDescriptorUpdateTemplateCreateInfo *in, VkDescriptorUpdateTemplateCreateInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkDescriptorUpdateTemplateCreateInfo_win_to_host(const VkDescriptorUpdateTemplateCreateInfo *in, VkDescriptorUpdateTemplateCreateInfo_host *out)
 {
     if (!in) return;
 
@@ -643,7 +535,7 @@ static inline void convert_VkDescriptorUpdateTemplateCreateInfo_win_to_host(cons
     out->set = in->set;
 }
 
-static inline void convert_VkFramebufferCreateInfo_win_to_host(const VkFramebufferCreateInfo *in, VkFramebufferCreateInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkFramebufferCreateInfo_win_to_host(const VkFramebufferCreateInfo *in, VkFramebufferCreateInfo_host *out)
 {
     if (!in) return;
 
@@ -658,14 +550,14 @@ static inline void convert_VkFramebufferCreateInfo_win_to_host(const VkFramebuff
     out->layers = in->layers;
 }
 
-static inline VkPipelineShaderStageCreateInfo_host *convert_VkPipelineShaderStageCreateInfo_array_win_to_host(const VkPipelineShaderStageCreateInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkPipelineShaderStageCreateInfo_host *convert_VkPipelineShaderStageCreateInfo_array_win_to_host(const VkPipelineShaderStageCreateInfo *in, uint32_t count)
 {
     VkPipelineShaderStageCreateInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -680,21 +572,14 @@ static inline VkPipelineShaderStageCreateInfo_host *convert_VkPipelineShaderStag
     return out;
 }
 
-static inline void free_VkPipelineShaderStageCreateInfo_array(VkPipelineShaderStageCreateInfo_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkGraphicsPipelineCreateInfo_host *convert_VkGraphicsPipelineCreateInfo_array_win_to_host(const VkGraphicsPipelineCreateInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkGraphicsPipelineCreateInfo_host *convert_VkGraphicsPipelineCreateInfo_array_win_to_host(const VkGraphicsPipelineCreateInfo *in, uint32_t count)
 {
     VkGraphicsPipelineCreateInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -721,20 +606,7 @@ static inline VkGraphicsPipelineCreateInfo_host *convert_VkGraphicsPipelineCreat
     return out;
 }
 
-static inline void free_VkGraphicsPipelineCreateInfo_array(VkGraphicsPipelineCreateInfo_host *in, uint32_t count)
-{
-    unsigned int i;
-
-    if (!in) return;
-
-    for (i = 0; i < count; i++)
-    {
-        free_VkPipelineShaderStageCreateInfo_array((VkPipelineShaderStageCreateInfo_host *)in[i].pStages, in[i].stageCount);
-    }
-    heap_free(in);
-}
-
-static inline void convert_VkImageViewCreateInfo_win_to_host(const VkImageViewCreateInfo *in, VkImageViewCreateInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkImageViewCreateInfo_win_to_host(const VkImageViewCreateInfo *in, VkImageViewCreateInfo_host *out)
 {
     if (!in) return;
 
@@ -748,14 +620,14 @@ static inline void convert_VkImageViewCreateInfo_win_to_host(const VkImageViewCr
     out->subresourceRange = in->subresourceRange;
 }
 
-static inline VkRayTracingPipelineCreateInfoNV_host *convert_VkRayTracingPipelineCreateInfoNV_array_win_to_host(const VkRayTracingPipelineCreateInfoNV *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkRayTracingPipelineCreateInfoNV_host *convert_VkRayTracingPipelineCreateInfoNV_array_win_to_host(const VkRayTracingPipelineCreateInfoNV *in, uint32_t count)
 {
     VkRayTracingPipelineCreateInfoNV_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -774,51 +646,14 @@ static inline VkRayTracingPipelineCreateInfoNV_host *convert_VkRayTracingPipelin
     return out;
 }
 
-static inline void free_VkRayTracingPipelineCreateInfoNV_array(VkRayTracingPipelineCreateInfoNV_host *in, uint32_t count)
-{
-    unsigned int i;
-
-    if (!in) return;
-
-    for (i = 0; i < count; i++)
-    {
-        free_VkPipelineShaderStageCreateInfo_array((VkPipelineShaderStageCreateInfo_host *)in[i].pStages, in[i].stageCount);
-    }
-    heap_free(in);
-}
-
-static inline void convert_VkSwapchainCreateInfoKHR_win_to_host(const VkSwapchainCreateInfoKHR *in, VkSwapchainCreateInfoKHR_host *out)
-{
-    if (!in) return;
-
-    out->sType = in->sType;
-    out->pNext = in->pNext;
-    out->flags = in->flags;
-    out->surface = in->surface;
-    out->minImageCount = in->minImageCount;
-    out->imageFormat = in->imageFormat;
-    out->imageColorSpace = in->imageColorSpace;
-    out->imageExtent = in->imageExtent;
-    out->imageArrayLayers = in->imageArrayLayers;
-    out->imageUsage = in->imageUsage;
-    out->imageSharingMode = in->imageSharingMode;
-    out->queueFamilyIndexCount = in->queueFamilyIndexCount;
-    out->pQueueFamilyIndices = in->pQueueFamilyIndices;
-    out->preTransform = in->preTransform;
-    out->compositeAlpha = in->compositeAlpha;
-    out->presentMode = in->presentMode;
-    out->clipped = in->clipped;
-    out->oldSwapchain = in->oldSwapchain;
-}
-
-static inline VkMappedMemoryRange_host *convert_VkMappedMemoryRange_array_win_to_host(const VkMappedMemoryRange *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkMappedMemoryRange_host *convert_VkMappedMemoryRange_array_win_to_host(const VkMappedMemoryRange *in, uint32_t count)
 {
     VkMappedMemoryRange_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -831,14 +666,7 @@ static inline VkMappedMemoryRange_host *convert_VkMappedMemoryRange_array_win_to
     return out;
 }
 
-static inline void free_VkMappedMemoryRange_array(VkMappedMemoryRange_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline void convert_VkAccelerationStructureMemoryRequirementsInfoNV_win_to_host(const VkAccelerationStructureMemoryRequirementsInfoNV *in, VkAccelerationStructureMemoryRequirementsInfoNV_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkAccelerationStructureMemoryRequirementsInfoNV_win_to_host(const VkAccelerationStructureMemoryRequirementsInfoNV *in, VkAccelerationStructureMemoryRequirementsInfoNV_host *out)
 {
     if (!in) return;
 
@@ -848,7 +676,7 @@ static inline void convert_VkAccelerationStructureMemoryRequirementsInfoNV_win_t
     out->accelerationStructure = in->accelerationStructure;
 }
 
-static inline void convert_VkMemoryRequirements_host_to_win(const VkMemoryRequirements_host *in, VkMemoryRequirements *out)
+static WINEVULKAN_FORCEINLINE void convert_VkMemoryRequirements_host_to_win(const VkMemoryRequirements_host *in, VkMemoryRequirements *out)
 {
     if (!in) return;
 
@@ -857,7 +685,7 @@ static inline void convert_VkMemoryRequirements_host_to_win(const VkMemoryRequir
     out->memoryTypeBits = in->memoryTypeBits;
 }
 
-static inline void convert_VkMemoryRequirements2KHR_win_to_host(const VkMemoryRequirements2KHR *in, VkMemoryRequirements2KHR_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkMemoryRequirements2KHR_win_to_host(const VkMemoryRequirements2KHR *in, VkMemoryRequirements2KHR_host *out)
 {
     if (!in) return;
 
@@ -865,42 +693,7 @@ static inline void convert_VkMemoryRequirements2KHR_win_to_host(const VkMemoryRe
     out->sType = in->sType;
 }
 
-static inline void convert_VkMemoryRequirements2KHR_host_to_win(const VkMemoryRequirements2KHR_host *in, VkMemoryRequirements2KHR *out)
-{
-    if (!in) return;
-
-    out->sType = in->sType;
-    out->pNext = in->pNext;
-    convert_VkMemoryRequirements_host_to_win(&in->memoryRequirements, &out->memoryRequirements);
-}
-
-static inline void convert_VkBufferDeviceAddressInfo_win_to_host(const VkBufferDeviceAddressInfo *in, VkBufferDeviceAddressInfo_host *out)
-{
-    if (!in) return;
-
-    out->sType = in->sType;
-    out->pNext = in->pNext;
-    out->buffer = in->buffer;
-}
-
-static inline void convert_VkBufferMemoryRequirementsInfo2_win_to_host(const VkBufferMemoryRequirementsInfo2 *in, VkBufferMemoryRequirementsInfo2_host *out)
-{
-    if (!in) return;
-
-    out->sType = in->sType;
-    out->pNext = in->pNext;
-    out->buffer = in->buffer;
-}
-
-static inline void convert_VkMemoryRequirements2_win_to_host(const VkMemoryRequirements2 *in, VkMemoryRequirements2_host *out)
-{
-    if (!in) return;
-
-    out->pNext = in->pNext;
-    out->sType = in->sType;
-}
-
-static inline void convert_VkMemoryRequirements2_host_to_win(const VkMemoryRequirements2_host *in, VkMemoryRequirements2 *out)
+static WINEVULKAN_FORCEINLINE void convert_VkMemoryRequirements2KHR_host_to_win(const VkMemoryRequirements2KHR_host *in, VkMemoryRequirements2KHR *out)
 {
     if (!in) return;
 
@@ -909,7 +702,42 @@ static inline void convert_VkMemoryRequirements2_host_to_win(const VkMemoryRequi
     convert_VkMemoryRequirements_host_to_win(&in->memoryRequirements, &out->memoryRequirements);
 }
 
-static inline void convert_VkDeviceMemoryOpaqueCaptureAddressInfo_win_to_host(const VkDeviceMemoryOpaqueCaptureAddressInfo *in, VkDeviceMemoryOpaqueCaptureAddressInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkBufferDeviceAddressInfo_win_to_host(const VkBufferDeviceAddressInfo *in, VkBufferDeviceAddressInfo_host *out)
+{
+    if (!in) return;
+
+    out->sType = in->sType;
+    out->pNext = in->pNext;
+    out->buffer = in->buffer;
+}
+
+static WINEVULKAN_FORCEINLINE void convert_VkBufferMemoryRequirementsInfo2_win_to_host(const VkBufferMemoryRequirementsInfo2 *in, VkBufferMemoryRequirementsInfo2_host *out)
+{
+    if (!in) return;
+
+    out->sType = in->sType;
+    out->pNext = in->pNext;
+    out->buffer = in->buffer;
+}
+
+static WINEVULKAN_FORCEINLINE void convert_VkMemoryRequirements2_win_to_host(const VkMemoryRequirements2 *in, VkMemoryRequirements2_host *out)
+{
+    if (!in) return;
+
+    out->pNext = in->pNext;
+    out->sType = in->sType;
+}
+
+static WINEVULKAN_FORCEINLINE void convert_VkMemoryRequirements2_host_to_win(const VkMemoryRequirements2_host *in, VkMemoryRequirements2 *out)
+{
+    if (!in) return;
+
+    out->sType = in->sType;
+    out->pNext = in->pNext;
+    convert_VkMemoryRequirements_host_to_win(&in->memoryRequirements, &out->memoryRequirements);
+}
+
+static WINEVULKAN_FORCEINLINE void convert_VkDeviceMemoryOpaqueCaptureAddressInfo_win_to_host(const VkDeviceMemoryOpaqueCaptureAddressInfo *in, VkDeviceMemoryOpaqueCaptureAddressInfo_host *out)
 {
     if (!in) return;
 
@@ -918,7 +746,7 @@ static inline void convert_VkDeviceMemoryOpaqueCaptureAddressInfo_win_to_host(co
     out->memory = in->memory;
 }
 
-static inline void convert_VkImageMemoryRequirementsInfo2_win_to_host(const VkImageMemoryRequirementsInfo2 *in, VkImageMemoryRequirementsInfo2_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkImageMemoryRequirementsInfo2_win_to_host(const VkImageMemoryRequirementsInfo2 *in, VkImageMemoryRequirementsInfo2_host *out)
 {
     if (!in) return;
 
@@ -927,7 +755,7 @@ static inline void convert_VkImageMemoryRequirementsInfo2_win_to_host(const VkIm
     out->image = in->image;
 }
 
-static inline void convert_VkImageSparseMemoryRequirementsInfo2_win_to_host(const VkImageSparseMemoryRequirementsInfo2 *in, VkImageSparseMemoryRequirementsInfo2_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkImageSparseMemoryRequirementsInfo2_win_to_host(const VkImageSparseMemoryRequirementsInfo2 *in, VkImageSparseMemoryRequirementsInfo2_host *out)
 {
     if (!in) return;
 
@@ -936,7 +764,7 @@ static inline void convert_VkImageSparseMemoryRequirementsInfo2_win_to_host(cons
     out->image = in->image;
 }
 
-static inline void convert_VkSubresourceLayout_host_to_win(const VkSubresourceLayout_host *in, VkSubresourceLayout *out)
+static WINEVULKAN_FORCEINLINE void convert_VkSubresourceLayout_host_to_win(const VkSubresourceLayout_host *in, VkSubresourceLayout *out)
 {
     if (!in) return;
 
@@ -947,7 +775,7 @@ static inline void convert_VkSubresourceLayout_host_to_win(const VkSubresourceLa
     out->depthPitch = in->depthPitch;
 }
 
-static inline void convert_VkImageFormatProperties_host_to_win(const VkImageFormatProperties_host *in, VkImageFormatProperties *out)
+static WINEVULKAN_FORCEINLINE void convert_VkImageFormatProperties_host_to_win(const VkImageFormatProperties_host *in, VkImageFormatProperties *out)
 {
     if (!in) return;
 
@@ -958,7 +786,7 @@ static inline void convert_VkImageFormatProperties_host_to_win(const VkImageForm
     out->maxResourceSize = in->maxResourceSize;
 }
 
-static inline void convert_VkImageFormatProperties2_win_to_host(const VkImageFormatProperties2 *in, VkImageFormatProperties2_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkImageFormatProperties2_win_to_host(const VkImageFormatProperties2 *in, VkImageFormatProperties2_host *out)
 {
     if (!in) return;
 
@@ -966,7 +794,7 @@ static inline void convert_VkImageFormatProperties2_win_to_host(const VkImageFor
     out->sType = in->sType;
 }
 
-static inline void convert_VkImageFormatProperties2_host_to_win(const VkImageFormatProperties2_host *in, VkImageFormatProperties2 *out)
+static WINEVULKAN_FORCEINLINE void convert_VkImageFormatProperties2_host_to_win(const VkImageFormatProperties2_host *in, VkImageFormatProperties2 *out)
 {
     if (!in) return;
 
@@ -975,7 +803,7 @@ static inline void convert_VkImageFormatProperties2_host_to_win(const VkImageFor
     convert_VkImageFormatProperties_host_to_win(&in->imageFormatProperties, &out->imageFormatProperties);
 }
 
-static inline void convert_VkMemoryHeap_static_array_host_to_win(const VkMemoryHeap_host *in, VkMemoryHeap *out, uint32_t count)
+static WINEVULKAN_FORCEINLINE void convert_VkMemoryHeap_static_array_host_to_win(const VkMemoryHeap_host *in, VkMemoryHeap *out, uint32_t count)
 {
     unsigned int i;
 
@@ -988,7 +816,7 @@ static inline void convert_VkMemoryHeap_static_array_host_to_win(const VkMemoryH
     }
 }
 
-static inline void convert_VkPhysicalDeviceMemoryProperties_host_to_win(const VkPhysicalDeviceMemoryProperties_host *in, VkPhysicalDeviceMemoryProperties *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPhysicalDeviceMemoryProperties_host_to_win(const VkPhysicalDeviceMemoryProperties_host *in, VkPhysicalDeviceMemoryProperties *out)
 {
     if (!in) return;
 
@@ -998,7 +826,7 @@ static inline void convert_VkPhysicalDeviceMemoryProperties_host_to_win(const Vk
     convert_VkMemoryHeap_static_array_host_to_win(in->memoryHeaps, out->memoryHeaps, VK_MAX_MEMORY_HEAPS);
 }
 
-static inline void convert_VkPhysicalDeviceMemoryProperties2_win_to_host(const VkPhysicalDeviceMemoryProperties2 *in, VkPhysicalDeviceMemoryProperties2_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPhysicalDeviceMemoryProperties2_win_to_host(const VkPhysicalDeviceMemoryProperties2 *in, VkPhysicalDeviceMemoryProperties2_host *out)
 {
     if (!in) return;
 
@@ -1006,7 +834,7 @@ static inline void convert_VkPhysicalDeviceMemoryProperties2_win_to_host(const V
     out->sType = in->sType;
 }
 
-static inline void convert_VkPhysicalDeviceMemoryProperties2_host_to_win(const VkPhysicalDeviceMemoryProperties2_host *in, VkPhysicalDeviceMemoryProperties2 *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPhysicalDeviceMemoryProperties2_host_to_win(const VkPhysicalDeviceMemoryProperties2_host *in, VkPhysicalDeviceMemoryProperties2 *out)
 {
     if (!in) return;
 
@@ -1015,7 +843,7 @@ static inline void convert_VkPhysicalDeviceMemoryProperties2_host_to_win(const V
     convert_VkPhysicalDeviceMemoryProperties_host_to_win(&in->memoryProperties, &out->memoryProperties);
 }
 
-static inline void convert_VkPhysicalDeviceLimits_host_to_win(const VkPhysicalDeviceLimits_host *in, VkPhysicalDeviceLimits *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPhysicalDeviceLimits_host_to_win(const VkPhysicalDeviceLimits_host *in, VkPhysicalDeviceLimits *out)
 {
     if (!in) return;
 
@@ -1127,7 +955,7 @@ static inline void convert_VkPhysicalDeviceLimits_host_to_win(const VkPhysicalDe
     out->nonCoherentAtomSize = in->nonCoherentAtomSize;
 }
 
-static inline void convert_VkPhysicalDeviceProperties_host_to_win(const VkPhysicalDeviceProperties_host *in, VkPhysicalDeviceProperties *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPhysicalDeviceProperties_host_to_win(const VkPhysicalDeviceProperties_host *in, VkPhysicalDeviceProperties *out)
 {
     if (!in) return;
 
@@ -1142,7 +970,7 @@ static inline void convert_VkPhysicalDeviceProperties_host_to_win(const VkPhysic
     out->sparseProperties = in->sparseProperties;
 }
 
-static inline void convert_VkPhysicalDeviceProperties2_win_to_host(const VkPhysicalDeviceProperties2 *in, VkPhysicalDeviceProperties2_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPhysicalDeviceProperties2_win_to_host(const VkPhysicalDeviceProperties2 *in, VkPhysicalDeviceProperties2_host *out)
 {
     if (!in) return;
 
@@ -1150,7 +978,7 @@ static inline void convert_VkPhysicalDeviceProperties2_win_to_host(const VkPhysi
     out->sType = in->sType;
 }
 
-static inline void convert_VkPhysicalDeviceProperties2_host_to_win(const VkPhysicalDeviceProperties2_host *in, VkPhysicalDeviceProperties2 *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPhysicalDeviceProperties2_host_to_win(const VkPhysicalDeviceProperties2_host *in, VkPhysicalDeviceProperties2 *out)
 {
     if (!in) return;
 
@@ -1159,7 +987,7 @@ static inline void convert_VkPhysicalDeviceProperties2_host_to_win(const VkPhysi
     convert_VkPhysicalDeviceProperties_host_to_win(&in->properties, &out->properties);
 }
 
-static inline void convert_VkPhysicalDeviceSurfaceInfo2KHR_win_to_host(const VkPhysicalDeviceSurfaceInfo2KHR *in, VkPhysicalDeviceSurfaceInfo2KHR_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPhysicalDeviceSurfaceInfo2KHR_win_to_host(const VkPhysicalDeviceSurfaceInfo2KHR *in, VkPhysicalDeviceSurfaceInfo2KHR_host *out)
 {
     if (!in) return;
 
@@ -1168,7 +996,7 @@ static inline void convert_VkPhysicalDeviceSurfaceInfo2KHR_win_to_host(const VkP
     out->surface = in->surface;
 }
 
-static inline void convert_VkPipelineExecutableInfoKHR_win_to_host(const VkPipelineExecutableInfoKHR *in, VkPipelineExecutableInfoKHR_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPipelineExecutableInfoKHR_win_to_host(const VkPipelineExecutableInfoKHR *in, VkPipelineExecutableInfoKHR_host *out)
 {
     if (!in) return;
 
@@ -1178,7 +1006,7 @@ static inline void convert_VkPipelineExecutableInfoKHR_win_to_host(const VkPipel
     out->executableIndex = in->executableIndex;
 }
 
-static inline void convert_VkPipelineInfoKHR_win_to_host(const VkPipelineInfoKHR *in, VkPipelineInfoKHR_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkPipelineInfoKHR_win_to_host(const VkPipelineInfoKHR *in, VkPipelineInfoKHR_host *out)
 {
     if (!in) return;
 
@@ -1187,14 +1015,14 @@ static inline void convert_VkPipelineInfoKHR_win_to_host(const VkPipelineInfoKHR
     out->pipeline = in->pipeline;
 }
 
-static inline VkSparseMemoryBind_host *convert_VkSparseMemoryBind_array_win_to_host(const VkSparseMemoryBind *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkSparseMemoryBind_host *convert_VkSparseMemoryBind_array_win_to_host(const VkSparseMemoryBind *in, uint32_t count)
 {
     VkSparseMemoryBind_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].resourceOffset = in[i].resourceOffset;
@@ -1207,21 +1035,14 @@ static inline VkSparseMemoryBind_host *convert_VkSparseMemoryBind_array_win_to_h
     return out;
 }
 
-static inline void free_VkSparseMemoryBind_array(VkSparseMemoryBind_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkSparseBufferMemoryBindInfo_host *convert_VkSparseBufferMemoryBindInfo_array_win_to_host(const VkSparseBufferMemoryBindInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkSparseBufferMemoryBindInfo_host *convert_VkSparseBufferMemoryBindInfo_array_win_to_host(const VkSparseBufferMemoryBindInfo *in, uint32_t count)
 {
     VkSparseBufferMemoryBindInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].buffer = in[i].buffer;
@@ -1232,27 +1053,14 @@ static inline VkSparseBufferMemoryBindInfo_host *convert_VkSparseBufferMemoryBin
     return out;
 }
 
-static inline void free_VkSparseBufferMemoryBindInfo_array(VkSparseBufferMemoryBindInfo_host *in, uint32_t count)
-{
-    unsigned int i;
-
-    if (!in) return;
-
-    for (i = 0; i < count; i++)
-    {
-        free_VkSparseMemoryBind_array((VkSparseMemoryBind_host *)in[i].pBinds, in[i].bindCount);
-    }
-    heap_free(in);
-}
-
-static inline VkSparseImageOpaqueMemoryBindInfo_host *convert_VkSparseImageOpaqueMemoryBindInfo_array_win_to_host(const VkSparseImageOpaqueMemoryBindInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkSparseImageOpaqueMemoryBindInfo_host *convert_VkSparseImageOpaqueMemoryBindInfo_array_win_to_host(const VkSparseImageOpaqueMemoryBindInfo *in, uint32_t count)
 {
     VkSparseImageOpaqueMemoryBindInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].image = in[i].image;
@@ -1263,27 +1071,14 @@ static inline VkSparseImageOpaqueMemoryBindInfo_host *convert_VkSparseImageOpaqu
     return out;
 }
 
-static inline void free_VkSparseImageOpaqueMemoryBindInfo_array(VkSparseImageOpaqueMemoryBindInfo_host *in, uint32_t count)
-{
-    unsigned int i;
-
-    if (!in) return;
-
-    for (i = 0; i < count; i++)
-    {
-        free_VkSparseMemoryBind_array((VkSparseMemoryBind_host *)in[i].pBinds, in[i].bindCount);
-    }
-    heap_free(in);
-}
-
-static inline VkSparseImageMemoryBind_host *convert_VkSparseImageMemoryBind_array_win_to_host(const VkSparseImageMemoryBind *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkSparseImageMemoryBind_host *convert_VkSparseImageMemoryBind_array_win_to_host(const VkSparseImageMemoryBind *in, uint32_t count)
 {
     VkSparseImageMemoryBind_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].subresource = in[i].subresource;
@@ -1297,21 +1092,14 @@ static inline VkSparseImageMemoryBind_host *convert_VkSparseImageMemoryBind_arra
     return out;
 }
 
-static inline void free_VkSparseImageMemoryBind_array(VkSparseImageMemoryBind_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
-}
-
-static inline VkSparseImageMemoryBindInfo_host *convert_VkSparseImageMemoryBindInfo_array_win_to_host(const VkSparseImageMemoryBindInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkSparseImageMemoryBindInfo_host *convert_VkSparseImageMemoryBindInfo_array_win_to_host(const VkSparseImageMemoryBindInfo *in, uint32_t count)
 {
     VkSparseImageMemoryBindInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].image = in[i].image;
@@ -1322,27 +1110,14 @@ static inline VkSparseImageMemoryBindInfo_host *convert_VkSparseImageMemoryBindI
     return out;
 }
 
-static inline void free_VkSparseImageMemoryBindInfo_array(VkSparseImageMemoryBindInfo_host *in, uint32_t count)
-{
-    unsigned int i;
-
-    if (!in) return;
-
-    for (i = 0; i < count; i++)
-    {
-        free_VkSparseImageMemoryBind_array((VkSparseImageMemoryBind_host *)in[i].pBinds, in[i].bindCount);
-    }
-    heap_free(in);
-}
-
-static inline VkBindSparseInfo_host *convert_VkBindSparseInfo_array_win_to_host(const VkBindSparseInfo *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkBindSparseInfo_host *convert_VkBindSparseInfo_array_win_to_host(const VkBindSparseInfo *in, uint32_t count)
 {
     VkBindSparseInfo_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -1362,22 +1137,7 @@ static inline VkBindSparseInfo_host *convert_VkBindSparseInfo_array_win_to_host(
     return out;
 }
 
-static inline void free_VkBindSparseInfo_array(VkBindSparseInfo_host *in, uint32_t count)
-{
-    unsigned int i;
-
-    if (!in) return;
-
-    for (i = 0; i < count; i++)
-    {
-        free_VkSparseBufferMemoryBindInfo_array((VkSparseBufferMemoryBindInfo_host *)in[i].pBufferBinds, in[i].bufferBindCount);
-        free_VkSparseImageOpaqueMemoryBindInfo_array((VkSparseImageOpaqueMemoryBindInfo_host *)in[i].pImageOpaqueBinds, in[i].imageOpaqueBindCount);
-        free_VkSparseImageMemoryBindInfo_array((VkSparseImageMemoryBindInfo_host *)in[i].pImageBinds, in[i].imageBindCount);
-    }
-    heap_free(in);
-}
-
-static inline void convert_VkSemaphoreSignalInfo_win_to_host(const VkSemaphoreSignalInfo *in, VkSemaphoreSignalInfo_host *out)
+static WINEVULKAN_FORCEINLINE void convert_VkSemaphoreSignalInfo_win_to_host(const VkSemaphoreSignalInfo *in, VkSemaphoreSignalInfo_host *out)
 {
     if (!in) return;
 
@@ -1387,14 +1147,14 @@ static inline void convert_VkSemaphoreSignalInfo_win_to_host(const VkSemaphoreSi
     out->value = in->value;
 }
 
-static inline VkCopyDescriptorSet_host *convert_VkCopyDescriptorSet_array_win_to_host(const VkCopyDescriptorSet *in, uint32_t count)
+static WINEVULKAN_FORCEINLINE VkCopyDescriptorSet_host *convert_VkCopyDescriptorSet_array_win_to_host(const VkCopyDescriptorSet *in, uint32_t count)
 {
     VkCopyDescriptorSet_host *out;
     unsigned int i;
 
     if (!in) return NULL;
 
-    out = heap_alloc(count * sizeof(*out));
+    out = WINEVULKAN_ALLOCA(count * sizeof(*out));
     for (i = 0; i < count; i++)
     {
         out[i].sType = in[i].sType;
@@ -1409,13 +1169,6 @@ static inline VkCopyDescriptorSet_host *convert_VkCopyDescriptorSet_array_win_to
     }
 
     return out;
-}
-
-static inline void free_VkCopyDescriptorSet_array(VkCopyDescriptorSet_host *in, uint32_t count)
-{
-    if (!in) return;
-
-    heap_free(in);
 }
 
 #endif /* USE_STRUCT_CONVERSION */
@@ -2572,12 +2325,6 @@ VkResult WINAPI wine_vkAcquireNextImage2KHR(VkDevice device, const VkAcquireNext
 #endif
 }
 
-VkResult WINAPI wine_vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t *pImageIndex)
-{
-    TRACE("%p, 0x%s, 0x%s, 0x%s, 0x%s, %p\n", device, wine_dbgstr_longlong(swapchain), wine_dbgstr_longlong(timeout), wine_dbgstr_longlong(semaphore), wine_dbgstr_longlong(fence), pImageIndex);
-    return device->funcs.p_vkAcquireNextImageKHR(device->device, swapchain, timeout, semaphore, fence, pImageIndex);
-}
-
 static VkResult WINAPI wine_vkAcquirePerformanceConfigurationINTEL(VkDevice device, const VkPerformanceConfigurationAcquireInfoINTEL *pAcquireInfo, VkPerformanceConfigurationINTEL *pConfiguration)
 {
     TRACE("%p, %p, %p\n", device, pAcquireInfo, pConfiguration);
@@ -2645,7 +2392,6 @@ VkResult WINAPI wine_vkBeginCommandBuffer(VkCommandBuffer commandBuffer, const V
     convert_VkCommandBufferBeginInfo_win_to_host(pBeginInfo, &pBeginInfo_host);
     result = commandBuffer->device->funcs.p_vkBeginCommandBuffer(commandBuffer->command_buffer, &pBeginInfo_host);
 
-    free_VkCommandBufferBeginInfo(&pBeginInfo_host);
     return result;
 #else
     TRACE("%p, %p\n", commandBuffer, pBeginInfo);
@@ -2663,7 +2409,6 @@ static VkResult WINAPI wine_vkBindAccelerationStructureMemoryNV(VkDevice device,
     pBindInfos_host = convert_VkBindAccelerationStructureMemoryInfoNV_array_win_to_host(pBindInfos, bindInfoCount);
     result = device->funcs.p_vkBindAccelerationStructureMemoryNV(device->device, bindInfoCount, pBindInfos_host);
 
-    free_VkBindAccelerationStructureMemoryInfoNV_array(pBindInfos_host, bindInfoCount);
     return result;
 #else
     TRACE("%p, %u, %p\n", device, bindInfoCount, pBindInfos);
@@ -2687,7 +2432,6 @@ VkResult WINAPI wine_vkBindBufferMemory2(VkDevice device, uint32_t bindInfoCount
     pBindInfos_host = convert_VkBindBufferMemoryInfo_array_win_to_host(pBindInfos, bindInfoCount);
     result = device->funcs.p_vkBindBufferMemory2(device->device, bindInfoCount, pBindInfos_host);
 
-    free_VkBindBufferMemoryInfo_array(pBindInfos_host, bindInfoCount);
     return result;
 #else
     TRACE("%p, %u, %p\n", device, bindInfoCount, pBindInfos);
@@ -2705,7 +2449,6 @@ static VkResult WINAPI wine_vkBindBufferMemory2KHR(VkDevice device, uint32_t bin
     pBindInfos_host = convert_VkBindBufferMemoryInfo_array_win_to_host(pBindInfos, bindInfoCount);
     result = device->funcs.p_vkBindBufferMemory2KHR(device->device, bindInfoCount, pBindInfos_host);
 
-    free_VkBindBufferMemoryInfo_array(pBindInfos_host, bindInfoCount);
     return result;
 #else
     TRACE("%p, %u, %p\n", device, bindInfoCount, pBindInfos);
@@ -2729,7 +2472,6 @@ VkResult WINAPI wine_vkBindImageMemory2(VkDevice device, uint32_t bindInfoCount,
     pBindInfos_host = convert_VkBindImageMemoryInfo_array_win_to_host(pBindInfos, bindInfoCount);
     result = device->funcs.p_vkBindImageMemory2(device->device, bindInfoCount, pBindInfos_host);
 
-    free_VkBindImageMemoryInfo_array(pBindInfos_host, bindInfoCount);
     return result;
 #else
     TRACE("%p, %u, %p\n", device, bindInfoCount, pBindInfos);
@@ -2747,7 +2489,6 @@ static VkResult WINAPI wine_vkBindImageMemory2KHR(VkDevice device, uint32_t bind
     pBindInfos_host = convert_VkBindImageMemoryInfo_array_win_to_host(pBindInfos, bindInfoCount);
     result = device->funcs.p_vkBindImageMemory2KHR(device->device, bindInfoCount, pBindInfos_host);
 
-    free_VkBindImageMemoryInfo_array(pBindInfos_host, bindInfoCount);
     return result;
 #else
     TRACE("%p, %u, %p\n", device, bindInfoCount, pBindInfos);
@@ -2884,7 +2625,6 @@ static void WINAPI wine_vkCmdBuildAccelerationStructureNV(VkCommandBuffer comman
     convert_VkAccelerationStructureInfoNV_win_to_host(pInfo, &pInfo_host);
     commandBuffer->device->funcs.p_vkCmdBuildAccelerationStructureNV(commandBuffer->command_buffer, &pInfo_host, instanceData, instanceOffset, update, dst, src, scratch, scratchOffset);
 
-    free_VkAccelerationStructureInfoNV(&pInfo_host);
 #else
     TRACE("%p, %p, 0x%s, 0x%s, %u, 0x%s, 0x%s, 0x%s, 0x%s\n", commandBuffer, pInfo, wine_dbgstr_longlong(instanceData), wine_dbgstr_longlong(instanceOffset), update, wine_dbgstr_longlong(dst), wine_dbgstr_longlong(src), wine_dbgstr_longlong(scratch), wine_dbgstr_longlong(scratchOffset));
     commandBuffer->device->funcs.p_vkCmdBuildAccelerationStructureNV(commandBuffer->command_buffer, pInfo, instanceData, instanceOffset, update, dst, src, scratch, scratchOffset);
@@ -2924,7 +2664,6 @@ void WINAPI wine_vkCmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuff
     pRegions_host = convert_VkBufferCopy_array_win_to_host(pRegions, regionCount);
     commandBuffer->device->funcs.p_vkCmdCopyBuffer(commandBuffer->command_buffer, srcBuffer, dstBuffer, regionCount, pRegions_host);
 
-    free_VkBufferCopy_array(pRegions_host, regionCount);
 #else
     TRACE("%p, 0x%s, 0x%s, %u, %p\n", commandBuffer, wine_dbgstr_longlong(srcBuffer), wine_dbgstr_longlong(dstBuffer), regionCount, pRegions);
     commandBuffer->device->funcs.p_vkCmdCopyBuffer(commandBuffer->command_buffer, srcBuffer, dstBuffer, regionCount, pRegions);
@@ -2940,7 +2679,6 @@ void WINAPI wine_vkCmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer 
     pRegions_host = convert_VkBufferImageCopy_array_win_to_host(pRegions, regionCount);
     commandBuffer->device->funcs.p_vkCmdCopyBufferToImage(commandBuffer->command_buffer, srcBuffer, dstImage, dstImageLayout, regionCount, pRegions_host);
 
-    free_VkBufferImageCopy_array(pRegions_host, regionCount);
 #else
     TRACE("%p, 0x%s, 0x%s, %#x, %u, %p\n", commandBuffer, wine_dbgstr_longlong(srcBuffer), wine_dbgstr_longlong(dstImage), dstImageLayout, regionCount, pRegions);
     commandBuffer->device->funcs.p_vkCmdCopyBufferToImage(commandBuffer->command_buffer, srcBuffer, dstImage, dstImageLayout, regionCount, pRegions);
@@ -2962,7 +2700,6 @@ void WINAPI wine_vkCmdCopyImageToBuffer(VkCommandBuffer commandBuffer, VkImage s
     pRegions_host = convert_VkBufferImageCopy_array_win_to_host(pRegions, regionCount);
     commandBuffer->device->funcs.p_vkCmdCopyImageToBuffer(commandBuffer->command_buffer, srcImage, srcImageLayout, dstBuffer, regionCount, pRegions_host);
 
-    free_VkBufferImageCopy_array(pRegions_host, regionCount);
 #else
     TRACE("%p, 0x%s, %#x, 0x%s, %u, %p\n", commandBuffer, wine_dbgstr_longlong(srcImage), srcImageLayout, wine_dbgstr_longlong(dstBuffer), regionCount, pRegions);
     commandBuffer->device->funcs.p_vkCmdCopyImageToBuffer(commandBuffer->command_buffer, srcImage, srcImageLayout, dstBuffer, regionCount, pRegions);
@@ -3160,8 +2897,6 @@ void WINAPI wine_vkCmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineS
     pImageMemoryBarriers_host = convert_VkImageMemoryBarrier_array_win_to_host(pImageMemoryBarriers, imageMemoryBarrierCount);
     commandBuffer->device->funcs.p_vkCmdPipelineBarrier(commandBuffer->command_buffer, srcStageMask, dstStageMask, dependencyFlags, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers_host, imageMemoryBarrierCount, pImageMemoryBarriers_host);
 
-    free_VkBufferMemoryBarrier_array(pBufferMemoryBarriers_host, bufferMemoryBarrierCount);
-    free_VkImageMemoryBarrier_array(pImageMemoryBarriers_host, imageMemoryBarrierCount);
 #else
     TRACE("%p, %#x, %#x, %#x, %u, %p, %u, %p, %u, %p\n", commandBuffer, srcStageMask, dstStageMask, dependencyFlags, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers);
     commandBuffer->device->funcs.p_vkCmdPipelineBarrier(commandBuffer->command_buffer, srcStageMask, dstStageMask, dependencyFlags, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers);
@@ -3183,7 +2918,6 @@ static void WINAPI wine_vkCmdPushDescriptorSetKHR(VkCommandBuffer commandBuffer,
     pDescriptorWrites_host = convert_VkWriteDescriptorSet_array_win_to_host(pDescriptorWrites, descriptorWriteCount);
     commandBuffer->device->funcs.p_vkCmdPushDescriptorSetKHR(commandBuffer->command_buffer, pipelineBindPoint, layout, set, descriptorWriteCount, pDescriptorWrites_host);
 
-    free_VkWriteDescriptorSet_array(pDescriptorWrites_host, descriptorWriteCount);
 #else
     TRACE("%p, %#x, 0x%s, %u, %u, %p\n", commandBuffer, pipelineBindPoint, wine_dbgstr_longlong(layout), set, descriptorWriteCount, pDescriptorWrites);
     commandBuffer->device->funcs.p_vkCmdPushDescriptorSetKHR(commandBuffer->command_buffer, pipelineBindPoint, layout, set, descriptorWriteCount, pDescriptorWrites);
@@ -3397,8 +3131,6 @@ void WINAPI wine_vkCmdWaitEvents(VkCommandBuffer commandBuffer, uint32_t eventCo
     pImageMemoryBarriers_host = convert_VkImageMemoryBarrier_array_win_to_host(pImageMemoryBarriers, imageMemoryBarrierCount);
     commandBuffer->device->funcs.p_vkCmdWaitEvents(commandBuffer->command_buffer, eventCount, pEvents, srcStageMask, dstStageMask, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers_host, imageMemoryBarrierCount, pImageMemoryBarriers_host);
 
-    free_VkBufferMemoryBarrier_array(pBufferMemoryBarriers_host, bufferMemoryBarrierCount);
-    free_VkImageMemoryBarrier_array(pImageMemoryBarriers_host, imageMemoryBarrierCount);
 #else
     TRACE("%p, %u, %p, %#x, %#x, %u, %p, %u, %p, %u, %p\n", commandBuffer, eventCount, pEvents, srcStageMask, dstStageMask, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers);
     commandBuffer->device->funcs.p_vkCmdWaitEvents(commandBuffer->command_buffer, eventCount, pEvents, srcStageMask, dstStageMask, memoryBarrierCount, pMemoryBarriers, bufferMemoryBarrierCount, pBufferMemoryBarriers, imageMemoryBarrierCount, pImageMemoryBarriers);
@@ -3490,7 +3222,6 @@ VkResult WINAPI wine_vkCreateComputePipelines(VkDevice device, VkPipelineCache p
     pCreateInfos_host = convert_VkComputePipelineCreateInfo_array_win_to_host(pCreateInfos, createInfoCount);
     result = device->funcs.p_vkCreateComputePipelines(device->device, pipelineCache, createInfoCount, pCreateInfos_host, NULL, pPipelines);
 
-    free_VkComputePipelineCreateInfo_array(pCreateInfos_host, createInfoCount);
     return result;
 #else
     TRACE("%p, 0x%s, %u, %p, %p, %p\n", device, wine_dbgstr_longlong(pipelineCache), createInfoCount, pCreateInfos, pAllocator, pPipelines);
@@ -3583,7 +3314,6 @@ VkResult WINAPI wine_vkCreateGraphicsPipelines(VkDevice device, VkPipelineCache 
     pCreateInfos_host = convert_VkGraphicsPipelineCreateInfo_array_win_to_host(pCreateInfos, createInfoCount);
     result = device->funcs.p_vkCreateGraphicsPipelines(device->device, pipelineCache, createInfoCount, pCreateInfos_host, NULL, pPipelines);
 
-    free_VkGraphicsPipelineCreateInfo_array(pCreateInfos_host, createInfoCount);
     return result;
 #else
     TRACE("%p, 0x%s, %u, %p, %p, %p\n", device, wine_dbgstr_longlong(pipelineCache), createInfoCount, pCreateInfos, pAllocator, pPipelines);
@@ -3648,7 +3378,6 @@ static VkResult WINAPI wine_vkCreateRayTracingPipelinesNV(VkDevice device, VkPip
     pCreateInfos_host = convert_VkRayTracingPipelineCreateInfoNV_array_win_to_host(pCreateInfos, createInfoCount);
     result = device->funcs.p_vkCreateRayTracingPipelinesNV(device->device, pipelineCache, createInfoCount, pCreateInfos_host, NULL, pPipelines);
 
-    free_VkRayTracingPipelineCreateInfoNV_array(pCreateInfos_host, createInfoCount);
     return result;
 #else
     TRACE("%p, 0x%s, %u, %p, %p, %p\n", device, wine_dbgstr_longlong(pipelineCache), createInfoCount, pCreateInfos, pAllocator, pPipelines);
@@ -3702,23 +3431,6 @@ VkResult WINAPI wine_vkCreateShaderModule(VkDevice device, const VkShaderModuleC
 {
     TRACE("%p, %p, %p, %p\n", device, pCreateInfo, pAllocator, pShaderModule);
     return device->funcs.p_vkCreateShaderModule(device->device, pCreateInfo, NULL, pShaderModule);
-}
-
-VkResult WINAPI wine_vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkSwapchainKHR *pSwapchain)
-{
-#if defined(USE_STRUCT_CONVERSION)
-    VkResult result;
-    VkSwapchainCreateInfoKHR_host pCreateInfo_host;
-    TRACE("%p, %p, %p, %p\n", device, pCreateInfo, pAllocator, pSwapchain);
-
-    convert_VkSwapchainCreateInfoKHR_win_to_host(pCreateInfo, &pCreateInfo_host);
-    result = device->funcs.p_vkCreateSwapchainKHR(device->device, &pCreateInfo_host, NULL, pSwapchain);
-
-    return result;
-#else
-    TRACE("%p, %p, %p, %p\n", device, pCreateInfo, pAllocator, pSwapchain);
-    return device->funcs.p_vkCreateSwapchainKHR(device->device, pCreateInfo, NULL, pSwapchain);
-#endif
 }
 
 static VkResult WINAPI wine_vkCreateValidationCacheEXT(VkDevice device, const VkValidationCacheCreateInfoEXT *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkValidationCacheEXT *pValidationCache)
@@ -3871,12 +3583,6 @@ void WINAPI wine_vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface, 
     instance->funcs.p_vkDestroySurfaceKHR(instance->instance, surface, NULL);
 }
 
-void WINAPI wine_vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks *pAllocator)
-{
-    TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(swapchain), pAllocator);
-    device->funcs.p_vkDestroySwapchainKHR(device->device, swapchain, NULL);
-}
-
 static void WINAPI wine_vkDestroyValidationCacheEXT(VkDevice device, VkValidationCacheEXT validationCache, const VkAllocationCallbacks *pAllocator)
 {
     TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(validationCache), pAllocator);
@@ -3917,7 +3623,6 @@ VkResult WINAPI wine_vkFlushMappedMemoryRanges(VkDevice device, uint32_t memoryR
     pMemoryRanges_host = convert_VkMappedMemoryRange_array_win_to_host(pMemoryRanges, memoryRangeCount);
     result = device->funcs.p_vkFlushMappedMemoryRanges(device->device, memoryRangeCount, pMemoryRanges_host);
 
-    free_VkMappedMemoryRange_array(pMemoryRanges_host, memoryRangeCount);
     return result;
 #else
     TRACE("%p, %u, %p\n", device, memoryRangeCount, pMemoryRanges);
@@ -4127,9 +3832,8 @@ VkResult WINAPI wine_vkGetDeviceGroupPresentCapabilitiesKHR(VkDevice device, VkD
     return device->funcs.p_vkGetDeviceGroupPresentCapabilitiesKHR(device->device, pDeviceGroupPresentCapabilities);
 }
 
-VkResult WINAPI wine_vkGetDeviceGroupSurfacePresentModesKHR(VkDevice device, VkSurfaceKHR surface, VkDeviceGroupPresentModeFlagsKHR *pModes)
+VkResult thunk_vkGetDeviceGroupSurfacePresentModesKHR(VkDevice device, VkSurfaceKHR surface, VkDeviceGroupPresentModeFlagsKHR *pModes)
 {
-    TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(surface), pModes);
     return device->funcs.p_vkGetDeviceGroupSurfacePresentModesKHR(device->device, surface, pModes);
 }
 
@@ -4542,7 +4246,7 @@ static VkResult WINAPI wine_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesC
     return physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV(physicalDevice->phys_dev, pCombinationCount, pCombinations);
 }
 
-static VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, VkSurfaceCapabilities2KHR *pSurfaceCapabilities)
+VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, VkSurfaceCapabilities2KHR *pSurfaceCapabilities)
 {
 #if defined(USE_STRUCT_CONVERSION)
     VkResult result;
@@ -4559,13 +4263,12 @@ static VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysica
 #endif
 }
 
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *pSurfaceCapabilities)
+VkResult thunk_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *pSurfaceCapabilities)
 {
-    TRACE("%p, 0x%s, %p\n", physicalDevice, wine_dbgstr_longlong(surface), pSurfaceCapabilities);
     return physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice->phys_dev, surface, pSurfaceCapabilities);
 }
 
-static VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceFormats2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, uint32_t *pSurfaceFormatCount, VkSurfaceFormat2KHR *pSurfaceFormats)
+VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceFormats2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, uint32_t *pSurfaceFormatCount, VkSurfaceFormat2KHR *pSurfaceFormats)
 {
 #if defined(USE_STRUCT_CONVERSION)
     VkResult result;
@@ -4588,9 +4291,8 @@ VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceFormatsKHR(VkPhysicalDevice physi
     return physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice->phys_dev, surface, pSurfaceFormatCount, pSurfaceFormats);
 }
 
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t *pPresentModeCount, VkPresentModeKHR *pPresentModes)
+VkResult thunk_vkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t *pPresentModeCount, VkPresentModeKHR *pPresentModes)
 {
-    TRACE("%p, 0x%s, %p, %p\n", physicalDevice, wine_dbgstr_longlong(surface), pPresentModeCount, pPresentModes);
     return physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice->phys_dev, surface, pPresentModeCount, pPresentModes);
 }
 
@@ -4711,12 +4413,6 @@ static VkResult WINAPI wine_vkGetShaderInfoAMD(VkDevice device, VkPipeline pipel
     return device->funcs.p_vkGetShaderInfoAMD(device->device, pipeline, shaderStage, infoType, pInfoSize, pInfo);
 }
 
-VkResult WINAPI wine_vkGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t *pSwapchainImageCount, VkImage *pSwapchainImages)
-{
-    TRACE("%p, 0x%s, %p, %p\n", device, wine_dbgstr_longlong(swapchain), pSwapchainImageCount, pSwapchainImages);
-    return device->funcs.p_vkGetSwapchainImagesKHR(device->device, swapchain, pSwapchainImageCount, pSwapchainImages);
-}
-
 static VkResult WINAPI wine_vkGetValidationCacheDataEXT(VkDevice device, VkValidationCacheEXT validationCache, size_t *pDataSize, void *pData)
 {
     TRACE("%p, 0x%s, %p, %p\n", device, wine_dbgstr_longlong(validationCache), pDataSize, pData);
@@ -4739,7 +4435,6 @@ VkResult WINAPI wine_vkInvalidateMappedMemoryRanges(VkDevice device, uint32_t me
     pMemoryRanges_host = convert_VkMappedMemoryRange_array_win_to_host(pMemoryRanges, memoryRangeCount);
     result = device->funcs.p_vkInvalidateMappedMemoryRanges(device->device, memoryRangeCount, pMemoryRanges_host);
 
-    free_VkMappedMemoryRange_array(pMemoryRanges_host, memoryRangeCount);
     return result;
 #else
     TRACE("%p, %u, %p\n", device, memoryRangeCount, pMemoryRanges);
@@ -4775,18 +4470,11 @@ VkResult WINAPI wine_vkQueueBindSparse(VkQueue queue, uint32_t bindInfoCount, co
     pBindInfo_host = convert_VkBindSparseInfo_array_win_to_host(pBindInfo, bindInfoCount);
     result = queue->device->funcs.p_vkQueueBindSparse(queue->queue, bindInfoCount, pBindInfo_host, fence);
 
-    free_VkBindSparseInfo_array(pBindInfo_host, bindInfoCount);
     return result;
 #else
     TRACE("%p, %u, %p, 0x%s\n", queue, bindInfoCount, pBindInfo, wine_dbgstr_longlong(fence));
     return queue->device->funcs.p_vkQueueBindSparse(queue->queue, bindInfoCount, pBindInfo, fence);
 #endif
-}
-
-VkResult WINAPI wine_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo)
-{
-    TRACE("%p, %p\n", queue, pPresentInfo);
-    return queue->device->funcs.p_vkQueuePresentKHR(queue->queue, pPresentInfo);
 }
 
 static VkResult WINAPI wine_vkQueueSetPerformanceConfigurationINTEL(VkQueue queue, VkPerformanceConfigurationINTEL configuration)
@@ -4942,8 +4630,6 @@ void WINAPI wine_vkUpdateDescriptorSets(VkDevice device, uint32_t descriptorWrit
     pDescriptorCopies_host = convert_VkCopyDescriptorSet_array_win_to_host(pDescriptorCopies, descriptorCopyCount);
     device->funcs.p_vkUpdateDescriptorSets(device->device, descriptorWriteCount, pDescriptorWrites_host, descriptorCopyCount, pDescriptorCopies_host);
 
-    free_VkWriteDescriptorSet_array(pDescriptorWrites_host, descriptorWriteCount);
-    free_VkCopyDescriptorSet_array(pDescriptorCopies_host, descriptorCopyCount);
 #else
     TRACE("%p, %u, %p, %u, %p\n", device, descriptorWriteCount, pDescriptorWrites, descriptorCopyCount, pDescriptorCopies);
     device->funcs.p_vkUpdateDescriptorSets(device->device, descriptorWriteCount, pDescriptorWrites, descriptorCopyCount, pDescriptorCopies);
@@ -4970,6 +4656,7 @@ static VkResult WINAPI wine_vkWaitSemaphoresKHR(VkDevice device, const VkSemapho
 
 static const struct vulkan_func vk_device_dispatch_table[] =
 {
+    {"vkAcquireFullScreenExclusiveModeEXT", &wine_vkAcquireFullScreenExclusiveModeEXT},
     {"vkAcquireNextImage2KHR", &wine_vkAcquireNextImage2KHR},
     {"vkAcquireNextImageKHR", &wine_vkAcquireNextImageKHR},
     {"vkAcquirePerformanceConfigurationINTEL", &wine_vkAcquirePerformanceConfigurationINTEL},
@@ -5152,6 +4839,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetDeviceGroupPeerMemoryFeatures", &wine_vkGetDeviceGroupPeerMemoryFeatures},
     {"vkGetDeviceGroupPeerMemoryFeaturesKHR", &wine_vkGetDeviceGroupPeerMemoryFeaturesKHR},
     {"vkGetDeviceGroupPresentCapabilitiesKHR", &wine_vkGetDeviceGroupPresentCapabilitiesKHR},
+    {"vkGetDeviceGroupSurfacePresentModes2EXT", &wine_vkGetDeviceGroupSurfacePresentModes2EXT},
     {"vkGetDeviceGroupSurfacePresentModesKHR", &wine_vkGetDeviceGroupSurfacePresentModesKHR},
     {"vkGetDeviceMemoryCommitment", &wine_vkGetDeviceMemoryCommitment},
     {"vkGetDeviceMemoryOpaqueCaptureAddress", &wine_vkGetDeviceMemoryOpaqueCaptureAddress},
@@ -5193,6 +4881,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkQueueSetPerformanceConfigurationINTEL", &wine_vkQueueSetPerformanceConfigurationINTEL},
     {"vkQueueSubmit", &wine_vkQueueSubmit},
     {"vkQueueWaitIdle", &wine_vkQueueWaitIdle},
+    {"vkReleaseFullScreenExclusiveModeEXT", &wine_vkReleaseFullScreenExclusiveModeEXT},
     {"vkReleasePerformanceConfigurationINTEL", &wine_vkReleasePerformanceConfigurationINTEL},
     {"vkReleaseProfilingLockKHR", &wine_vkReleaseProfilingLockKHR},
     {"vkResetCommandBuffer", &wine_vkResetCommandBuffer},
@@ -5266,6 +4955,7 @@ static const struct vulkan_func vk_instance_dispatch_table[] =
     {"vkGetPhysicalDeviceSurfaceCapabilitiesKHR", &wine_vkGetPhysicalDeviceSurfaceCapabilitiesKHR},
     {"vkGetPhysicalDeviceSurfaceFormats2KHR", &wine_vkGetPhysicalDeviceSurfaceFormats2KHR},
     {"vkGetPhysicalDeviceSurfaceFormatsKHR", &wine_vkGetPhysicalDeviceSurfaceFormatsKHR},
+    {"vkGetPhysicalDeviceSurfacePresentModes2EXT", &wine_vkGetPhysicalDeviceSurfacePresentModes2EXT},
     {"vkGetPhysicalDeviceSurfacePresentModesKHR", &wine_vkGetPhysicalDeviceSurfacePresentModesKHR},
     {"vkGetPhysicalDeviceSurfaceSupportKHR", &wine_vkGetPhysicalDeviceSurfaceSupportKHR},
     {"vkGetPhysicalDeviceToolPropertiesEXT", &wine_vkGetPhysicalDeviceToolPropertiesEXT},
@@ -5335,6 +5025,7 @@ static const char * const vk_device_extensions[] =
     "VK_EXT_filter_cubic",
     "VK_EXT_fragment_density_map",
     "VK_EXT_fragment_shader_interlock",
+    "VK_EXT_full_screen_exclusive",
     "VK_EXT_global_priority",
     "VK_EXT_host_query_reset",
     "VK_EXT_index_type_uint8",
@@ -5441,6 +5132,11 @@ static const char * const vk_device_extensions[] =
     "VK_QCOM_render_pass_transform",
 };
 
+static const VkExtensionProperties vk_device_extension_discards[] =
+{
+    {"VK_EXT_full_screen_exclusive", 4},
+};
+
 static const char * const vk_instance_extensions[] =
 {
     "VK_EXT_headless_surface",
@@ -5464,6 +5160,27 @@ BOOL wine_vk_device_extension_supported(const char *name)
             return TRUE;
     }
     return FALSE;
+}
+
+BOOL wine_vk_device_extension_faked(const char *name)
+{
+    unsigned int i;
+    for (i = 0; i < ARRAY_SIZE(vk_device_extension_discards); i++)
+    {
+        if (strcmp(vk_device_extension_discards[i].extensionName, name) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+unsigned int wine_vk_device_extension_faked_count(void)
+{
+    return ARRAY_SIZE(vk_device_extension_discards);
+}
+
+const VkExtensionProperties* wine_vk_device_extension_faked_idx(unsigned int idx)
+{
+    return &vk_device_extension_discards[idx];
 }
 
 BOOL wine_vk_instance_extension_supported(const char *name)

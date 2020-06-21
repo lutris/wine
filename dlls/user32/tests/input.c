@@ -46,7 +46,6 @@
  */
 
 #include <stdarg.h>
-#include <stdio.h>
 #include <assert.h>
 
 #include "windef.h"
@@ -55,6 +54,9 @@
 #include "wingdi.h"
 #include "winnls.h"
 #include "ddk/hidsdi.h"
+#include "dbt.h"
+#include "initguid.h"
+#include "ddk/hidclass.h"
 
 #include "wine/test.h"
 
@@ -1823,330 +1825,6 @@ static void test_RegisterRawInputDevices(void)
     DestroyWindow(hwnd);
 }
 
-static int rawinput_received;
-static int rawinput_received_foreground;
-static int rawinput_motion_x;
-static int rawinput_motion_y;
-static HANDLE rawinput_wndproc_done;
-
-static LRESULT CALLBACK rawinput_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
-{
-    UINT ret, raw_size;
-    RAWINPUT raw;
-
-    if (msg == WM_INPUT)
-    {
-        rawinput_received++;
-
-        ok(wparam == RIM_INPUT || wparam == RIM_INPUTSINK, "Unexpected wparam: %lu\n", wparam);
-        if (wparam == RIM_INPUT)
-            rawinput_received_foreground++;
-
-        ret = GetRawInputData((HRAWINPUT)lparam, RID_INPUT, NULL, &raw_size, sizeof(RAWINPUTHEADER));
-        ok(ret == 0, "GetRawInputData failed\n");
-        ok(raw_size <= sizeof(raw), "Unexpected rawinput data size: %u", raw_size);
-
-        if (raw_size <= sizeof(raw))
-        {
-            ret = GetRawInputData((HRAWINPUT)lparam, RID_INPUT, &raw, &raw_size, sizeof(RAWINPUTHEADER));
-            ok(ret > 0 && ret != (UINT)-1, "GetRawInputData failed\n");
-            ok(raw.header.dwType == RIM_TYPEMOUSE, "Unexpected rawinput type: %u\n", raw.header.dwType);
-
-            if (raw.header.dwType == RIM_TYPEMOUSE)
-            {
-                ok(!(raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE), "Unexpected absolute rawinput motion\n");
-                ok(!(raw.data.mouse.usFlags & MOUSE_VIRTUAL_DESKTOP), "Unexpected virtual desktop rawinput motion\n");
-                rawinput_motion_x += raw.data.mouse.lLastX;
-                rawinput_motion_y += raw.data.mouse.lLastY;
-            }
-        }
-    }
-
-    if (msg == WM_USER)
-        SetEvent(rawinput_wndproc_done);
-
-    return DefWindowProcA(hwnd, msg, wparam, lparam);
-}
-
-struct rawinput_mouse_thread_params
-{
-    int step;
-    HWND window;
-    HANDLE ready;
-    HANDLE start;
-    const char *argv0;
-};
-
-static void rawinput_mouse_process(void)
-{
-    HWND window;
-    HANDLE start_event, stop_event;
-
-    start_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "test_rawinput_mouse_start");
-    ok(start_event != 0, "OpenEventA failed, error: %u\n", GetLastError());
-
-    stop_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "test_rawinput_mouse_stop");
-    ok(stop_event != 0, "OpenEventA failed, error: %u\n", GetLastError());
-
-    window = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP, 200, 100, 100, 100, 0, NULL, NULL, NULL);
-    ok(window != 0, "CreateWindow failed\n");
-
-    ShowWindow(window, SW_SHOW);
-    SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
-    SetForegroundWindow(window);
-    UpdateWindow(window);
-    empty_message_queue();
-
-    SetEvent(start_event);
-    while (MsgWaitForMultipleObjects(1, &stop_event, FALSE, INFINITE, QS_ALLINPUT) != WAIT_OBJECT_0)
-	    empty_message_queue();
-
-    DestroyWindow(window);
-}
-
-static DWORD WINAPI rawinput_mouse_thread(void *arg)
-{
-    struct rawinput_mouse_thread_params *params = arg;
-    RECT rect_105 = { 105, 105, 105, 105 };
-    RECT rect_110 = { 110, 110, 110, 110 };
-    HWND window;
-    int i;
-    char path[MAX_PATH];
-    PROCESS_INFORMATION process_info;
-    STARTUPINFOA startup_info;
-    HANDLE start_event, stop_event;
-    BOOL ret;
-
-    while (WaitForSingleObject(params->ready, INFINITE) == 0)
-    {
-        ResetEvent(params->ready);
-        SetEvent(params->start);
-
-        switch (params->step)
-        {
-            case 0:
-            case 1:
-            case 2:
-                mouse_event(MOUSEEVENTF_MOVE, -1, 0, 0, 0);
-                mouse_event(MOUSEEVENTF_MOVE, 0, -1, 0, 0);
-                break;
-            case 3:
-                for (i = 0; i < 10; ++i)
-                {
-                    ClipCursor(&rect_105);
-                    Sleep(5);
-                    ClipCursor(&rect_110);
-                    Sleep(5);
-                    ClipCursor(NULL);
-                    Sleep(5);
-                }
-                break;
-            case 4:
-                for (i = 0; i < 10; ++i)
-                {
-                    ClipCursor(&rect_110);
-                    Sleep(5);
-                    mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
-                    ClipCursor(NULL);
-                    Sleep(5);
-                    mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
-                    ClipCursor(&rect_110);
-                    ClipCursor(NULL);
-                    Sleep(5);
-                }
-                break;
-            case 5:
-            case 6:
-                window = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP, 100, 100, 100, 100, 0, NULL, NULL, NULL);
-                ok(window != 0, "%d: CreateWindow failed\n", params->step);
-
-                ShowWindow(window, SW_SHOW);
-                SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
-                SetForegroundWindow(window);
-                UpdateWindow(window);
-                empty_message_queue();
-
-                mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
-                SendMessageA(GetForegroundWindow(), WM_USER, 0, 0);
-                mouse_event(MOUSEEVENTF_MOVE, -1, -1, 0, 0);
-                SendMessageA(GetForegroundWindow(), WM_USER, 0, 0);
-
-                empty_message_queue();
-
-                DestroyWindow(window);
-                break;
-            case 7:
-            case 8:
-                start_event = CreateEventA(NULL, 0, 0, "test_rawinput_mouse_start");
-                ok(start_event != 0, "%d: CreateEventA failed, error %u\n", params->step, GetLastError());
-
-                stop_event = CreateEventA(NULL, 0, 0, "test_rawinput_mouse_stop");
-                ok(stop_event != 0, "%d: CreateEventA failed, error %u\n", params->step, GetLastError());
-
-                memset(&startup_info, 0, sizeof(startup_info));
-                startup_info.cb = sizeof(startup_info);
-                startup_info.dwFlags = STARTF_USESHOWWINDOW;
-                startup_info.wShowWindow = SW_SHOWNORMAL;
-
-                sprintf(path, "%s input test_rawinput_mouse", params->argv0);
-                ret = CreateProcessA(NULL, path, NULL, NULL, TRUE, 0, NULL, NULL, &startup_info, &process_info );
-                ok(ret, "%d: CreateProcess '%s' failed err %u.\n", params->step, path, GetLastError());
-
-                ret = WaitForSingleObject(start_event, 5000);
-                ok(ret == WAIT_OBJECT_0, "%d: WaitForSingleObject failed\n", params->step);
-
-                mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
-                SendMessageA(GetForegroundWindow(), WM_USER, 0, 0);
-                mouse_event(MOUSEEVENTF_MOVE, -1, -1, 0, 0);
-                SendMessageA(GetForegroundWindow(), WM_USER, 0, 0);
-
-                SetEvent(stop_event);
-
-                winetest_wait_child_process(process_info.hProcess);
-                CloseHandle(process_info.hProcess);
-                CloseHandle(process_info.hThread);
-                CloseHandle(start_event);
-                CloseHandle(stop_event);
-                break;
-            default:
-                return 0;
-        }
-
-        PostMessageA(params->window, WM_USER, 0, 0);
-    }
-
-    return 0;
-}
-
-struct rawinput_mouse_test
-{
-    BOOL register_device;
-    BOOL register_window;
-    DWORD register_flags;
-    int expect_received;
-    int expect_received_foreground;
-    int expect_motion_x;
-    int expect_motion_y;
-    BOOL todo;
-};
-
-static void test_rawinput_mouse(const char *argv0)
-{
-    struct rawinput_mouse_thread_params params;
-    RAWINPUTDEVICE raw_devices[1];
-    HANDLE thread;
-    DWORD ret;
-    int i;
-
-    struct rawinput_mouse_test tests[] =
-    {
-        { FALSE, FALSE, 0, 0, 0, 0, 0, FALSE },
-        { TRUE, FALSE, 0, 2, 2, -1, -1, FALSE },
-        { TRUE, TRUE, 0, 2, 2, -1, -1, FALSE },
-
-        /* clip cursor tests */
-        { TRUE, TRUE, 0, 0, 0, 0, 0, FALSE },
-        { TRUE, TRUE, 0, 20, 20, 20, 20, FALSE },
-
-        /* same-process foreground tests */
-        { TRUE, TRUE, 0, 2, 2, 0, 0, FALSE },
-        { TRUE, TRUE, RIDEV_INPUTSINK, 2, 2, 0, 0, FALSE },
-
-        /* cross-process foreground tests */
-        { TRUE, TRUE, 0, 0, 0, 0, 0, FALSE },
-        { TRUE, TRUE, RIDEV_INPUTSINK, 2, 0, 0, 0, TRUE },
-    };
-
-    mouse_event(MOUSEEVENTF_ABSOLUTE, 100, 100, 0, 0);
-    SetCursorPos(100, 100);
-
-    params.argv0 = argv0;
-
-    rawinput_wndproc_done = CreateEventA(NULL, FALSE, FALSE, NULL);
-    ok(rawinput_wndproc_done != NULL, "CreateEvent failed\n");
-
-    params.window = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP, 100, 100, 100, 100, 0, NULL, NULL, NULL);
-    ok(params.window != 0, "CreateWindow failed\n");
-
-    ShowWindow(params.window, SW_SHOW);
-    SetWindowPos(params.window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
-    SetForegroundWindow(params.window);
-    UpdateWindow(params.window);
-    empty_message_queue();
-
-    SetWindowLongPtrA(params.window, GWLP_WNDPROC, (LONG_PTR)rawinput_wndproc);
-
-    params.step = 0;
-    params.ready = CreateEventA(NULL, FALSE, FALSE, NULL);
-    ok(params.ready != NULL, "CreateEvent failed\n");
-
-    params.start = CreateEventA(NULL, FALSE, FALSE, NULL);
-    ok(params.start != NULL, "CreateEvent failed\n");
-
-    thread = CreateThread(NULL, 0, rawinput_mouse_thread, &params, 0, NULL);
-    ok(thread != NULL, "CreateThread failed\n");
-
-    for (i = 0; i < ARRAY_SIZE(tests); ++i)
-    {
-        rawinput_received = 0;
-        rawinput_received_foreground = 0;
-        rawinput_motion_x = 0;
-        rawinput_motion_y = 0;
-
-        raw_devices[0].usUsagePage = 0x01;
-        raw_devices[0].usUsage = 0x02;
-        raw_devices[0].dwFlags = tests[i].register_flags;
-        raw_devices[0].hwndTarget = tests[i].register_window ? params.window : 0;
-
-        if (tests[i].register_device)
-        {
-            SetLastError(0xdeadbeef);
-            ret = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
-            ok(ret, "%d: RegisterRawInputDevices failed\n", i);
-            ok(GetLastError() == 0xdeadbeef, "%d: RegisterRawInputDevices returned %08x\n", i, GetLastError());
-        }
-
-        params.step = i;
-        SetEvent(params.ready);
-
-        WaitForSingleObject(params.start, INFINITE);
-        ResetEvent(params.start);
-
-        while (MsgWaitForMultipleObjects(1, &rawinput_wndproc_done, FALSE, INFINITE, QS_ALLINPUT) != WAIT_OBJECT_0)
-            empty_message_queue();
-        ResetEvent(rawinput_wndproc_done);
-
-        /* Wine is sometimes passing some of the conditions, but not always, let's test
-         * all at once in the todo block, there should be at least one that fails. */
-        todo_wine_if(tests[i].todo)
-        ok(rawinput_received == tests[i].expect_received &&
-           rawinput_received_foreground == tests[i].expect_received_foreground &&
-           rawinput_motion_x == tests[i].expect_motion_x &&
-           rawinput_motion_y == tests[i].expect_motion_y,
-           "%d: Unexpected rawinput results: received %d, %d in foreground, motion is %dx%d\n",
-           i, rawinput_received, rawinput_received_foreground, rawinput_motion_x, rawinput_motion_y);
-
-        if (tests[i].register_device)
-        {
-            raw_devices[0].dwFlags = RIDEV_REMOVE;
-            raw_devices[0].hwndTarget = 0;
-
-            SetLastError(0xdeadbeef);
-            ret = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
-            ok(ret, "%d: RegisterRawInputDevices failed\n", i);
-            ok(GetLastError() == 0xdeadbeef, "%d: RegisterRawInputDevices returned %08x\n", i, GetLastError());
-        }
-    }
-
-    params.step = -1;
-    SetEvent(params.ready);
-    WaitForSingleObject(thread, INFINITE);
-
-    CloseHandle(params.start);
-    CloseHandle(params.ready);
-    CloseHandle(thread);
-}
-
 static void test_key_map(void)
 {
     HKL kl = GetKeyboardLayout(0);
@@ -3622,21 +3300,75 @@ static void test_GetKeyboardLayoutList(void)
     }
 }
 
+static void test_RegisterDeviceNotification(void)
+{
+    static const WCHAR mainwindowclassW[] = {'M','a','i','n','W','i','n','d','o','w','C','l','a','s','s',0};
+    static const WCHAR message_windowW[] = {'m','e','s','s','a','g','e',' ','w','i','n','d','o','w',0};
+
+    HDEVNOTIFY hnotify1, hnotify2;
+    DEV_BROADCAST_DEVICEINTERFACE_W dbh;
+    HWND hwnd;
+    WNDCLASSEXW cls;
+    BOOL ret;
+
+    memset(&cls, 0, sizeof(cls));
+    cls.cbSize = sizeof(cls);
+    cls.hInstance = 0;
+    cls.lpszClassName = mainwindowclassW;
+    cls.lpfnWndProc = DefWindowProcW;
+
+    RegisterClassExW(&cls);
+
+    hwnd = CreateWindowExW(0, mainwindowclassW, message_windowW, 0,
+                           0, 0, 0, 0, HWND_MESSAGE, 0, 0, NULL);
+    ok(hwnd != 0, "CreateWindowExW with parent HWND_MESSAGE failed\n");
+
+    memset(&dbh, 0, sizeof(dbh));
+
+    dbh.dbcc_size = sizeof(dbh);
+    dbh.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    dbh.dbcc_classguid = GUID_DEVINTERFACE_HID;
+
+    /* Test RegisterDeviceNotification behavior */
+
+    /* Prior to Windows 8 a NULL recipient handle caused a failure, but more
+     * recent versions of windows allow it.
+     */
+    hnotify1 = RegisterDeviceNotificationW(NULL, &dbh, DEVICE_NOTIFY_WINDOW_HANDLE);
+    /* ok(hnotify1 != 0, "RegisterDeviceNotificationW failed when called with a NULL recipient window handle\n"); */
+    if (hnotify1 != 0)
+    {
+        ret = UnregisterDeviceNotification(hnotify1);
+        ok(ret, "UnregisterDeviceNotification failed with a valid handle\n");
+    }
+
+    hnotify1 = RegisterDeviceNotificationW(hwnd, &dbh, DEVICE_NOTIFY_WINDOW_HANDLE);
+    ok(hnotify1 != 0, "RegisterDeviceNotificationW failed when called with a message only window as recipient\n");
+
+    hnotify2 = RegisterDeviceNotificationW(hwnd, &dbh, DEVICE_NOTIFY_WINDOW_HANDLE);
+    ok(hnotify2 != 0, "RegisterDeviceNotificationW failed when called with a window that has already been registered as a recipient\n");
+
+    ret = UnregisterDeviceNotification(hnotify1);
+    ok(ret, "UnregisterDeviceNotification failed with a valid handle\n");
+    ret = UnregisterDeviceNotification(hnotify2);
+    ok(ret, "UnregisterDeviceNotification failed with a valid handle\n");
+    ret = UnregisterDeviceNotification(hnotify1);
+    ok(!ret, "UnregisterDeviceNotification succeeded with an already released handle\n");
+    ret = UnregisterDeviceNotification(NULL);
+    ok(!ret, "UnregisterDeviceNotification succeeded with NULL handle\n");
+
+    hnotify1 = RegisterDeviceNotificationW(hwnd, &dbh, 0xffff);
+    ok(hnotify1 == 0, "RegisterDeviceNotificationW accepted invalid flags\n");
+
+    /* FIXME: Find a way to trigger a device notification for testing */
+    DestroyWindow(hwnd);
+}
+
 START_TEST(input)
 {
-    char **argv;
-    int argc;
     POINT pos;
-
     init_function_pointers();
     GetCursorPos( &pos );
-
-    argc = winetest_get_mainargs(&argv);
-    if (argc >= 3 && strcmp(argv[2], "test_rawinput_mouse") == 0)
-    {
-        rawinput_mouse_process();
-        return;
-    }
 
     test_Input_blackbox();
     test_Input_whitebox();
@@ -3656,7 +3388,6 @@ START_TEST(input)
     test_GetRawInputData();
     test_GetKeyboardLayoutList();
     test_RegisterRawInputDevices();
-    test_rawinput_mouse(argv[0]);
 
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx();
@@ -3679,4 +3410,6 @@ START_TEST(input)
         test_GetPointerType();
     else
         win_skip("GetPointerType is not available\n");
+
+    test_RegisterDeviceNotification();
 }

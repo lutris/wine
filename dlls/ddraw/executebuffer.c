@@ -45,14 +45,109 @@ static void _dump_D3DEXECUTEBUFFERDESC(const D3DEXECUTEBUFFERDESC *lpDesc) {
     TRACE("lpData       : %p\n", lpDesc->lpData);
 }
 
-HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer, struct d3d_device *device)
+#define TRIANGLE_SIZE 3
+/*****************************************************************************
+ * d3d_execute_buffer_pick_test
+ *
+ * Determines whether a "point" is inside a "triangle". Mainly used when
+ * executing a "pick" from an execute buffer to determine whether a pixel
+ * coordinate (often a mouse coordinate) is inside a triangle (and
+ * therefore clicking or hovering over a 3D object in the scene). This
+ * function uses triangle rasterization algorithms to determine if the
+ * pixel falls inside (using the top-left rule, in accordance with
+ * documentation).
+ *
+ * Params:
+ *  x:     The X coordinate of the point to verify.
+ *  y:     The Y coordinate of the point to verify.
+ *  verts: An array of vertices describing the screen coordinates of the
+ *         triangle. This function expects 3 elements in this array.
+ *
+ * Returns:
+ *  TRUE if the pixel coordinate is inside this triangle
+ *  FALSE if not
+ *
+ *****************************************************************************/
+static BOOL d3d_execute_buffer_pick_test(LONG x, LONG y, D3DTLVERTEX* verts)
+{
+    INT i;
+
+    for (i=0;i<TRIANGLE_SIZE;i++)
+    {
+        D3DTLVERTEX* v1 = &verts[(i)%TRIANGLE_SIZE];
+        D3DTLVERTEX* v2 = &verts[(i+1)%TRIANGLE_SIZE];
+        D3DVALUE bias = 0.0f;
+
+        /* Edge function - determines whether pixel is inside triangle */
+        D3DVALUE w = (v2->u1.sx-v1->u1.sx)*(y-v1->u2.sy) - (v2->u2.sy-v1->u2.sy)*(x-v1->u1.sx);
+
+        /* Force top-left rule */
+        if ((v1->u2.sy == v2->u2.sy && v1->u1.sx > v2->u1.sx) || (v1->u2.sy < v2->u2.sy))
+            bias = 1.0f;
+
+        if (w < bias)
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+/*****************************************************************************
+ * d3d_execute_buffer_z_value_at_coords
+ *
+ * Returns the Z point of a triangle given an X, Y coordinate somewhere inside
+ * the triangle. Used as the `dvZ` parameter of D3DPICKRECORD.
+ *
+ * Params:
+ *  x:     The X coordinate of the point to verify.
+ *  y:     The Y coordinate of the point to verify.
+ *  verts: An array of vertices describing the screen coordinates of the
+ *         triangle. This function expects 3 elements in this array.
+ *
+ * Returns:
+ *  A floating-point Z value that can be used directly as the dvZ member of a
+ *  D3DPICKRECORD.
+ *
+ *****************************************************************************/
+static D3DVALUE d3d_execute_buffer_z_value_at_coords(LONG x, LONG y, D3DTLVERTEX* verts)
+{
+    INT i;
+
+    D3DVALUE z1 = 0;
+    D3DVALUE z2 = 0;
+
+    for (i=0;i<TRIANGLE_SIZE;i++)
+    {
+        D3DTLVERTEX* v1 = &verts[i];
+        D3DTLVERTEX* v2 = &verts[(i+1)%TRIANGLE_SIZE];
+        D3DTLVERTEX* v3 = &verts[(i+2)%TRIANGLE_SIZE];
+
+        z1 += v3->u3.sz * (x - v1->u1.sx) * (y - v2->u2.sy) - v2->u3.sz * (x - v1->u1.sx) * (y - v3->u2.sy);
+        z2 += (x - v1->u1.sx) * (y - v2->u2.sy) - (x - v1->u1.sx) * (y - v3->u2.sy);
+    }
+
+    return z1 / z2;
+}
+
+HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer, struct d3d_device *device,
+    D3DRECT* pick_rect)
 {
     DWORD is = buffer->data.dwInstructionOffset;
     char *instr = (char *)buffer->desc.lpData + is;
     unsigned int i, primitive_size;
-    struct wined3d_map_desc map_desc;
+    struct wined3d_map_desc map_desc, vert_map_desc;
     struct wined3d_box box = {0};
     HRESULT hr;
+
+    /* Variables used for picking */
+    const unsigned int vertex_size = get_flexible_vertex_size(D3DFVF_TLVERTEX);
+    D3DTLVERTEX verts[TRIANGLE_SIZE];
+
+    /* Check for any un-freed pick records */
+    if (device->pick_record_count > 0) {
+        free(device->pick_records);
+        device->pick_record_count = 0;
+    }
 
     TRACE("ExecuteData :\n");
     if (TRACE_ON(ddraw))
@@ -68,6 +163,26 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer, struct d3d
         size = current->bSize;
         instr += sizeof(*current);
         primitive_size = 0;
+
+        /* We can skip these opcodes when Picking */
+        if (pick_rect != NULL)
+        {
+            switch (current->bOpcode)
+            {
+                /* None of these opcodes seem to be necessary for picking */
+                case D3DOP_POINT:
+                case D3DOP_LINE:
+                case D3DOP_STATETRANSFORM:
+                case D3DOP_STATELIGHT:
+                case D3DOP_STATERENDER:
+                case D3DOP_TEXTURELOAD:
+                case D3DOP_SPAN:
+                    instr += count * size;
+                    continue;
+                default:
+                    break;
+            }
+        }
 
         switch (current->bOpcode)
         {
@@ -96,6 +211,7 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer, struct d3d
             {
                 WORD *indices;
                 unsigned int index_pos = buffer->index_pos, index_count;
+
                 TRACE("TRIANGLE         (%d)\n", count);
 
                 if (!count)
@@ -173,6 +289,67 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer, struct d3d
                     {
                         case 3:
                             indices[(i * primitive_size) + 2] = ci->u3.v3;
+
+                            if (pick_rect != NULL) {
+                                INT j;
+
+                                /* Get D3DTLVERTEX objects for each triangle vertex */
+                                for (j=0;j<TRIANGLE_SIZE;j++) {
+
+                                    /* Get index of vertex from D3DTRIANGLE struct */
+                                    switch (j) {
+                                    case 0: box.left = vertex_size * ci->u1.v1; break;
+                                    case 1: box.left = vertex_size * ci->u2.v2; break;
+                                    case 2: box.left = vertex_size * ci->u3.v3; break;
+                                    }
+
+                                    box.right = box.left + vertex_size;
+                                    if (FAILED(hr = wined3d_resource_map(wined3d_buffer_get_resource(buffer->dst_vertex_buffer),
+                                            0, &vert_map_desc, &box, WINED3D_MAP_WRITE))) {
+                                        return hr;
+                                    } else {
+                                        /* Copy vert data into stack array */
+                                        verts[j] = *((D3DTLVERTEX*)vert_map_desc.data);
+
+                                        wined3d_resource_unmap(wined3d_buffer_get_resource(buffer->dst_vertex_buffer), 0);
+                                    }
+                                }
+
+                                /* Use vertices acquired above to test for clicking */
+                                if (d3d_execute_buffer_pick_test(pick_rect->u1.x1, pick_rect->u2.y1, verts))
+                                {
+                                    D3DPICKRECORD* record;
+
+                                    /* Create new array to fit one more record */
+                                    DWORD new_record_count = device->pick_record_count + 1;
+                                    D3DPICKRECORD* new_record_array = malloc(sizeof(D3DPICKRECORD) * new_record_count);
+                                    if (device->pick_record_count > 0) {
+                                        memcpy(new_record_array, device->pick_records, sizeof(D3DPICKRECORD) * device->pick_record_count);
+                                        free(device->pick_records);
+                                    }
+
+                                    /* Fill record parameters */
+                                    record = &new_record_array[device->pick_record_count];
+
+                                    record->bOpcode = current->bOpcode;
+                                    record->bPad = 0;
+
+                                    /* Write current instruction offset into file */
+                                    record->dwOffset = (DWORD)instr - (DWORD)buffer->desc.lpData - is;
+
+                                    /* Formula for returning the Z value at this X/Y */
+                                    record->dvZ = d3d_execute_buffer_z_value_at_coords(pick_rect->u1.x1, pick_rect->u2.y1, verts);
+
+                                    /* Point device info to new record information */
+                                    device->pick_records = new_record_array;
+                                    device->pick_record_count = new_record_count;
+
+                                    /* We have a successful pick so we can skip the rest of the triangles */
+                                    instr += size * (count - i - 1);
+                                    count = i;
+                                }
+                            }
+
                             /* Drop through. */
                         case 2:
                             indices[(i * primitive_size) + 1] = ci->u2.v2;
@@ -183,13 +360,17 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer, struct d3d
 
                 wined3d_resource_unmap(wined3d_buffer_get_resource(buffer->index_buffer), 0);
 
-                wined3d_stateblock_set_stream_source(device->state, 0,
-                        buffer->dst_vertex_buffer, 0, sizeof(D3DTLVERTEX));
-                wined3d_stateblock_set_vertex_declaration(device->state,
-                        ddraw_find_decl(device->ddraw, D3DFVF_TLVERTEX));
-                wined3d_stateblock_set_index_buffer(device->state, buffer->index_buffer, WINED3DFMT_R16_UINT);
-                wined3d_device_apply_stateblock(device->wined3d_device, device->state);
-                wined3d_device_draw_indexed_primitive(device->wined3d_device, index_pos, index_count);
+                /* Skip drawing if we're picking */
+                if (pick_rect == NULL)
+                {
+                    wined3d_stateblock_set_stream_source(device->state, 0,
+                            buffer->dst_vertex_buffer, 0, sizeof(D3DTLVERTEX));
+                    wined3d_stateblock_set_vertex_declaration(device->state,
+                            ddraw_find_decl(device->ddraw, D3DFVF_TLVERTEX));
+                    wined3d_stateblock_set_index_buffer(device->state, buffer->index_buffer, WINED3DFMT_R16_UINT);
+                    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
+                    wined3d_device_draw_indexed_primitive(device->wined3d_device, index_pos, index_count);
+                }
 
                 buffer->index_pos = index_pos + index_count;
                 break;

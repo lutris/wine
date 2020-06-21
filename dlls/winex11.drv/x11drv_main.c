@@ -66,16 +66,16 @@ Colormap default_colormap = None;
 XPixmapFormatValues **pixmap_formats;
 unsigned int screen_bpp;
 Window root_window;
-BOOL usexvidmode = TRUE;
+BOOL usexvidmode = FALSE;
 BOOL usexrandr = TRUE;
 BOOL usexcomposite = TRUE;
 BOOL use_xkb = TRUE;
-BOOL use_take_focus = TRUE;
+BOOL use_take_focus = FALSE;
 BOOL use_primary_selection = FALSE;
 BOOL use_system_cursors = TRUE;
 BOOL show_systray = TRUE;
 BOOL grab_pointer = TRUE;
-BOOL grab_fullscreen = FALSE;
+BOOL grab_fullscreen = TRUE;
 BOOL managed_mode = TRUE;
 BOOL decorated_mode = TRUE;
 BOOL private_color_map = FALSE;
@@ -138,6 +138,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "TEXT",
     "TIMESTAMP",
     "UTF8_STRING",
+    "STRING",
     "RAW_ASCENT",
     "RAW_DESCENT",
     "RAW_CAP_HEIGHT",
@@ -147,6 +148,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "Abs Y",
     "WM_PROTOCOLS",
     "WM_DELETE_WINDOW",
+    "WM_NAME",
     "WM_STATE",
     "WM_TAKE_FOCUS",
     "DndProtocol",
@@ -156,9 +158,11 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_STARTUP_INFO_BEGIN",
     "_NET_STARTUP_INFO",
     "_NET_SUPPORTED",
+    "_NET_SUPPORTING_WM_CHECK",
     "_NET_SYSTEM_TRAY_OPCODE",
     "_NET_SYSTEM_TRAY_S0",
     "_NET_SYSTEM_TRAY_VISUAL",
+    "_NET_WM_BYPASS_COMPOSITOR",
     "_NET_WM_ICON",
     "_NET_WM_MOVERESIZE",
     "_NET_WM_NAME",
@@ -205,6 +209,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "WCF_SYLK",
     "WCF_TIFF",
     "WCF_WAVE",
+    "WINDOW",
     "image/bmp",
     "image/gif",
     "image/jpeg",
@@ -306,6 +311,9 @@ static int error_handler( Display *display, XErrorEvent *error_evt )
              error_evt->serial, error_evt->request_code );
         DebugBreak();  /* force an entry in the debugger */
     }
+    TRACE("passing on error %d req %d:%d res 0x%lx\n",
+            error_evt->error_code, error_evt->request_code,
+            error_evt->minor_code, error_evt->resourceid);
     old_error_handler( display, error_evt );
     return 0;
 }

@@ -34,6 +34,18 @@
 
 #include "vulkan_thunks.h"
 
+#if defined(__GNUC__) || defined(__clang__)
+#include <alloca.h>
+#define WINEVULKAN_FORCEINLINE __attribute__((always_inline)) inline
+#define WINEVULKAN_ALLOCA(x)   alloca(x)
+#elif defined(_MSC_VER)
+#include <malloc.h>
+#define WINEVULKAN_FORCEINLINE __forceinline
+#define WINEVULKAN_ALLOCA(x)   _alloca(x)
+#else
+#error Unsupported platform for forceinline/alloca
+#endif
+
 /* Magic value defined by Vulkan ICD / Loader spec */
 #define VULKAN_ICD_MAGIC_VALUE 0x01CDC0DE
 
@@ -72,11 +84,18 @@ struct VkDevice_T
     struct wine_vk_base base;
     struct vulkan_device_funcs funcs;
     VkDevice device; /* native device */
+    struct VkPhysicalDevice_T *phys_dev; /* parent */
 
     struct VkQueue_T **queues;
     uint32_t max_queue_families;
 
     unsigned int quirks;
+
+    uint32_t num_swapchains;
+    struct VkSwapchainKHR_T **swapchains;
+    VkQueueFamilyProperties *queue_props;
+
+    CRITICAL_SECTION swapchain_lock;
 };
 
 struct VkInstance_T
@@ -130,8 +149,48 @@ static inline VkCommandPool wine_cmd_pool_to_handle(struct wine_cmd_pool *cmd_po
     return (VkCommandPool)(uintptr_t)cmd_pool;
 }
 
+struct fs_hack_image
+{
+    uint32_t cmd_queue_idx;
+    VkCommandBuffer cmd;
+    VkImage swapchain_image;
+    VkImage blit_image;
+    VkImage user_image;
+    VkSemaphore blit_finished;
+    VkImageView user_view, blit_view;
+    VkDescriptorSet descriptor_set;
+};
+
+struct VkSwapchainKHR_T
+{
+    struct wine_vk_base base;
+    VkSwapchainKHR swapchain; /* native swapchain */
+
+    /* fs hack data below */
+    BOOL fs_hack_enabled;
+    VkExtent2D user_extent;
+    VkExtent2D real_extent;
+    VkImageUsageFlags surface_usage;
+    VkRect2D blit_dst;
+    VkCommandPool *cmd_pools; /* VkCommandPool[device->max_queue_families] */
+    VkDeviceMemory user_image_memory, blit_image_memory;
+    uint32_t n_images;
+    struct fs_hack_image *fs_hack_images; /* struct fs_hack_image[n_images] */
+    VkFilter fs_hack_filter;
+    VkFormat imageFormat;
+    VkSampler sampler;
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkPipelineLayout pipeline_layout;
+    VkPipeline pipeline;
+};
+
 void *wine_vk_get_device_proc_addr(const char *name) DECLSPEC_HIDDEN;
 void *wine_vk_get_instance_proc_addr(const char *name) DECLSPEC_HIDDEN;
+
+BOOL wine_vk_device_extension_faked(const char *name) DECLSPEC_HIDDEN;
+unsigned int wine_vk_device_extension_faked_count(void) DECLSPEC_HIDDEN;
+const VkExtensionProperties* wine_vk_device_extension_faked_idx(unsigned int idx) DECLSPEC_HIDDEN;
 
 BOOL wine_vk_device_extension_supported(const char *name) DECLSPEC_HIDDEN;
 BOOL wine_vk_instance_extension_supported(const char *name) DECLSPEC_HIDDEN;

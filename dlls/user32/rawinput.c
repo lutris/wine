@@ -63,8 +63,6 @@ static CRITICAL_SECTION_DEBUG rawinput_devices_cs_debug =
 };
 static CRITICAL_SECTION rawinput_devices_cs = { &rawinput_devices_cs_debug, -1, 0, 0, 0, 0 };
 
-extern DWORD WINAPI GetFinalPathNameByHandleW(HANDLE file, LPWSTR path, DWORD charcount, DWORD flags);
-
 static BOOL array_reserve(void **elements, unsigned int *capacity, unsigned int count, unsigned int size)
 {
     unsigned int new_capacity, max_capacity;
@@ -151,13 +149,16 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
     return device;
 }
 
-HANDLE rawinput_handle_from_device_handle(HANDLE device)
+extern DWORD WINAPI GetFinalPathNameByHandleW(HANDLE file, LPWSTR path, DWORD charcount, DWORD flags);
+static void find_devices(BOOL);
+
+HANDLE rawinput_handle_from_device_handle(HANDLE device, BOOL rescan)
 {
     WCHAR buffer[sizeof(OBJECT_NAME_INFORMATION) + MAX_PATH + 1];
     OBJECT_NAME_INFORMATION *info = (OBJECT_NAME_INFORMATION*)&buffer;
     ULONG dummy;
     unsigned int i;
-
+ 
     for (i = 0; i < rawinput_devices_count; ++i)
     {
         if (rawinput_devices[i].handle == device)
@@ -167,7 +168,7 @@ HANDLE rawinput_handle_from_device_handle(HANDLE device)
     if (NtQueryObject( device, ObjectNameInformation, &buffer, sizeof(buffer) - sizeof(WCHAR), &dummy ) || !info->Name.Buffer)
         return NULL;
 
-    /* replace \??\ with \\?\ to match hid_devices paths */
+    /* replace \??\ with \\?\ to match rawinput_devices paths */
     if (info->Name.Length > 1 && info->Name.Buffer[0] == '\\' && info->Name.Buffer[1] == '?')
         info->Name.Buffer[1] = '\\';
 
@@ -180,40 +181,26 @@ HANDLE rawinput_handle_from_device_handle(HANDLE device)
         }
     }
 
-    return NULL;
+    if (!rescan)
+        return NULL;
+
+    find_devices(TRUE);
+
+    return rawinput_handle_from_device_handle(device, FALSE);
 }
 
-static void find_devices(void)
+static void find_devices_by_guid(const GUID *guid)
 {
-    static ULONGLONG last_check;
-
     SP_DEVICE_INTERFACE_DATA iface = { sizeof(iface) };
     struct device *device;
     HIDD_ATTRIBUTES attr;
     HIDP_CAPS caps;
-    GUID hid_guid;
     HDEVINFO set;
     DWORD idx;
 
-    if (GetTickCount64() - last_check < 2000)
-        return;
-    last_check = GetTickCount64();
+    set = SetupDiGetClassDevsW(guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
 
-    HidD_GetHidGuid(&hid_guid);
-
-    EnterCriticalSection(&rawinput_devices_cs);
-
-    /* destroy previous list */
-    for (idx = 0; idx < rawinput_devices_count; ++idx)
-    {
-        CloseHandle(rawinput_devices[idx].file);
-        heap_free(rawinput_devices[idx].path);
-    }
-    rawinput_devices_count = 0;
-
-    set = SetupDiGetClassDevsW(&hid_guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
-
-    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &hid_guid, idx, &iface); ++idx)
+    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, guid, idx, &iface); ++idx)
     {
         if (!(device = add_device(set, &iface)))
             continue;
@@ -254,6 +241,45 @@ static void find_devices(void)
 
     SetupDiDestroyDeviceInfoList(set);
 
+}
+
+static void find_devices(BOOL force)
+{
+    static ULONGLONG last_check;
+
+    DWORD idx;
+    GUID hid_guid;
+
+    if (!force && GetTickCount64() - last_check < 2000)
+        return;
+
+    HidD_GetHidGuid(&hid_guid);
+
+    EnterCriticalSection(&rawinput_devices_cs);
+
+    if (!force && GetTickCount64() - last_check < 2000)
+    {
+        LeaveCriticalSection(&rawinput_devices_cs);
+        return;
+    }
+
+    last_check = GetTickCount64();
+
+    /* destroy previous list */
+    for (idx = 0; idx < rawinput_devices_count; ++idx)
+    {
+        CloseHandle(rawinput_devices[idx].file);
+        heap_free(rawinput_devices[idx].path);
+    }
+
+    rawinput_devices_count = 0;
+
+    find_devices_by_guid(&hid_guid);
+
+    /* HACK: also look up the xinput-specific devices */
+    hid_guid.Data4[7]++;
+    find_devices_by_guid(&hid_guid);
+
     LeaveCriticalSection(&rawinput_devices_cs);
 }
 
@@ -278,7 +304,7 @@ UINT WINAPI GetRawInputDeviceList(RAWINPUTDEVICELIST *devices, UINT *device_coun
         return ~0U;
     }
 
-    find_devices();
+    find_devices(FALSE);
 
     if (!devices)
     {

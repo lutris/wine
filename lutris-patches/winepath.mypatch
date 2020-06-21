@@ -1,0 +1,24 @@
+X-Git-Url: https://source.winehq.org/git/wine.git/blobdiff_plain/b336a084d650b9d0e59fc2a1120229794c3c3327..4c391c1454ea5fcac0ac5d793651f3c20383ef6a:/programs/winepath/winepath.c
+
+diff --git a/programs/winepath/winepath.c b/programs/winepath/winepath.c
+index 81944829dd..17cfdc1d2e 100644
+--- a/programs/winepath/winepath.c
++++ b/programs/winepath/winepath.c
+@@ -24,6 +24,8 @@
+ #include <windows.h>
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <fcntl.h>
++#include <io.h>
+ 
+ #include "wine/debug.h"
+ 
+@@ -140,6 +142,8 @@ int __cdecl wmain(int argc, WCHAR *argv[])
+     int i;
+     int separator;
+ 
++    setmode( fileno(stdout), O_BINARY );  /* avoid crlf */
++
+     outputformats = parse_options(argv);
+ 
+     if (outputformats & PRINT0)

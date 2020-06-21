@@ -40,6 +40,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(win);
 static HWND (WINAPI *imm_get_ui_window)(HKL);
 BOOL (WINAPI *imm_register_window)(HWND) = NULL;
 void (WINAPI *imm_unregister_window)(HWND) = NULL;
+void (WINAPI *imm_activate_window)(HWND) = NULL;
 
 /* MSIME messages */
 static UINT WM_MSIME_SERVICE;
@@ -241,17 +242,6 @@ DWORD WINAPI SetLogonNotifyWindow(HWINSTA hwinsta,HWND hwnd)
 }
 
 /***********************************************************************
- *              QueryDisplayConfig (USER32.@)
- */
-LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCONFIG_PATH_INFO *pathinfo,
-                               UINT32 *numinfoelements, DISPLAYCONFIG_MODE_INFO *modeinfo,
-                               DISPLAYCONFIG_TOPOLOGY_ID *topologyid)
-{
-   FIXME("(%08x %p %p %p %p %p)\n", flags, numpathelements, pathinfo, numinfoelements, modeinfo, topologyid);
-   return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
-/***********************************************************************
  *		RegisterSystemThread (USER32.@)
  */
 void WINAPI RegisterSystemThread(DWORD flags, DWORD reserved)
@@ -411,6 +401,7 @@ BOOL WINAPI User32InitializeImmEntryTable(DWORD magic)
     imm_get_ui_window = (void*)GetProcAddress(imm32, "__wine_get_ui_window");
     imm_register_window = (void*)GetProcAddress(imm32, "__wine_register_window");
     imm_unregister_window = (void*)GetProcAddress(imm32, "__wine_unregister_window");
+    imm_activate_window = (void*)GetProcAddress(imm32, "__wine_activate_window");
     if (!imm_get_ui_window)
         FIXME("native imm32.dll not supported\n");
     return TRUE;
@@ -543,21 +534,6 @@ BOOL WINAPI IsWindowRedirectedForPrint( HWND hwnd )
 {
     FIXME("(%p): stub\n", hwnd);
     return FALSE;
-}
-
-/**********************************************************************
- * GetDisplayConfigBufferSizes [USER32.@]
- */
-LONG WINAPI GetDisplayConfigBufferSizes(UINT32 flags, UINT32 *num_path_info, UINT32 *num_mode_info)
-{
-    FIXME("(0x%x %p %p): stub\n", flags, num_path_info, num_mode_info);
-
-    if (!num_path_info || !num_mode_info)
-        return ERROR_INVALID_PARAMETER;
-
-    *num_path_info = 0;
-    *num_mode_info = 0;
-    return ERROR_NOT_SUPPORTED;
 }
 
 /**********************************************************************

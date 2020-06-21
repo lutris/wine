@@ -159,11 +159,11 @@ void CDECL __wine_start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
     {
         if (CreateEventA(0, 0, 0, "__winestaging_warn_event") && GetLastError() != ERROR_ALREADY_EXISTS)
         {
-            FIXME_(winediag)("Wine Staging %s is a testing version containing experimental patches.\n", wine_get_version());
-            FIXME_(winediag)("Please mention your exact version when filing bug reports on winehq.org.\n");
+            FIXME_(winediag)("Wine TkG %s is a testing version containing experimental patches.\n", wine_get_version());
+            FIXME_(winediag)("Please don't report bugs about it on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead.\n");
         }
         else
-            WARN_(winediag)("Wine Staging %s is a testing version containing experimental patches.\n", wine_get_version());
+            WARN_(winediag)("Wine TkG %s is a testing version containing experimental patches.\n", wine_get_version());
 
 
         if (!CheckRemoteDebuggerPresent( GetCurrentProcess(), &being_debugged ))

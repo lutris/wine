@@ -1,0 +1,91 @@
+From 7c0f2650d49986b07bd6532640caec768c1cda92 Mon Sep 17 00:00:00 2001
+From: Maxime Lombard <berillions@gmail.com>
+Date: Thu, 19 Dec 2019 12:16:27 +0100
+Subject: [PATCH] kernel32: Add SetEnvironmentStringsW stub
+
+Fixes the crash issue in GoG Galaxy 2 when a game is launched
+directly by the launcher.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=48308
+Signed-off-by: Maxime Lombard <berillions@gmail.com>
+---
+ .../api-ms-win-core-processenvironment-l1-1-0.spec        | 2 +-
+ dlls/kernel32/kernel32.spec                               | 2 +-
+ dlls/kernelbase/kernelbase.spec                           | 2 +-
+ dlls/kernelbase/process.c                                 | 8 ++++++++
+ include/winbase.h                                         | 1 +
+ 5 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/api-ms-win-core-processenvironment-l1-1-0/api-ms-win-core-processenvironment-l1-1-0.spec b/dlls/api-ms-win-core-processenvironment-l1-1-0/api-ms-win-core-processenvironment-l1-1-0.spec
+index e3698d6efd..7a62b74390 100644
+--- a/dlls/api-ms-win-core-processenvironment-l1-1-0/api-ms-win-core-processenvironment-l1-1-0.spec
++++ b/dlls/api-ms-win-core-processenvironment-l1-1-0/api-ms-win-core-processenvironment-l1-1-0.spec
+@@ -15,7 +15,7 @@
+ @ stdcall SearchPathW(wstr wstr wstr long ptr ptr) kernel32.SearchPathW
+ @ stdcall SetCurrentDirectoryA(str) kernel32.SetCurrentDirectoryA
+ @ stdcall SetCurrentDirectoryW(wstr) kernel32.SetCurrentDirectoryW
+-@ stub SetEnvironmentStringsW
++@ stdcall SetEnvironmentStringsW(ptr) kernel32.SetEnvironmentStringsW
+ @ stdcall SetEnvironmentVariableA(str str) kernel32.SetEnvironmentVariableA
+ @ stdcall SetEnvironmentVariableW(wstr wstr) kernel32.SetEnvironmentVariableW
+ @ stdcall SetStdHandle(long long) kernel32.SetStdHandle
+diff --git a/dlls/kernel32/kernel32.spec b/dlls/kernel32/kernel32.spec
+index a87747bf61..88d79369a0 100644
+--- a/dlls/kernel32/kernel32.spec
++++ b/dlls/kernel32/kernel32.spec
+@@ -1387,7 +1387,7 @@
+ # @ stub SetDynamicTimeZoneInformation
+ @ stdcall -import SetEndOfFile(long)
+ # @ stub SetEnvironmentStringsA
+-# @ stub SetEnvironmentStringsW
++@ stdcall -import SetEnvironmentStringsW(ptr)
+ @ stdcall -import SetEnvironmentVariableA(str str)
+ @ stdcall -import SetEnvironmentVariableW(wstr wstr)
+ @ stdcall -import SetErrorMode(long)
+diff --git a/dlls/kernelbase/kernelbase.spec b/dlls/kernelbase/kernelbase.spec
+index afa3b0192f..3817eb3af5 100644
+--- a/dlls/kernelbase/kernelbase.spec
++++ b/dlls/kernelbase/kernelbase.spec
+@@ -1422,7 +1422,7 @@
+ @ stdcall SetDefaultDllDirectories(long)
+ # @ stub SetDynamicTimeZoneInformation
+ @ stdcall SetEndOfFile(long)
+-@ stub SetEnvironmentStringsW
++@ stdcall SetEnvironmentStringsW (ptr)
+ @ stdcall SetEnvironmentVariableA(str str)
+ @ stdcall SetEnvironmentVariableW(wstr wstr)
+ @ stdcall SetErrorMode(long)
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index a07dddb1fc..0bf3f8e81d 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -1289,6 +1289,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeEnvironmentStringsW( LPWSTR ptr )
+     return HeapFree( GetProcessHeap(), 0, ptr );
+ }
+ 
++/***********************************************************************
++ *           SetEnvironmentStringW   (kernelbase.@)
++ */
++BOOL WINAPI DECLSPEC_HOTPATCH SetEnvironmentStringsW( WCHAR *env )
++{
++    FIXME("%s: stub\n", debugstr_w(env));
++    return S_OK;
++}
+ 
+ /***********************************************************************
+  *           SetEnvironmentVariableA   (kernelbase.@)
+diff --git a/include/winbase.h b/include/winbase.h
+index 655eb48f0f..36c538f283 100644
+--- a/include/winbase.h
++++ b/include/winbase.h
+@@ -2618,6 +2618,7 @@ WINBASEAPI BOOL        WINAPI SetDllDirectoryA(LPCSTR);
+ WINBASEAPI BOOL        WINAPI SetDllDirectoryW(LPCWSTR);
+ #define                       SetDllDirectory WINELIB_NAME_AW(SetDllDirectory)
+ WINBASEAPI BOOL        WINAPI SetEndOfFile(HANDLE);
++WINBASEAPI BOOL        WINAPI SetEnvironmentStringsW(LPWSTR);
+ WINBASEAPI BOOL        WINAPI SetEnvironmentVariableA(LPCSTR,LPCSTR);
+ WINBASEAPI BOOL        WINAPI SetEnvironmentVariableW(LPCWSTR,LPCWSTR);
+ #define                       SetEnvironmentVariable WINELIB_NAME_AW(SetEnvironmentVariable)
+-- 
+2.24.1
+

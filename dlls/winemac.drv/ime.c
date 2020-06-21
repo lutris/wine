@@ -42,7 +42,6 @@
 #include "winuser.h"
 #include "imm.h"
 #include "ddk/imm.h"
-#include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(imm);
 
