@@ -1,0 +1,28 @@
+diff --git a/dlls/appwiz.cpl/addons.c b/dlls/appwiz.cpl/addons.c
+index e501054e16d..350c25ef905 100644
+--- a/dlls/appwiz.cpl/addons.c
++++ b/dlls/appwiz.cpl/addons.c
+@@ -58,8 +58,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
+ #define GECKO_SHA "???"
+ #endif
+ 
+-#define MONO_VERSION "4.9.4"
+-#define MONO_SHA "51a6ff38323fcda71d70ead90c252b5eaeacec542ba737dbd1d676787b210fdd"
++#define MONO_VERSION "5.1.0"
++#define MONO_SHA "ae55439c7cd61d1a17f0c687967fad8ad12d9e2263972ffd5e9dde2685fd8ddd"
+ 
+ typedef struct {
+     const char *version;
+diff --git a/dlls/mscoree/mscoree_private.h b/dlls/mscoree/mscoree_private.h
+index 250bd24ad10..5847126b3ec 100644
+--- a/dlls/mscoree/mscoree_private.h
++++ b/dlls/mscoree/mscoree_private.h
+@@ -45,7 +45,7 @@ extern HRESULT assembly_get_runtime_version(ASSEMBLY *assembly, LPSTR *version)
+ extern HRESULT assembly_get_vtable_fixups(ASSEMBLY *assembly, VTableFixup **fixups, DWORD *count) DECLSPEC_HIDDEN;
+ extern HRESULT assembly_get_native_entrypoint(ASSEMBLY *assembly, NativeEntryPointFunc *func) DECLSPEC_HIDDEN;
+ 
+-#define WINE_MONO_VERSION "4.9.4"
++#define WINE_MONO_VERSION "5.1.0"
+ 
+ /* Mono embedding */
+ typedef struct _MonoDomain MonoDomain;
