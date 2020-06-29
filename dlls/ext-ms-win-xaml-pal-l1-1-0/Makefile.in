@@ -1,0 +1,4 @@
+MODULE    = ext-ms-win-xaml-pal-l1-1-0.dll
+
+C_SRCS = \
+	main.c

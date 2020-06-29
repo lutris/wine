@@ -61,7 +61,7 @@ static inline void *get_stack( CONTEXT *context )
 }
 
 #include "pshpack1.h"
-struct idtr
+struct dtr
 {
     WORD  limit;
     BYTE *base;
@@ -69,19 +69,41 @@ struct idtr
 #include "poppack.h"
 
 static LDT_ENTRY idt[256];
+static LDT_ENTRY gdt[8192];
+static LDT_ENTRY ldt[8192];
 
-static inline struct idtr get_idtr(void)
+static BOOL emulate_idtr( BYTE *data, unsigned int data_size, unsigned int *offset )
 {
-    struct idtr ret;
 #if defined(__i386__) && defined(__GNUC__)
+    struct dtr ret;
     __asm__( "sidtl %0" : "=m" (ret) );
+    *offset = data - ret.base;
+    return (*offset <= ret.limit + 1 - data_size);
 #else
-    ret.base = (BYTE *)idt;
-    ret.limit = sizeof(idt) - 1;
+    return FALSE;
 #endif
-    return ret;
 }
 
+static BOOL emulate_gdtr( BYTE *data, unsigned int data_size, unsigned int *offset )
+{
+#if defined(__i386__) && defined(__GNUC__)
+    struct dtr ret;
+    __asm__( "sgdtl %0" : "=m" (ret) );
+    *offset = data - ret.base;
+    return (*offset <= ret.limit + 1 - data_size);
+#else
+    return FALSE;
+#endif
+}
+
+static inline WORD get_ldt(void)
+{
+    WORD seg = 1;
+#if defined(__i386__) && defined(__GNUC__)
+    __asm__( "sldt %0" : "=m" (seg) );
+#endif
+    return seg;
+}
 
 /***********************************************************************
  *           INSTR_ReplaceSelector
@@ -706,10 +728,9 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
                 BYTE *data = INSTR_GetOperandAddr(context, instr + 1, long_addr,
                                                   segprefix, &len);
                 unsigned int data_size = (*instr == 0x8b) ? (long_op ? 4 : 2) : 1;
-                struct idtr idtr = get_idtr();
-                unsigned int offset = data - idtr.base;
+                unsigned int offset;
 
-                if (offset <= idtr.limit + 1 - data_size)
+                if (emulate_idtr( data, data_size, &offset ))
                 {
                     idt[1].LimitLow = 0x100; /* FIXME */
                     idt[2].LimitLow = 0x11E; /* FIXME */
@@ -719,6 +740,31 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
                     {
                     case 0x8a: store_reg_byte( context, instr[1], (BYTE *)idt + offset ); break;
                     case 0x8b: store_reg_word( context, instr[1], (BYTE *)idt + offset, long_op ); break;
+                    }
+                    context->Eip += prefixlen + len + 1;
+                    return ExceptionContinueExecution;
+                }
+
+                if (emulate_gdtr( data, data_size, &offset ))
+                {
+                    static BOOL initialized;
+
+                    if (!initialized)
+                    {
+                        WORD index = get_ldt() >> 3;
+                        gdt[index].BaseLow                = ((DWORD_PTR)ldt & 0x0000FFFF);
+                        gdt[index].HighWord.Bytes.BaseMid = ((DWORD_PTR)ldt & 0x00FF0000) >> 16;
+                        gdt[index].HighWord.Bytes.BaseHi  = ((DWORD_PTR)ldt & 0xFF000000) >> 24;
+                        gdt[index].LimitLow               = 0xFFFF;
+                        gdt[index].HighWord.Bits.Pres     = 1;
+
+                        initialized = TRUE;
+                    }
+
+                    switch (*instr)
+                    {
+                    case 0x8a: store_reg_byte( context, instr[1], (BYTE *)gdt + offset ); break;
+                    case 0x8b: store_reg_word( context, instr[1], (BYTE *)gdt + offset, long_op ); break;
                     }
                     context->Eip += prefixlen + len + 1;
                     return ExceptionContinueExecution;

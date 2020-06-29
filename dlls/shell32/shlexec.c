@@ -50,6 +50,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(exec);
 
+extern HANDLE CDECL __wine_create_default_token(BOOL admin);
+
 static const WCHAR wszOpen[] = {'o','p','e','n',0};
 static const WCHAR wszExe[] = {'.','e','x','e',0};
 static const WCHAR wszILPtr[] = {':','%','p',0};
@@ -312,6 +314,8 @@ static HRESULT SHELL_GetPathFromIDListForExecuteW(LPCITEMIDLIST pidl, LPWSTR psz
 static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
 			    const SHELLEXECUTEINFOW *psei, LPSHELLEXECUTEINFOW psei_out)
 {
+    static WCHAR runasW[] = {'r','u','n','a','s',0};
+    HANDLE token = NULL;
     STARTUPINFOW  startup;
     PROCESS_INFORMATION info;
     UINT_PTR retval = SE_ERR_NOASSOC;
@@ -344,8 +348,20 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     dwCreationFlags = CREATE_UNICODE_ENVIRONMENT;
     if (!(psei->fMask & SEE_MASK_NO_CONSOLE))
         dwCreationFlags |= CREATE_NEW_CONSOLE;
-    if (CreateProcessW(NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE, dwCreationFlags, env,
-                       lpDirectory, &startup, &info))
+
+    /* Spawning a process with runas verb means that the process should be
+     * executed with admin rights. This function ignores the manifest data,
+     * and allows programs to elevate rights on-demand. On Windows a complex
+     * RPC menchanism is used, using CreateProcessAsUser would fail because
+     * it can only be used to drop rights. */
+    if (psei->lpVerb && !strcmpiW(psei->lpVerb, runasW))
+    {
+        if (!(token = __wine_create_default_token(TRUE)))
+            ERR("Failed to create admin token\n");
+    }
+
+    if (CreateProcessAsUserW(token, NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE,
+                             dwCreationFlags, env, lpDirectory, &startup, &info))
     {
         /* Give 30 seconds to the app to come up, if desired. Probably only needed
            when starting app immediately before making a DDE connection. */
@@ -364,6 +380,8 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
         TRACE("CreateProcess returned error %ld\n", retval);
         retval = ERROR_BAD_FORMAT;
     }
+
+    if (token) CloseHandle(token);
 
     TRACE("returning %lu\n", retval);
 

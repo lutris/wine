@@ -200,8 +200,6 @@ static int internal_set_entry( unsigned short sel, const LDT_ENTRY *entry )
 {
     int ret = 0, index = sel >> 3;
 
-    if (index < LDT_FIRST_ENTRY) return 0;  /* cannot modify reserved entries */
-
 #ifdef linux
     {
         struct modify_ldt_s ldt_info;
@@ -253,7 +251,7 @@ static int internal_set_entry( unsigned short sel, const LDT_ENTRY *entry )
         wine_ldt_copy_obsolete.limit[index] = wine_ldt_get_limit(entry);
         wine_ldt_copy_obsolete.flags[index] = (entry->HighWord.Bits.Type |
                                  (entry->HighWord.Bits.Default_Big ? WINE_LDT_FLAGS_32BIT : 0) |
-                                 (wine_ldt_copy_obsolete.flags[index] & WINE_LDT_FLAGS_ALLOCATED));
+                                 WINE_LDT_FLAGS_ALLOCATED);
     }
     return ret;
 }
