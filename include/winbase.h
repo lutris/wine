@@ -2619,6 +2619,7 @@ WINBASEAPI BOOL        WINAPI SetDllDirectoryA(LPCSTR);
 WINBASEAPI BOOL        WINAPI SetDllDirectoryW(LPCWSTR);
 #define                       SetDllDirectory WINELIB_NAME_AW(SetDllDirectory)
 WINBASEAPI BOOL        WINAPI SetEndOfFile(HANDLE);
+WINBASEAPI BOOL        WINAPI SetEnvironmentStringsW(LPWSTR);
 WINBASEAPI BOOL        WINAPI SetEnvironmentVariableA(LPCSTR,LPCSTR);
 WINBASEAPI BOOL        WINAPI SetEnvironmentVariableW(LPCWSTR,LPCWSTR);
 #define                       SetEnvironmentVariable WINELIB_NAME_AW(SetEnvironmentVariable)
