@@ -51,6 +51,12 @@
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif
+#ifdef HAVE_SYS_IOCTL_H
+#include <sys/ioctl.h>
+#endif
+#ifdef HAVE_LINUX_IOCTL_H
+#include <linux/ioctl.h>
+#endif
 #ifdef HAVE_SYS_PRCTL_H
 # include <sys/prctl.h>
 #endif
@@ -81,8 +87,26 @@
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
+#include "esync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(server);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
+
+/* just in case... */
+#undef EXT2_IOC_GETFLAGS
+#undef EXT2_IOC_SETFLAGS
+#undef EXT4_CASEFOLD_FL
+
+#ifdef __linux__
+
+/* Define the ext2 ioctls for handling extra attributes */
+#define EXT2_IOC_GETFLAGS _IOR('f', 1, long)
+#define EXT2_IOC_SETFLAGS _IOW('f', 2, long)
+
+/* Case-insensitivity attribute */
+#define EXT4_CASEFOLD_FL 0x40000000
+
+#endif
 
 /* Some versions of glibc don't define this */
 #ifndef SCM_RIGHTS
@@ -119,14 +143,14 @@ sigset_t server_block_set;  /* signals to block during server calls */
 static int fd_socket = -1;  /* socket to exchange file descriptors with the server */
 static pid_t server_pid;
 
-static RTL_CRITICAL_SECTION fd_cache_section;
+RTL_CRITICAL_SECTION fd_cache_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 {
     0, 0, &fd_cache_section,
     { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
       0, 0, { (DWORD_PTR)(__FILE__ ": fd_cache_section") }
 };
-static RTL_CRITICAL_SECTION fd_cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+RTL_CRITICAL_SECTION fd_cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /* atomically exchange a 64-bit value */
 static inline LONG64 interlocked_xchg64( LONG64 *dest, LONG64 val )
@@ -314,8 +338,17 @@ unsigned int server_call_unlocked( void *req_ptr )
  */
 unsigned int CDECL wine_server_call( void *req_ptr )
 {
+    struct __server_request_info * const req = req_ptr;
     sigset_t old_set;
     unsigned int ret;
+
+    /* trigger write watches, otherwise read() might return EFAULT */
+    if (req->u.req.request_header.reply_size &&
+        !virtual_check_buffer_for_write( req->reply_data, req->u.req.request_header.reply_size ))
+    {
+        ret = STATUS_ACCESS_VIOLATION;
+        return ret;
+    }
 
     pthread_sigmask( SIG_BLOCK, &server_block_set, &old_set );
     ret = server_call_unlocked( req_ptr );
@@ -830,7 +863,7 @@ void CDECL wine_server_send_fd( int fd )
  *
  * Receive a file descriptor passed from the server.
  */
-static int receive_fd( obj_handle_t *handle )
+int receive_fd( obj_handle_t *handle )
 {
     struct iovec vec;
     struct msghdr msghdr;
@@ -1001,6 +1034,30 @@ int server_remove_fd_from_cache( HANDLE handle )
 
 
 /***********************************************************************
+ *           wine_server_close_fds_by_type
+ *
+ * Needed for a proper implementation of WSACleanup.
+ */
+void CDECL wine_server_close_fds_by_type( enum server_fd_type type )
+{
+    union fd_cache_entry cache;
+    unsigned int entry, idx;
+
+    for (entry = 0; entry < FD_CACHE_ENTRIES; entry++)
+    {
+        if (!fd_cache[entry]) continue;
+        for (idx = 0; idx < FD_CACHE_BLOCK_SIZE; idx++)
+        {
+            cache.data = interlocked_cmpxchg64( &fd_cache[entry][idx].data, 0, 0 );
+            if (cache.s.type != type || cache.s.fd == 0) continue;
+            if (interlocked_cmpxchg64( &fd_cache[entry][idx].data, 0, cache.data ) != cache.data) continue;
+            close( cache.s.fd - 1 );
+        }
+    }
+}
+
+
+/***********************************************************************
  *           server_get_unix_fd
  *
  * The returned unix_fd should be closed iff needs_close is non-zero.
@@ -1058,6 +1115,87 @@ done:
     }
     if (!ret) *unix_fd = fd;
     return ret;
+}
+
+
+/***********************************************************************
+ *           server_get_shared_memory_fd
+ *
+ * Receive a file descriptor to a server shared memory block.
+ */
+static int server_get_shared_memory_fd( HANDLE thread, int *unix_fd )
+{
+    obj_handle_t dummy;
+    sigset_t sigset;
+    int ret;
+
+    server_enter_uninterrupted_section( &fd_cache_section, &sigset );
+
+    SERVER_START_REQ( get_shared_memory )
+    {
+        req->tid = HandleToULong(thread);
+        if (!(ret = wine_server_call( req )))
+        {
+            *unix_fd = receive_fd( &dummy );
+            if (*unix_fd == -1) ret = STATUS_NOT_SUPPORTED;
+        }
+    }
+    SERVER_END_REQ;
+
+    server_leave_uninterrupted_section( &fd_cache_section, &sigset );
+    return ret;
+}
+
+/* The shared memory wineserver communication is still highly experimental
+ * and might cause unexpected results when the client/server status gets
+ * out of synchronization. The feature will be disabled by default until it
+ * is tested a bit more. */
+static inline BOOL experimental_SHARED_MEMORY( void )
+{
+    static int enabled = -1;
+    if (enabled == -1)
+    {
+        const char *str = getenv( "STAGING_SHARED_MEMORY" );
+        enabled = str && (atoi(str) != 0);
+    }
+    return enabled;
+}
+
+
+/***********************************************************************
+ *           server_get_shared_memory
+ *
+ * Get address of a shared memory block.
+ */
+void *server_get_shared_memory( HANDLE thread )
+{
+    static shmglobal_t *shmglobal = (void *)-1;
+    void *mem = NULL;
+    int fd = -1;
+
+    if (!experimental_SHARED_MEMORY())
+        return NULL;
+
+    /* The global memory block is only requested once. No locking is
+     * required because this function is called very early during the
+     * process initialization for the first time. */
+    if (!thread && shmglobal != (void *)-1)
+        return shmglobal;
+
+    if (!server_get_shared_memory_fd( thread, &fd ))
+    {
+        SIZE_T size = thread ? sizeof(shmlocal_t) : sizeof(shmglobal_t);
+        virtual_map_shared_memory( fd, &mem, 0, &size, PAGE_READONLY );
+        close( fd );
+    }
+
+    if (!thread)
+    {
+        if (mem) WARN_(winediag)("Using shared memory wineserver communication\n");
+        shmglobal = mem;
+    }
+
+    return mem;
 }
 
 
@@ -1200,6 +1338,28 @@ static void start_server(void)
 
 
 /***********************************************************************
+ *           set_case_insensitive
+ *
+ * Make the supplied directory case insensitive, if available.
+ */
+static void set_case_insensitive(const char *dir)
+{
+#if defined(EXT2_IOC_GETFLAGS) && defined(EXT2_IOC_SETFLAGS) && defined(EXT4_CASEFOLD_FL)
+    int flags, fd;
+
+    if ((fd = open(dir, O_RDONLY | O_NONBLOCK | O_LARGEFILE)) == -1)
+        return;
+    if (ioctl(fd, EXT2_IOC_GETFLAGS, &flags) != -1 && !(flags & EXT4_CASEFOLD_FL))
+    {
+        flags |= EXT4_CASEFOLD_FL;
+        ioctl(fd, EXT2_IOC_SETFLAGS, &flags);
+    }
+    close(fd);
+#endif
+}
+
+
+/***********************************************************************
  *           setup_config_dir
  *
  * Setup the wine configuration dir.
@@ -1242,6 +1402,7 @@ static int setup_config_dir(void)
     /* create the drive symlinks */
 
     mkdir( "drive_c", 0777 );
+    set_case_insensitive( "drive_c" );
     symlink( "../drive_c", "dosdevices/c:" );
     symlink( "/", "dosdevices/z:" );
 
@@ -1600,6 +1761,10 @@ size_t server_init_thread( void *entry_point, BOOL *suspend )
         *suspend          = reply->suspend;
     }
     SERVER_END_REQ;
+
+    /* initialize thread shared memory pointers */
+    NtCurrentTeb()->Reserved5[1] = server_get_shared_memory( 0 );
+    NtCurrentTeb()->Reserved5[2] = server_get_shared_memory( NtCurrentTeb()->ClientId.UniqueThread );
 
     is_wow64 = !is_win64 && (server_cpus & ((1 << CPU_x86_64) | (1 << CPU_ARM64))) != 0;
     ntdll_get_thread_data()->wow64_redir = is_wow64;

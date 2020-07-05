@@ -1,6 +1,15 @@
 MODULE = dxva2.dll
+IMPORTS = ole32 advapi32
 
-EXTRADLLFLAGS = -mno-cygwin
+IDL_SRCS = \
+	backend.idl
 
 C_SRCS = \
-	main.c
+	devicemanager.c \
+	genericdecoder.c \
+	main.c \
+	softwareprocessor.c \
+	vaapi-h264.c \
+	vaapi-mpeg2.c \
+	vaapi.c \
+	videoservices.c

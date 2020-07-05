@@ -64,6 +64,7 @@ static const struct object_ops completion_ops =
     add_queue,                 /* add_queue */
     remove_queue,              /* remove_queue */
     completion_signaled,       /* signaled */
+    NULL,                      /* get_esync_fd */
     no_satisfied,              /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
@@ -75,6 +76,7 @@ static const struct object_ops completion_ops =
     default_unlink_name,       /* unlink_name */
     no_open_file,              /* open_file */
     no_kernel_obj_list,        /* get_kernel_obj_list */
+    no_alloc_handle,           /* alloc_handle */
     no_close_handle,           /* close_handle */
     completion_destroy         /* destroy */
 };
@@ -109,8 +111,7 @@ static void completion_dump( struct object *obj, int verbose )
 
 static struct object_type *completion_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'I','o','C','o','m','p','l','e','t','i','o','n'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_IoCompletion, sizeof(type_IoCompletion) };
     return get_object_type( &str );
 }
 

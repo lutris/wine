@@ -1,6 +1,9 @@
 MODULE    = fsutil.exe
 
 EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+IMPORTS   = user32
 
 C_SRCS = \
 	main.c
+
+RC_SRCS = fsutil.rc

@@ -61,8 +61,13 @@ static const struct
     { &GUID_WICPixelFormat16bppBGR555, PixelFormat16bppRGB555, WICBitmapPaletteTypeFixedHalftone256 },
     { &GUID_WICPixelFormat24bppBGR, PixelFormat24bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
     { &GUID_WICPixelFormat32bppBGR, PixelFormat32bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
+    { &GUID_WICPixelFormat48bppRGB, PixelFormat48bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
     { &GUID_WICPixelFormat32bppBGRA, PixelFormat32bppARGB, WICBitmapPaletteTypeFixedHalftone256 },
     { &GUID_WICPixelFormat32bppPBGRA, PixelFormat32bppPARGB, WICBitmapPaletteTypeFixedHalftone256 },
+    { &GUID_WICPixelFormat32bppCMYK, PixelFormat32bppCMYK, WICBitmapPaletteTypeFixedHalftone256 },
+    { &GUID_WICPixelFormat32bppGrayFloat, PixelFormat32bppARGB, WICBitmapPaletteTypeFixedGray256 },
+    { &GUID_WICPixelFormat64bppCMYK, PixelFormat48bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
+    { &GUID_WICPixelFormat64bppRGBA, PixelFormat48bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
     { NULL }
 };
 
