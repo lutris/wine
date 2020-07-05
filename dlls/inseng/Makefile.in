@@ -1,8 +1,11 @@
 MODULE    = inseng.dll
-IMPORTS   = uuid ole32 advapi32
+IMPORTS   = uuid ole32 advapi32 urlmon shlwapi
 
 EXTRADLLFLAGS = -mno-cygwin
 
-C_SRCS = inseng_main.c
+C_SRCS = \
+	icif.c \
+	inf.c \
+	inseng_main.c
 
 IDL_SRCS = inseng_classes.idl

@@ -481,8 +481,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(int);
 #define SIB_INDEX( sib, rex )   (((sib) >> 3) & 7) | (((rex) & REX_X) ? 8 : 0)
 #define SIB_BASE( sib, rex )    (((sib) & 7) | (((rex) & REX_B) ? 8 : 0))
 
-/* keep in sync with dlls/ntdll/thread.c:thread_init */
-static const BYTE *wine_user_shared_data = (BYTE *)0x7ffe0000;
+extern BYTE* CDECL __wine_user_shared_data(void);
 static const BYTE *user_shared_data      = (BYTE *)0xfffff78000000000;
 
 static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
@@ -590,15 +589,6 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr, int addl_instr
 static void fake_syscall_function(void)
 {
     TRACE("() stub\n");
-}
-
-
-static void update_shared_data(void)
-{
-    struct _KUSER_SHARED_DATA *shared_data  = (struct _KUSER_SHARED_DATA *)wine_user_shared_data;
-
-    shared_data->u.TickCountQuad = GetTickCount64();
-    shared_data->u.TickCount.High2Time = shared_data->u.TickCount.High1Time;
 }
 
 
@@ -802,8 +792,7 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
             if (offset <= sizeof(KSHARED_USER_DATA) - data_size)
             {
                 ULONGLONG temp = 0;
-                update_shared_data();
-                memcpy( &temp, wine_user_shared_data + offset, data_size );
+                memcpy( &temp, __wine_user_shared_data() + offset, data_size );
                 store_reg_word( context, instr[2], (BYTE *)&temp, long_op, rex );
                 context->Rip += prefixlen + len + 2;
                 return ExceptionContinueExecution;
@@ -823,11 +812,10 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
 
         if (offset <= sizeof(KSHARED_USER_DATA) - data_size)
         {
-            update_shared_data();
             switch (*instr)
             {
-            case 0x8a: store_reg_byte( context, instr[1], wine_user_shared_data + offset, rex ); break;
-            case 0x8b: store_reg_word( context, instr[1], wine_user_shared_data + offset, long_op, rex ); break;
+            case 0x8a: store_reg_byte( context, instr[1], __wine_user_shared_data() + offset, rex ); break;
+            case 0x8b: store_reg_word( context, instr[1], __wine_user_shared_data() + offset, long_op, rex ); break;
             }
             context->Rip += prefixlen + len + 1;
             return ExceptionContinueExecution;
@@ -845,8 +833,7 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
 
         if (offset <= sizeof(KSHARED_USER_DATA) - data_size)
         {
-            update_shared_data();
-            memcpy( &context->Rax, wine_user_shared_data + offset, data_size );
+            memcpy( &context->Rax, __wine_user_shared_data() + offset, data_size );
             context->Rip += prefixlen + len + 1;
             return ExceptionContinueExecution;
         }

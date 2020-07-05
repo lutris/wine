@@ -19,12 +19,17 @@ WINE_1.0
     wine_get_server_dir;
     wine_get_user_name;
     wine_get_version;
+    wine_get_patches;
     wine_init;
     wine_init_argv0_path;
     wine_mmap_add_reserved_area;
     wine_mmap_enum_reserved_areas;
     wine_mmap_is_in_reserved_area;
     wine_mmap_remove_reserved_area;
+    wine_mmap_add_free_area;
+    wine_mmap_enum_free_areas;
+    wine_mmap_is_in_free_area;
+    wine_mmap_remove_free_area;
     wine_wctype_table;
 
     /* the following functions are obsolete and only exported for backwards compatibility */

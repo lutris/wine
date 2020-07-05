@@ -218,14 +218,13 @@ static const BOOL is_case_sensitive = FALSE;
 
 static struct file_identity windir;
 
-static RTL_CRITICAL_SECTION dir_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 {
     0, 0, &dir_section,
     { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
       0, 0, { (DWORD_PTR)(__FILE__ ": dir_section") }
 };
-static RTL_CRITICAL_SECTION dir_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+RTL_CRITICAL_SECTION dir_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 
 /* check if a given Unicode char is OK in a DOS short name */
@@ -1276,17 +1275,17 @@ static DWORD WINAPI init_options( RTL_RUN_ONCE *once, void *param, void **contex
  *
  * Check if the specified file should be hidden based on its name and the show dot files option.
  */
-BOOL DIR_is_hidden_file( const UNICODE_STRING *name )
+BOOL DIR_is_hidden_file( const char *name )
 {
-    WCHAR *p, *end;
+    char *p, *end;
 
     RtlRunOnceExecuteOnce( &init_once, init_options, NULL, NULL );
 
     if (show_dot_files) return FALSE;
 
-    end = p = name->Buffer + name->Length/sizeof(WCHAR);
-    while (p > name->Buffer && IS_SEPARATOR(p[-1])) p--;
-    while (p > name->Buffer && !IS_SEPARATOR(p[-1])) p--;
+    end = p = (char *)name + strlen(name);
+    while (p > name && IS_SEPARATOR(p[-1])) p--;
+    while (p > name && !IS_SEPARATOR(p[-1])) p--;
     if (p == end || *p != '.') return FALSE;
     /* make sure it isn't '.' or '..' */
     if (p + 1 == end) return FALSE;
@@ -1533,11 +1532,6 @@ static NTSTATUS get_dir_data_entry( struct dir_data *dir_data, void *info_ptr, I
     if (class != FileNamesInformation)
     {
         if (st.st_dev != dir_data->id.dev) st.st_ino = 0;  /* ignore inode if on a different device */
-
-        if (!show_dot_files && names->long_name[0] == '.' && names->long_name[1] &&
-            (names->long_name[1] != '.' || names->long_name[2]))
-            attributes |= FILE_ATTRIBUTE_HIDDEN;
-
         fill_file_info( &st, attributes, info, class );
     }
 
@@ -2054,7 +2048,7 @@ static NTSTATUS find_file_in_dir( char *unix_name, int pos, const WCHAR *name, i
     if (ret >= 0 && ret <= MAX_DIR_ENTRY_LEN)
     {
         unix_name[pos + ret] = 0;
-        if (!stat( unix_name, &st ))
+        if (!lstat( unix_name, &st ))
         {
             if (is_win_dir) *is_win_dir = is_same_file( &windir, &st );
             return STATUS_SUCCESS;
@@ -2176,7 +2170,7 @@ not_found:
     return STATUS_OBJECT_PATH_NOT_FOUND;
 
 success:
-    if (is_win_dir && !stat( unix_name, &st )) *is_win_dir = is_same_file( &windir, &st );
+    if (is_win_dir && !lstat( unix_name, &st )) *is_win_dir = is_same_file( &windir, &st );
     return STATUS_SUCCESS;
 }
 
@@ -2576,7 +2570,7 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
         for (p = unix_name + pos ; *p; p++) if (*p == '\\') *p = '/';
         if (!name_len || !redirect || (!strstr( unix_name, "/windows/") && strncmp( unix_name, "windows/", 8 )))
         {
-            if (!stat( unix_name, &st ))
+            if (!lstat( unix_name, &st ))
             {
                 if (disposition == FILE_CREATE)
                     return STATUS_OBJECT_NAME_COLLISION;
@@ -2638,6 +2632,19 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
             else if (status == STATUS_SUCCESS && disposition == FILE_CREATE)
             {
                 status = STATUS_OBJECT_NAME_COLLISION;
+            }
+        }
+        else if (disposition == FILE_WINE_PATH && status == STATUS_OBJECT_PATH_NOT_FOUND)
+        {
+            ret = ntdll_wcstoumbs( name, end - name, unix_name + pos + 1, MAX_DIR_ENTRY_LEN + 1, TRUE );
+            if (ret > 0 && ret <= MAX_DIR_ENTRY_LEN)
+            {
+                unix_name[pos] = '/';
+                unix_name[pos + 1 + ret] = 0;
+                status = STATUS_NO_SUCH_FILE;
+                pos += strlen( unix_name + pos );
+                name = next;
+                continue;
             }
         }
 
@@ -2732,18 +2739,13 @@ NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *
 
 
 /******************************************************************************
- *           wine_nt_to_unix_file_name  (NTDLL.@) Not a Windows API
- *
- * Convert a file name from NT namespace to Unix namespace.
- *
- * If disposition is not FILE_OPEN or FILE_OVERWRITE, the last path
- * element doesn't have to exist; in that case STATUS_NO_SUCH_FILE is
- * returned, but the unix name is still filled in properly.
+ *           nt_to_unix_file_name_internal
  */
-NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
-                                          UINT disposition, BOOLEAN check_case )
+static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
+                                               UINT disposition, BOOLEAN check_case )
 {
     static const WCHAR unixW[] = {'u','n','i','x'};
+    static const WCHAR pipeW[] = {'p','i','p','e'};
     static const WCHAR invalid_charsW[] = { INVALID_NT_CHARS, 0 };
 
     NTSTATUS status = STATUS_SUCCESS;
@@ -2754,6 +2756,7 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRI
     int pos, ret, name_len, unix_len, prefix_len;
     WCHAR prefix[MAX_DIR_ENTRY_LEN + 1];
     BOOLEAN is_unix = FALSE;
+    BOOLEAN is_pipe = FALSE;
 
     name     = nameW->Buffer;
     name_len = nameW->Length / sizeof(WCHAR);
@@ -2789,13 +2792,17 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRI
     name += prefix_len;
     name_len -= prefix_len;
 
-    /* check for invalid characters (all chars except 0 are valid for unix) */
-    is_unix = (prefix_len == 4 && !memcmp( prefix, unixW, sizeof(unixW) ));
-    if (is_unix)
+    /* check for invalid characters (all chars except 0 are valid for unix and pipes) */
+    if (prefix_len == 4)
+    {
+        is_unix = !memcmp( prefix, unixW, sizeof(unixW) );
+        is_pipe = !memcmp( prefix, pipeW, sizeof(pipeW) );
+    }
+    if (is_unix || is_pipe)
     {
         for (p = name; p < name + name_len; p++)
             if (!*p) return STATUS_OBJECT_NAME_INVALID;
-        check_case = TRUE;
+        check_case |= is_unix;
     }
     else
     {
@@ -2851,6 +2858,126 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRI
     return status;
 }
 
+/* read the contents of an NT symlink object */
+NTSTATUS read_nt_symlink( HANDLE root, UNICODE_STRING *name, WCHAR *target, size_t length )
+{
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING targetW;
+    NTSTATUS status;
+    HANDLE handle;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = root;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = name;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    if (!(status = NtOpenSymbolicLinkObject( &handle, SYMBOLIC_LINK_QUERY, &attr )))
+    {
+        targetW.Buffer = target;
+        targetW.MaximumLength = (length - 1) * sizeof(WCHAR);
+        status = NtQuerySymbolicLinkObject( handle, &targetW, NULL );
+        NtClose( handle );
+    }
+
+    return status;
+}
+
+/* try to find dos device based on nt device name */
+static NTSTATUS nt_to_dos_device( WCHAR *name, size_t length, WCHAR *device_ret )
+{
+    static const WCHAR dosdevicesW[] = {'\\','D','o','s','D','e','v','i','c','e','s',0};
+    UNICODE_STRING dosdevW;
+    WCHAR symlinkW[MAX_DIR_ENTRY_LEN];
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+    char data[1024];
+    HANDLE handle;
+    ULONG ctx = 0;
+
+    DIRECTORY_BASIC_INFORMATION *info = (DIRECTORY_BASIC_INFORMATION *)data;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &dosdevW;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    RtlInitUnicodeString( &dosdevW, dosdevicesW );
+    status = NtOpenDirectoryObject( &handle, FILE_LIST_DIRECTORY, &attr );
+    if (status) return STATUS_BAD_DEVICE_TYPE;
+
+    while (!NtQueryDirectoryObject( handle, info, sizeof(data), TRUE, FALSE, &ctx, NULL ))
+    {
+        if (read_nt_symlink( handle, &info->ObjectName, symlinkW, MAX_DIR_ENTRY_LEN )) continue;
+        if (wcsnicmp( symlinkW, name, length )) continue;
+        if (info->ObjectName.Length != 2 * sizeof(WCHAR) || info->ObjectName.Buffer[1] != ':') continue;
+
+        *device_ret = info->ObjectName.Buffer[0];
+        NtClose( handle );
+        return STATUS_SUCCESS;
+    }
+
+    NtClose( handle );
+    return STATUS_BAD_DEVICE_TYPE;
+}
+
+/******************************************************************************
+ *           wine_nt_to_unix_file_name  (NTDLL.@) Not a Windows API
+ *
+ * Convert a file name from NT namespace to Unix namespace.
+ *
+ * If disposition is not FILE_OPEN or FILE_OVERWRITE, the last path
+ * element doesn't have to exist; in that case STATUS_NO_SUCH_FILE is
+ * returned, but the unix name is still filled in properly.
+ */
+NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
+                                          UINT disposition, BOOLEAN check_case )
+{
+    static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t','\\',0};
+    static const WCHAR dosprefixW[] = {'\\','?','?','\\'};
+    static const WCHAR deviceW[] = {'\\','D','e','v','i','c','e','\\',0};
+    WCHAR *name, *ptr, *prefix, buffer[3] = {'c',':',0};
+    UNICODE_STRING dospathW;
+    size_t offset, name_len;
+    NTSTATUS status;
+
+    if (!wcsnicmp( nameW->Buffer, deviceW, nameW->Length / sizeof(WCHAR) ))
+    {
+        offset = sizeof(deviceW) / sizeof(WCHAR);
+        while (offset * sizeof(WCHAR) < nameW->Length && nameW->Buffer[ offset ] != '\\') offset++;
+        if ((status = nt_to_dos_device( nameW->Buffer, offset, buffer ))) return status;
+        prefix = buffer;
+    }
+    else if (!wcsnicmp( nameW->Buffer, systemrootW, nameW->Length / sizeof(WCHAR) ))
+    {
+        offset = (sizeof(systemrootW) - 1) / sizeof(WCHAR);
+        prefix = user_shared_data->NtSystemRoot;
+    }
+    else
+        return nt_to_unix_file_name_internal( nameW, unix_name_ret, disposition, check_case );
+
+    name_len = sizeof(dosprefixW) + wcslen(prefix) * sizeof(WCHAR) +
+               nameW->Length - offset * sizeof(WCHAR) + sizeof(WCHAR);
+    if (!(name = RtlAllocateHeap( GetProcessHeap(), 0, name_len )))
+        return STATUS_NO_MEMORY;
+
+    ptr = name;
+    memcpy( ptr, dosprefixW, sizeof(dosprefixW) );
+    ptr += sizeof(dosprefixW) / sizeof(WCHAR);
+    wcscpy( ptr, prefix );
+    ptr += wcslen(ptr);
+    memcpy( ptr, nameW->Buffer + offset, nameW->Length - offset * sizeof(WCHAR) );
+    ptr[ nameW->Length / sizeof(WCHAR) - offset ] = 0;
+
+    RtlInitUnicodeString( &dospathW, name );
+    status = nt_to_unix_file_name_internal( &dospathW, unix_name_ret, disposition, check_case );
+
+    RtlFreeHeap( GetProcessHeap(), 0, name );
+    return status;
+}
 
 /******************************************************************
  *		RtlWow64EnableFsRedirection   (NTDLL.@)
@@ -2997,7 +3124,7 @@ NTSTATUS DIR_get_unix_cwd( char **cwd )
         attr.SecurityDescriptor = NULL;
         attr.SecurityQualityOfService = NULL;
 
-        status = NtOpenFile( &handle, SYNCHRONIZE, &attr, &io, 0,
+        status = __syscall_NtOpenFile( &handle, SYNCHRONIZE, &attr, &io, 0,
                              FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
         RtlFreeUnicodeString( &dirW );
         if (status != STATUS_SUCCESS) goto done;

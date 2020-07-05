@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdarg.h>
 
 #include "windef.h"
@@ -29,6 +31,7 @@
 #include "tmschema.h"
 
 #include "msstyles.h"
+#include "uxthemedll.h"
 
 #include "wine/debug.h"
 
@@ -46,6 +49,9 @@ HRESULT WINAPI GetThemeBool(HTHEME hTheme, int iPartId, int iStateId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeBool(hTheme, iPartId, iStateId, iPropId, pfVal);
+
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_BOOL, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
     return MSSTYLES_GetPropertyBool(tp, pfVal);
@@ -62,6 +68,9 @@ HRESULT WINAPI GetThemeColor(HTHEME hTheme, int iPartId, int iStateId,
     TRACE("(%d, %d, %d)\n", iPartId, iStateId, iPropId);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeColor(hTheme, iPartId, iStateId, iPropId, pColor);
 
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_COLOR, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
@@ -81,6 +90,9 @@ HRESULT WINAPI GetThemeEnumValue(HTHEME hTheme, int iPartId, int iStateId,
     TRACE("(%d, %d, %d)\n", iPartId, iStateId, iPropId);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeEnumValue(hTheme, iPartId, iStateId, iPropId, piVal);
 
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_ENUM, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
@@ -106,6 +118,9 @@ HRESULT WINAPI GetThemeFilename(HTHEME hTheme, int iPartId, int iStateId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeFilename(hTheme, iPartId, iStateId, iPropId, pszThemeFilename, cchMaxBuffChars);
+
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
     return MSSTYLES_GetPropertyString(tp, pszThemeFilename, cchMaxBuffChars);
@@ -122,6 +137,9 @@ HRESULT WINAPI GetThemeFont(HTHEME hTheme, HDC hdc, int iPartId,
     TRACE("(%d, %d, %d)\n", iPartId, iStateId, iPropId);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeFont(hTheme, hdc, iPartId, iStateId, iPropId, pFont);
 
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FONT, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
@@ -140,6 +158,9 @@ HRESULT WINAPI GetThemeInt(HTHEME hTheme, int iPartId, int iStateId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeInt(hTheme, iPartId, iStateId, iPropId, piVal);
+
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_INT, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
     return MSSTYLES_GetPropertyInt(tp, piVal);
@@ -156,6 +177,9 @@ HRESULT WINAPI GetThemeIntList(HTHEME hTheme, int iPartId, int iStateId,
     TRACE("(%d, %d, %d)\n", iPartId, iStateId, iPropId);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeIntList(hTheme, iPartId, iStateId, iPropId, pIntList);
 
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_INTLIST, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
@@ -174,6 +198,9 @@ HRESULT WINAPI GetThemePosition(HTHEME hTheme, int iPartId, int iStateId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemePosition(hTheme, iPartId, iStateId, iPropId, pPoint);
+
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_POSITION, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
     return MSSTYLES_GetPropertyPosition(tp, pPoint);
@@ -191,6 +218,9 @@ HRESULT WINAPI GetThemeRect(HTHEME hTheme, int iPartId, int iStateId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeRect(hTheme, iPartId, iStateId, iPropId, pRect);
+
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_RECT, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
     return MSSTYLES_GetPropertyRect(tp, pRect);
@@ -207,6 +237,9 @@ HRESULT WINAPI GetThemeString(HTHEME hTheme, int iPartId, int iStateId,
     TRACE("(%d, %d, %d)\n", iPartId, iStateId, iPropId);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeString(hTheme, iPartId, iStateId, iPropId, pszBuff, cchMaxBuffChars);
 
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_STRING, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
@@ -227,6 +260,9 @@ HRESULT WINAPI GetThemeMargins(HTHEME hTheme, HDC hdc, int iPartId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeMargins(hTheme, hdc, iPartId, iStateId, iPropId, prc, pMargins);
+
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_MARGINS, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
     return MSSTYLES_GetPropertyMargins(tp, prc, pMargins);
@@ -245,6 +281,9 @@ HRESULT WINAPI GetThemeMetric(HTHEME hTheme, HDC hdc, int iPartId,
     TRACE("(%d, %d, %d)\n", iPartId, iStateId, iPropId);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeMetric(hTheme, hdc, iPartId, iStateId, iPropId, piVal);
 
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, 0, iPropId)))
         return E_PROP_ID_UNSUPPORTED;
@@ -285,6 +324,9 @@ HRESULT WINAPI GetThemePropertyOrigin(HTHEME hTheme, int iPartId, int iStateId,
     TRACE("(%d, %d, %d)\n", iPartId, iStateId, iPropId);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemePropertyOrigin(hTheme, iPartId, iStateId, iPropId, pOrigin);
 
     if(!(tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, 0, iPropId))) {
         *pOrigin = PO_NOTFOUND;
