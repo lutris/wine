@@ -34,6 +34,18 @@
 
 #include "vulkan_thunks.h"
 
+#if defined(__GNUC__) || defined(__clang__)
+#include <alloca.h>
+#define WINEVULKAN_FORCEINLINE __attribute__((always_inline)) inline
+#define WINEVULKAN_ALLOCA(x)   alloca(x)
+#elif defined(_MSC_VER)
+#include <malloc.h>
+#define WINEVULKAN_FORCEINLINE __forceinline
+#define WINEVULKAN_ALLOCA(x)   _alloca(x)
+#else
+#error Unsupported platform for forceinline/alloca
+#endif
+
 /* Magic value defined by Vulkan ICD / Loader spec */
 #define VULKAN_ICD_MAGIC_VALUE 0x01CDC0DE
 
@@ -132,6 +144,10 @@ static inline VkCommandPool wine_cmd_pool_to_handle(struct wine_cmd_pool *cmd_po
 
 void *wine_vk_get_device_proc_addr(const char *name) DECLSPEC_HIDDEN;
 void *wine_vk_get_instance_proc_addr(const char *name) DECLSPEC_HIDDEN;
+
+BOOL wine_vk_device_extension_faked(const char *name) DECLSPEC_HIDDEN;
+unsigned int wine_vk_device_extension_faked_count(void) DECLSPEC_HIDDEN;
+const VkExtensionProperties* wine_vk_device_extension_faked_idx(unsigned int idx) DECLSPEC_HIDDEN;
 
 BOOL wine_vk_device_extension_supported(const char *name) DECLSPEC_HIDDEN;
 BOOL wine_vk_instance_extension_supported(const char *name) DECLSPEC_HIDDEN;
