@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -556,6 +558,10 @@ BOOL WINAPI IsAppThemed(void)
 BOOL WINAPI IsThemeActive(void)
 {
     TRACE("\n");
+
+    if (uxtheme_gtk_enabled())
+        return TRUE;
+
     SetLastError(ERROR_SUCCESS);
     return bThemeActive;
 }
@@ -584,6 +590,9 @@ HRESULT WINAPI EnableTheming(BOOL fEnable)
     WCHAR szEnabled[] = {'0','\0'};
 
     TRACE("(%d)\n", fEnable);
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_EnableTheming(fEnable);
 
     if(fEnable != bThemeActive) {
         if(fEnable) 
@@ -657,7 +666,9 @@ HTHEME WINAPI OpenThemeDataEx(HWND hwnd, LPCWSTR pszClassList, DWORD flags)
     if(flags)
         FIXME("unhandled flags: %x\n", flags);
 
-    if(bThemeActive)
+    if (uxtheme_gtk_enabled())
+        hTheme = uxtheme_gtk_OpenThemeDataEx(hwnd, pszClassList, flags);
+    else if (bThemeActive)
     {
         pszAppName = UXTHEME_GetWindowProperty(hwnd, atSubAppName, szAppBuff, ARRAY_SIZE(szAppBuff));
         /* If SetWindowTheme was used on the window, that overrides the class list passed to this function */
@@ -668,6 +679,7 @@ HTHEME WINAPI OpenThemeDataEx(HWND hwnd, LPCWSTR pszClassList, DWORD flags)
         if (pszUseClassList)
             hTheme = MSSTYLES_OpenThemeClass(pszAppName, pszUseClassList);
     }
+
     if(IsWindow(hwnd))
         SetPropW(hwnd, (LPCWSTR)MAKEINTATOM(atWindowTheme), hTheme);
     TRACE(" = %p\n", hTheme);
@@ -710,6 +722,10 @@ HRESULT WINAPI SetWindowTheme(HWND hwnd, LPCWSTR pszSubAppName,
     HRESULT hr;
     TRACE("(%p,%s,%s)\n", hwnd, debugstr_w(pszSubAppName),
           debugstr_w(pszSubIdList));
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_SetWindowTheme(hwnd, pszSubAppName, pszSubIdList);
+
     hr = UXTHEME_SetWindowProperty(hwnd, atSubAppName, pszSubAppName);
     if(SUCCEEDED(hr))
         hr = UXTHEME_SetWindowProperty(hwnd, atSubIdList, pszSubIdList);
@@ -735,6 +751,10 @@ HRESULT WINAPI GetCurrentThemeName(LPWSTR pszThemeFileName, int dwMaxNameChars,
                                    LPWSTR pszColorBuff, int cchMaxColorChars,
                                    LPWSTR pszSizeBuff, int cchMaxSizeChars)
 {
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetCurrentThemeName(pszThemeFileName, dwMaxNameChars,
+                pszColorBuff, cchMaxColorChars, pszSizeBuff, cchMaxSizeChars);
+
     if(!bThemeActive)
         return E_PROP_ID_UNSUPPORTED;
     if(pszThemeFileName) lstrcpynW(pszThemeFileName, szCurrentTheme, dwMaxNameChars);
@@ -748,6 +768,8 @@ HRESULT WINAPI GetCurrentThemeName(LPWSTR pszThemeFileName, int dwMaxNameChars,
  */
 DWORD WINAPI GetThemeAppProperties(void)
 {
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeAppProperties();
     return dwThemeAppProperties;
 }
 
@@ -757,6 +779,10 @@ DWORD WINAPI GetThemeAppProperties(void)
 void WINAPI SetThemeAppProperties(DWORD dwFlags)
 {
     TRACE("(0x%08x)\n", dwFlags);
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_SetThemeAppProperties(dwFlags);
+
     dwThemeAppProperties = dwFlags;
 }
 
@@ -768,6 +794,10 @@ HRESULT WINAPI CloseThemeData(HTHEME hTheme)
     TRACE("(%p)\n", hTheme);
     if(!hTheme || hTheme == INVALID_HANDLE_VALUE)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_CloseThemeData(hTheme);
+
     return MSSTYLES_CloseThemeClass(hTheme);
 }
 
@@ -795,6 +825,10 @@ BOOL WINAPI IsThemePartDefined(HTHEME hTheme, int iPartId, int iStateId)
         SetLastError(E_HANDLE);
         return FALSE;
     }
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_IsThemePartDefined(hTheme, iPartId, iStateId);
+
     if(MSSTYLES_FindPartState(hTheme, iPartId, iStateId, NULL))
         return TRUE;
     return FALSE;

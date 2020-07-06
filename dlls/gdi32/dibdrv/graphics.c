@@ -313,6 +313,60 @@ static int get_arc_points( int arc_dir, const RECT *rect, POINT start, POINT end
     return pos - count;
 }
 
+/*
+ Check if matrix has uniform scale and shear and contains a rotation.
+*/
+BOOL xform_has_rotate_and_uniform_scale_and_shear( const XFORM *xform )
+{
+    return xform->eM21 != 0 && xform->eM11 == xform->eM22 && -xform->eM21 == xform->eM12;
+}
+
+/*
+ Decompose rotation and translation from matrix xform.
+
+ If parameter rotation_and_translation is != NULL, save rotation and translation into it.
+
+ Note: The current implementation only works on matrixes with uniform scale and shear,
+       which has to be checked by a call to xform_has_rotate_and_uniform_scale_and_shear().
+       Hints how to get unique values for non-uniform matrixes are welcome.
+*/
+BOOL xform_decompose_rotation_and_translation( XFORM *xform, XFORM *rotation_and_translation )
+{
+    XFORM inverse_matrix_scale;
+    XFORM origin_matrix = *xform;
+    double determinant = 0;
+
+    /* xform = xfrom-transposed * xform */
+    xform->eM11 = sqrt( xform->eM11 * xform->eM11 + xform->eM21 * xform->eM21 );
+    xform->eM22 = sqrt( xform->eM12 * xform->eM12 + xform->eM22 * xform->eM22 );
+    xform->eM12 = 0;
+    xform->eM21 = 0;
+    xform->eDx = 0;
+    xform->eDy = 0;
+
+    if ( rotation_and_translation == NULL )
+        return TRUE;
+
+    if ( xform->eM11 == 0 || xform->eM22 == 0 )
+        return FALSE;
+
+    determinant = xform->eM11 * xform->eM22;
+
+    inverse_matrix_scale.eM11 = xform->eM22 / determinant;
+    inverse_matrix_scale.eM12 = 0;
+    inverse_matrix_scale.eM21 = 0;
+    inverse_matrix_scale.eM22 = xform->eM11 / determinant;
+
+    /* calculate the rotation matrix */
+    rotation_and_translation->eM11 = inverse_matrix_scale.eM11 * origin_matrix.eM11;
+    rotation_and_translation->eM12 = inverse_matrix_scale.eM11 * origin_matrix.eM12;
+    rotation_and_translation->eM21 = inverse_matrix_scale.eM22 * origin_matrix.eM12 * -1;
+    rotation_and_translation->eM22 = inverse_matrix_scale.eM22 * origin_matrix.eM22;
+    rotation_and_translation->eDx = origin_matrix.eDx;
+    rotation_and_translation->eDy = origin_matrix.eDy;
+    return TRUE;
+}
+
 /* backend for arc functions; extra_lines is -1 for ArcTo, 0 for Arc, 1 for Chord, 2 for Pie */
 static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                       INT start_x, INT start_y, INT end_x, INT end_y, INT extra_lines )
@@ -324,6 +378,22 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
     int width, height, count;
     BOOL ret = TRUE;
     HRGN outline = 0, interior = 0;
+
+    BOOL exclude_rotation = FALSE;
+    XFORM old;
+    XFORM rotation_and_translation;
+    if (GetGraphicsMode( pdev->dev.hdc ) == GM_ADVANCED)
+    {
+        XFORM xf;
+        GetWorldTransform( pdev->dev.hdc, &old );
+        xf = old;
+        if (xform_has_rotate_and_uniform_scale_and_shear( &xf ) &&
+            xform_decompose_rotation_and_translation( &xf, &rotation_and_translation ))
+        {
+            SetWorldTransform( pdev->dev.hdc, &xf );
+            exclude_rotation = TRUE;
+        }
+    }
 
     if (!get_pen_device_rect( dc, pdev, &rect, left, top, right, bottom )) return TRUE;
 
@@ -358,6 +428,16 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
         points[count].y = rect.top + height / 2;
         count++;
     }
+
+    if (exclude_rotation == TRUE)
+    {
+        SetWorldTransform( pdev->dev.hdc, &rotation_and_translation );
+        /* apply rotation and translation to calculated points */
+        LPtoDP( dev->hdc, points, count );
+        /* restore origin matrix */
+        SetWorldTransform( pdev->dev.hdc, &old );
+    }
+
     if (count < 2)
     {
         HeapFree( GetProcessHeap(), 0, points );
@@ -1475,6 +1555,23 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     BOOL ret = TRUE;
     HRGN outline = 0, interior = 0;
 
+    BOOL exclude_rotation_translation = FALSE;
+    XFORM old;
+    XFORM rotation_and_translation;
+
+    if (GetGraphicsMode( pdev->dev.hdc ) == GM_ADVANCED)
+    {
+        XFORM xf;
+        GetWorldTransform( pdev->dev.hdc, &old );
+        xf = old;
+        if (xform_has_rotate_and_uniform_scale_and_shear( &xf ) &&
+            xform_decompose_rotation_and_translation( &xf, &rotation_and_translation ))
+        {
+            SetWorldTransform( pdev->dev.hdc, &xf );
+            exclude_rotation_translation = TRUE;
+        }
+    }
+
     if (!get_pen_device_rect( dc, pdev, &rect, left, top, right, bottom )) return TRUE;
 
     pt[0].x = pt[0].y = 0;
@@ -1493,23 +1590,6 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     {
         HeapFree( GetProcessHeap(), 0, points );
         return FALSE;
-    }
-
-    if (pdev->brush.style != BS_NULL &&
-        !(interior = CreateRoundRectRgn( rect.left, rect.top, rect.right + 1, rect.bottom + 1,
-                                         ellipse_width, ellipse_height )))
-    {
-        HeapFree( GetProcessHeap(), 0, points );
-        if (outline) DeleteObject( outline );
-        return FALSE;
-    }
-
-    /* if not using a region, paint the interior first so the outline can overlap it */
-    if (interior && !outline)
-    {
-        ret = brush_region( pdev, interior );
-        DeleteObject( interior );
-        interior = 0;
     }
 
     count = ellipse_first_quadrant( ellipse_width, ellipse_height, points );
@@ -1555,13 +1635,37 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     }
     count = end + 1;
 
+    if (exclude_rotation_translation == TRUE)
+    {
+        SetWorldTransform( pdev->dev.hdc, &rotation_and_translation );
+        /* apply rotation and translation to calculated points */
+        LPtoDP( dev->hdc, points, count );
+        /* restore origin matrix */
+        SetWorldTransform( pdev->dev.hdc, &old );
+    }
+
+    if (pdev->brush.style != BS_NULL &&
+        !(interior = CreatePolygonRgn(points, count, ALTERNATE)))
+    {
+        HeapFree( GetProcessHeap(), 0, points );
+        if (outline) DeleteObject( outline );
+            return FALSE;
+    }
+
+    /* if not using a region, paint the interior first so the outline can overlap it */
+    if (interior && !outline)
+    {
+        ret = brush_region( pdev, interior );
+        DeleteObject( interior );
+        interior = 0;
+    }
+
     reset_dash_origin( pdev );
     pdev->pen_lines( pdev, count, points, TRUE, outline );
     add_pen_lines_bounds( pdev, count, points, outline );
 
     if (interior)
     {
-        CombineRgn( interior, interior, outline, RGN_DIFF );
         ret = brush_region( pdev, interior );
         DeleteObject( interior );
     }

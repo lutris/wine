@@ -34,6 +34,7 @@
 #include "dsconf.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dsound);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 /*******************************************************************************
  *		IDirectSoundNotify
@@ -857,6 +858,25 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetObjectInPath(IDirectSoundBuffer8
 	if (!ppObject)
 		return E_INVALIDARG;
 
+    if(dwIndex == 0 && !IsEqualGUID(rguidObject, &GUID_All_Objects))
+    {
+        int i;
+
+        for(i = 0; i < This->num_filters; i++)
+        {
+            if(IsEqualGUID(rguidObject, &This->filters[i].guid))
+            {
+                if (SUCCEEDED(IMediaObject_QueryInterface(This->filters[i].obj, rguidInterface, ppObject)))
+                    return DS_OK;
+
+                return E_NOINTERFACE;
+            }
+        }
+
+        WARN("control unavailable\n");
+		return DSERR_OBJECTNOTFOUND;
+    }
+
 	if (IsEqualGUID(rguidObject, &This->filters[dwIndex].guid) || IsEqualGUID(rguidObject, &GUID_All_Objects)) {
 		if (SUCCEEDED(IMediaObject_QueryInterface(This->filters[dwIndex].obj, rguidInterface, ppObject)))
 			return DS_OK;
@@ -1107,7 +1127,9 @@ HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *ds
 	} else
 		DSOUND_RecalcVolPan(&(dsb->volpan));
 
-        InitializeSRWLock(&dsb->lock);
+    InitializeSRWLock(&dsb->lock);
+	if (dsb->device->eax.using_eax)
+		init_eax_buffer(dsb);
 
         /* register buffer */
         err = DirectSoundDevice_AddBuffer(device, dsb);
@@ -1148,6 +1170,8 @@ void secondarybuffer_destroy(IDirectSoundBufferImpl *This)
         HeapFree(GetProcessHeap(), 0, This->filters);
     }
 
+    free_eax_buffer(This);
+
     HeapFree(GetProcessHeap(), 0, This);
 
     TRACE("(%p) released\n", This);
@@ -1162,7 +1186,7 @@ HRESULT IDirectSoundBufferImpl_Duplicate(
     HRESULT hres = DS_OK;
     TRACE("(%p,%p,%p)\n", device, ppdsb, pdsb);
 
-    dsb = HeapAlloc(GetProcessHeap(),0,sizeof(*dsb));
+    dsb = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(*dsb));
     if (dsb == NULL) {
         WARN("out of memory\n");
         *ppdsb = NULL;
@@ -1198,6 +1222,8 @@ HRESULT IDirectSoundBufferImpl_Duplicate(
     DSOUND_RecalcFormat(dsb);
 
     InitializeSRWLock(&dsb->lock);
+
+    init_eax_buffer(dsb); /* FIXME: should we duplicate EAX properties? */
 
     /* register buffer */
     hres = DirectSoundDevice_AddBuffer(device, dsb);
@@ -1278,6 +1304,9 @@ static HRESULT WINAPI IKsPropertySetImpl_Get(IKsPropertySet *iface, REFGUID guid
     TRACE("(iface=%p,guidPropSet=%s,dwPropID=%d,pInstanceData=%p,cbInstanceData=%d,pPropData=%p,cbPropData=%d,pcbReturned=%p)\n",
     This,debugstr_guid(guidPropSet),dwPropID,pInstanceData,cbInstanceData,pPropData,cbPropData,pcbReturned);
 
+    if (IsEqualGUID(&DSPROPSETID_EAX_ReverbProperties, guidPropSet) || IsEqualGUID(&DSPROPSETID_EAXBUFFER_ReverbProperties, guidPropSet))
+        return EAX_Get(This, guidPropSet, dwPropID, pInstanceData, cbInstanceData, pPropData, cbPropData, pcbReturned);
+
     return E_PROP_ID_UNSUPPORTED;
 }
 
@@ -1289,6 +1318,9 @@ static HRESULT WINAPI IKsPropertySetImpl_Set(IKsPropertySet *iface, REFGUID guid
 
     TRACE("(%p,%s,%d,%p,%d,%p,%d)\n",This,debugstr_guid(guidPropSet),dwPropID,pInstanceData,cbInstanceData,pPropData,cbPropData);
 
+    if (IsEqualGUID(&DSPROPSETID_EAX_ReverbProperties, guidPropSet) || IsEqualGUID(&DSPROPSETID_EAXBUFFER_ReverbProperties, guidPropSet))
+        return EAX_Set(This, guidPropSet, dwPropID, pInstanceData, cbInstanceData, pPropData, cbPropData);
+
     return E_PROP_ID_UNSUPPORTED;
 }
 
@@ -1298,6 +1330,13 @@ static HRESULT WINAPI IKsPropertySetImpl_QuerySupport(IKsPropertySet *iface, REF
     IDirectSoundBufferImpl *This = impl_from_IKsPropertySet(iface);
 
     TRACE("(%p,%s,%d,%p)\n",This,debugstr_guid(guidPropSet),dwPropID,pTypeSupport);
+
+    if (EAX_QuerySupport(guidPropSet, dwPropID, pTypeSupport)) {
+        static int once;
+        if (!once++)
+            FIXME_(winediag)("EAX sound effects are enabled - try to disable it if your app crashes unexpectedly\n");
+        return S_OK;
+    }
 
     return E_PROP_ID_UNSUPPORTED;
 }

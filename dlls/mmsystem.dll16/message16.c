@@ -33,6 +33,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(winmm);
 
+struct mihdrWrap
+{
+    int ref;
+    SEGPTR mh16;
+    MIDIHDR hdr;
+};
+
 /* =================================
  *       A U X    M A P P E R S
  * ================================= */
@@ -88,7 +95,78 @@ static  void	                MMSYSTDRV_Mixer_MapCB(DWORD uMsg, DWORD_PTR* dwUser
  */
 static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_Map16To32W  (UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
 {
-    return MMSYSTEM_MAP_MSGERROR;
+    MMSYSTEM_MapType ret = MMSYSTEM_MAP_MSGERROR;
+
+    switch (wMsg)
+    {
+        case MIDM_GETNUMDEVS:
+        case MIDM_RESET:
+            ret = MMSYSTEM_MAP_OK;
+            break;
+
+        case MIDM_GETDEVCAPS:
+            {
+                LPMIDIINCAPSW  mic32 = HeapAlloc(GetProcessHeap(), 0, sizeof(LPMIDIINCAPS16) + sizeof(MIDIINCAPSW));
+                LPMIDIINCAPS16 mic16 = MapSL(*lpParam1);
+
+                if (mic32)
+                {
+                    *(LPMIDIINCAPS16 *)mic32 = mic16;
+                    mic32 = (LPMIDIINCAPSW)((LPSTR)mic32 + sizeof(LPMIDIINCAPS16));
+                    *lpParam1 = (DWORD)mic32;
+                    *lpParam2 = sizeof(LPMIDIINCAPSW);
+
+                    ret = MMSYSTEM_MAP_OKMEM;
+                }
+                else
+                    ret = MMSYSTEM_MAP_NOMEM;
+            }
+            break;
+
+        case MIDM_ADDBUFFER:
+        case MIDM_PREPARE:
+            {
+                struct mihdrWrap   *mh32 = HeapAlloc(GetProcessHeap(), 0, sizeof(struct mihdrWrap));
+                LPMIDIHDR16         mh16 = MapSL(*lpParam1);
+
+                if (mh32)
+                {
+                    mh32->ref = 2;
+                    mh32->mh16 = (SEGPTR)*lpParam1;
+                    mh32->hdr.lpData = MapSL((SEGPTR)mh16->lpData);
+                    mh32->hdr.dwBufferLength = mh16->dwBufferLength;
+                    mh32->hdr.dwBytesRecorded = mh16->dwBytesRecorded;
+                    mh32->hdr.dwUser = mh16->dwUser;
+                    mh32->hdr.dwFlags = mh16->dwFlags;
+                    mh16->lpNext = (MIDIHDR16*)mh32;
+                    *lpParam1 = (DWORD)&mh32->hdr;
+                    *lpParam2 = offsetof(MIDIHDR,dwOffset);
+
+                    ret = MMSYSTEM_MAP_OKMEM;
+                }
+                else
+                    ret = MMSYSTEM_MAP_NOMEM;
+            }
+            break;
+
+        case MIDM_UNPREPARE:
+            {
+                LPMIDIHDR16         mh16 = MapSL(*lpParam1);
+                struct mihdrWrap   *mh32 = (struct mihdrWrap *)mh16->lpNext;
+
+                mh32->ref++;
+
+                *lpParam1 = (DWORD)&mh32->hdr;
+                *lpParam2 = offsetof(MIDIHDR,dwOffset);
+
+                mh32->hdr.dwBufferLength = mh16->dwBufferLength;
+
+                ret = MMSYSTEM_MAP_OKMEM;
+            }
+            break;
+    }
+
+    return ret;
 }
 
 /**************************************************************************
@@ -96,7 +174,60 @@ static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_Map16To32W  (UINT wMsg, DWORD_PTR* lpP
  */
 static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_UnMap16To32W(UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
 {
-    return MMSYSTEM_MAP_MSGERROR;
+    MMSYSTEM_MapType    ret = MMSYSTEM_MAP_MSGERROR;
+
+    switch (wMsg)
+    {
+        case MIDM_GETNUMDEVS:
+        case MIDM_RESET:
+            ret = MMSYSTEM_MAP_OK;
+            break;
+
+        case MIDM_GETDEVCAPS:
+            {
+                LPMIDIINCAPSW   mic32 = (LPMIDIINCAPSW)(*lpParam1);
+                LPMIDIINCAPS16  mic16 = *(LPMIDIINCAPS16*)((LPSTR)mic32 - sizeof(LPMIDIINCAPS16));
+
+                mic16->wMid             = mic32->wMid;
+                mic16->wPid             = mic32->wPid;
+                mic16->vDriverVersion   = mic32->vDriverVersion;
+                WideCharToMultiByte( CP_ACP, 0, mic32->szPname, -1, mic16->szPname,
+                                     sizeof(mic16->szPname), NULL, NULL );
+                mic16->dwSupport        = mic32->dwSupport;
+                HeapFree(GetProcessHeap(), 0, (LPSTR)mic32 - sizeof(LPMIDIINCAPS16));
+                ret = MMSYSTEM_MAP_OK;
+            }
+            break;
+
+        case MIDM_PREPARE:
+        case MIDM_UNPREPARE:
+            {
+                struct mihdrWrap   *mh32 = CONTAINING_RECORD((MIDIHDR *)*lpParam1, struct mihdrWrap, hdr);
+                LPMIDIHDR16         mh16;
+
+                if (mh32->mh16)
+                {
+                    mh16 = MapSL(mh32->mh16);
+                    assert((struct mihdrWrap *)mh16->lpNext == mh32);
+                    mh16->dwFlags = mh32->hdr.dwFlags;
+
+                    if (wMsg == MODM_UNPREPARE && fn_ret == MMSYSERR_NOERROR)
+                    {
+                        mh32->mh16 = 0;
+                        mh32->ref--;
+                        mh16->lpNext = 0;
+                    }
+                }
+
+                if (!--mh32->ref)
+                    HeapFree(GetProcessHeap(), 0, mh32);
+
+                ret = MMSYSTEM_MAP_OK;
+            }
+            break;
+
+    }
+    return ret;
 }
 
 /**************************************************************************
@@ -117,13 +248,13 @@ static  void            	MMSYSTDRV_MidiIn_MapCB(UINT uMsg, DWORD_PTR* dwUser, DW
     case MIM_LONGDATA:
     case MIM_LONGERROR:
         {
-	    LPMIDIHDR		mh32 = (LPMIDIHDR)(*dwParam1);
-	    SEGPTR		segmh16 = *(SEGPTR*)((LPSTR)mh32 - sizeof(LPMIDIHDR));
-	    LPMIDIHDR16		mh16 = MapSL(segmh16);
+	        struct mihdrWrap   *mh32 = CONTAINING_RECORD((MIDIHDR *)*dwParam1, struct mihdrWrap, hdr);
+	        SEGPTR              segmh16 = mh32->mh16;
+	        LPMIDIHDR16         mh16 = MapSL(segmh16);
 
-	    *dwParam1 = (DWORD)segmh16;
-	    mh16->dwFlags = mh32->dwFlags;
-	    mh16->dwBytesRecorded = mh32->dwBytesRecorded;
+	        *dwParam1 = (DWORD)segmh16;
+	        mh16->dwFlags = mh32->hdr.dwFlags;
+	        mh16->dwBytesRecorded = mh32->hdr.dwBytesRecorded;
 	}
 	break;
     default:
@@ -175,42 +306,49 @@ static MMSYSTEM_MapType	MMSYSTDRV_MidiOut_Map16To32W  (UINT wMsg, DWORD_PTR* lpP
 	break;
     case MODM_PREPARE:
 	{
-	    LPMIDIHDR		mh32 = HeapAlloc(GetProcessHeap(), 0, sizeof(LPMIDIHDR) + sizeof(MIDIHDR));
-	    LPMIDIHDR16		mh16 = MapSL(*lpParam1);
+        struct mihdrWrap   *mh32 = HeapAlloc(GetProcessHeap(), 0, sizeof(struct mihdrWrap));
+        LPMIDIHDR16         mh16 = MapSL(*lpParam1);
 
-	    if (mh32) {
-		*(LPMIDIHDR*)mh32 = (LPMIDIHDR)*lpParam1;
-		mh32 = (LPMIDIHDR)((LPSTR)mh32 + sizeof(LPMIDIHDR));
-		mh32->lpData = MapSL((SEGPTR)mh16->lpData);
-		mh32->dwBufferLength = mh16->dwBufferLength;
-		mh32->dwBytesRecorded = mh16->dwBytesRecorded;
-		mh32->dwUser = mh16->dwUser;
-		mh32->dwFlags = mh16->dwFlags;
-		mh16->lpNext = (MIDIHDR16*)mh32; /* for reuse in unprepare and write */
-		*lpParam1 = (DWORD)mh32;
-		*lpParam2 = offsetof(MIDIHDR,dwOffset); /* old size, without dwOffset */
+        if (mh32)
+        {
+            mh32->ref = 2;
+            mh32->mh16 = (SEGPTR)*lpParam1;
+            mh32->hdr.lpData = MapSL((SEGPTR)mh16->lpData);
+            mh32->hdr.dwBufferLength = mh16->dwBufferLength;
+            mh32->hdr.dwBytesRecorded = mh16->dwBytesRecorded;
+            mh32->hdr.dwUser = mh16->dwUser;
+            mh32->hdr.dwFlags = mh16->dwFlags;
+            mh16->lpNext = (MIDIHDR16*)mh32; /* for reuse in unprepare and write */
+            *lpParam1 = (DWORD)&mh32->hdr;
+            *lpParam2 = offsetof(MIDIHDR,dwOffset); /* old size, without dwOffset */
 
-		ret = MMSYSTEM_MAP_OKMEM;
-	    } else {
-		ret = MMSYSTEM_MAP_NOMEM;
-	    }
+            ret = MMSYSTEM_MAP_OKMEM;
+        }
+        else
+            ret = MMSYSTEM_MAP_NOMEM;
 	}
 	break;
     case MODM_UNPREPARE:
     case MODM_LONGDATA:
 	{
-	    LPMIDIHDR16		mh16 = MapSL(*lpParam1);
-	    LPMIDIHDR		mh32 = (MIDIHDR*)mh16->lpNext;
+        LPMIDIHDR16         mh16 = MapSL(*lpParam1);
+        struct mihdrWrap   *mh32 = (struct mihdrWrap*)mh16->lpNext;
 
-	    *lpParam1 = (DWORD)mh32;
-	    *lpParam2 = offsetof(MIDIHDR,dwOffset);
-	    /* dwBufferLength can be reduced between prepare & write */
-	    if (wMsg == MODM_LONGDATA && mh32->dwBufferLength < mh16->dwBufferLength) {
-		ERR("Size of buffer has been increased from %d to %d, keeping initial value\n",
-		    mh32->dwBufferLength, mh16->dwBufferLength);
-	    } else
-                mh32->dwBufferLength = mh16->dwBufferLength;
-	    ret = MMSYSTEM_MAP_OKMEM;
+        mh32->ref++;
+
+        *lpParam1 = (DWORD)&mh32->hdr;
+        *lpParam2 = offsetof(MIDIHDR,dwOffset);
+
+        /* dwBufferLength can be reduced between prepare & write */
+        if (wMsg == MODM_LONGDATA && mh32->hdr.dwBufferLength < mh16->dwBufferLength)
+        {
+            ERR("Size of buffer has been increased from %d to %d, keeping initial value\n",
+                mh32->hdr.dwBufferLength, mh16->dwBufferLength);
+        }
+        else
+            mh32->hdr.dwBufferLength = mh16->dwBufferLength;
+
+        ret = MMSYSTEM_MAP_OKMEM;
 	}
 	break;
 
@@ -267,17 +405,28 @@ static  MMSYSTEM_MapType	MMSYSTDRV_MidiOut_UnMap16To32W(UINT wMsg, DWORD_PTR* lp
     case MODM_UNPREPARE:
     case MODM_LONGDATA:
 	{
-	    LPMIDIHDR		mh32 = (LPMIDIHDR)(*lpParam1);
-	    LPMIDIHDR16		mh16 = MapSL(*(SEGPTR*)((LPSTR)mh32 - sizeof(LPMIDIHDR)));
+        struct mihdrWrap   *mh32 = CONTAINING_RECORD((MIDIHDR *)*lpParam1, struct mihdrWrap, hdr);
+        LPMIDIHDR16         mh16;
 
-	    assert((MIDIHDR*)mh16->lpNext == mh32);
-	    mh16->dwFlags = mh32->dwFlags;
+        /* Prosound unprepares the buffer during a callback */
+        if (mh32->mh16)
+        {
+            mh16 = MapSL(mh32->mh16);
+            assert((struct mihdrWrap *)mh16->lpNext == mh32);
+            mh16->dwFlags = mh32->hdr.dwFlags;
 
-	    if (wMsg == MODM_UNPREPARE && fn_ret == MMSYSERR_NOERROR) {
-		HeapFree(GetProcessHeap(), 0, (LPSTR)mh32 - sizeof(LPMIDIHDR));
-		mh16->lpNext = 0;
-	    }
-	    ret = MMSYSTEM_MAP_OK;
+            if (wMsg == MODM_UNPREPARE && fn_ret == MMSYSERR_NOERROR)
+            {
+                mh32->mh16 = 0;
+                mh32->ref--;
+                mh16->lpNext = 0;
+            }
+        }
+
+        if (!--mh32->ref)
+            HeapFree(GetProcessHeap(), 0, mh32);
+
+        ret = MMSYSTEM_MAP_OK;
 	}
 	break;
 
@@ -307,12 +456,12 @@ static  void MMSYSTDRV_MidiOut_MapCB(UINT uMsg, DWORD_PTR* dwUser, DWORD_PTR* dw
     case MOM_DONE:
         {
 	    /* initial map is: 16 => 32 */
-	    LPMIDIHDR		mh32 = (LPMIDIHDR)(*dwParam1);
-	    SEGPTR		segmh16 = *(SEGPTR*)((LPSTR)mh32 - sizeof(LPMIDIHDR));
-	    LPMIDIHDR16		mh16 = MapSL(segmh16);
+        struct mihdrWrap   *mh32 = CONTAINING_RECORD((MIDIHDR *)*dwParam1, struct mihdrWrap, hdr);
+        SEGPTR              segmh16 = mh32->mh16;
+        LPMIDIHDR16         mh16 = MapSL(segmh16);
 
-	    *dwParam1 = (DWORD)segmh16;
-	    mh16->dwFlags = mh32->dwFlags;
+        *dwParam1 = (DWORD)segmh16;
+        mh16->dwFlags = mh32->hdr.dwFlags;
 	}
 	break;
     default:
