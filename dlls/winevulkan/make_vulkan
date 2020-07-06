@@ -102,7 +102,6 @@ BLACKLISTED_EXTENSIONS = [
     "VK_AMD_display_native_hdr",
     "VK_EXT_calibrated_timestamps",
     "VK_EXT_display_control", # Requires VK_EXT_display_surface_counter
-    "VK_EXT_full_screen_exclusive",
     "VK_EXT_hdr_metadata", # Needs WSI work.
     "VK_EXT_pipeline_creation_feedback",
     "VK_GOOGLE_display_timing",
@@ -133,6 +132,11 @@ CORE_EXTENSIONS = [
     "VK_KHR_surface",
     "VK_KHR_swapchain",
     "VK_KHR_win32_surface",
+    "VK_KHR_get_surface_capabilities2",
+]
+
+FAKED_EXTENSIONS = [
+    {"name": "VK_EXT_full_screen_exclusive", "version": 4}
 ]
 
 # Functions part of our winevulkan graphics driver interface.
@@ -181,9 +185,9 @@ FUNCTION_OVERRIDES = {
     # VK_KHR_surface
     "vkDestroySurfaceKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
     "vkGetPhysicalDeviceSurfaceSupportKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
-    "vkGetPhysicalDeviceSurfaceCapabilitiesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
+    "vkGetPhysicalDeviceSurfaceCapabilitiesKHR" : {"dispatch" : True, "driver" : True, "thunk" : False, "private_thunk" : True},
     "vkGetPhysicalDeviceSurfaceFormatsKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
-    "vkGetPhysicalDeviceSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
+    "vkGetPhysicalDeviceSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True, "private_thunk" : True},
 
     # VK_KHR_get_surface_capabilities2
     "vkGetPhysicalDeviceSurfaceCapabilities2KHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
@@ -194,10 +198,11 @@ FUNCTION_OVERRIDES = {
     "vkGetPhysicalDeviceWin32PresentationSupportKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
 
     # VK_KHR_swapchain
-    "vkCreateSwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
-    "vkDestroySwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
-    "vkGetSwapchainImagesKHR": {"dispatch" : True, "driver" : True, "thunk" : True},
-    "vkQueuePresentKHR": {"dispatch" : True, "driver" : True, "thunk" : True},
+    "vkAcquireNextImageKHR": {"dispatch" : True, "driver" : False, "thunk" : False},
+    "vkCreateSwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : False},
+    "vkDestroySwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : False},
+    "vkGetSwapchainImagesKHR": {"dispatch" : True, "driver" : True, "thunk" : False},
+    "vkQueuePresentKHR": {"dispatch" : True, "driver" : True, "thunk" : False},
 
     # VK_KHR_external_fence_capabilities
     "vkGetPhysicalDeviceExternalFencePropertiesKHR" : {"dispatch" : False, "driver" : False, "thunk" : False},
@@ -213,15 +218,24 @@ FUNCTION_OVERRIDES = {
     "vkEnumeratePhysicalDeviceGroupsKHR" : {"dispatch" : True, "driver" : False, "thunk" : False},
 
     # VK_KHR_device_group
-    "vkGetDeviceGroupSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
+    "vkGetDeviceGroupSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True, "private_thunk": True},
     "vkGetPhysicalDevicePresentRectanglesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
+
+    # VK_KHR_get_surface_capabilities2
+    #"vkGetPhysicalDeviceSurfaceCapabilities2KHR" : {"dispatch" : True, "driver" : True, "thunk" : False, "private_thunk" : True},
+    #"vkGetPhysicalDeviceSurfaceFormats2KHR" : {"dispatch" : True, "driver" : True, "thunk" : False, "private_thunk" : True},
+
+    # VK_EXT_full_screen_exclusive
+    "vkGetPhysicalDeviceSurfacePresentModes2EXT" : {"dispatch" : True, "driver" : False, "thunk" : False},
+    "vkGetDeviceGroupSurfacePresentModes2EXT" : {"dispatch" : True, "driver" : False, "thunk" : False},
+    "vkAcquireFullScreenExclusiveModeEXT" : {"dispatch" : True, "driver" : False, "thunk" : False},
+    "vkReleaseFullScreenExclusiveModeEXT" : {"dispatch" : True, "driver" : False, "thunk" : False},
 }
 
 STRUCT_CHAIN_CONVERSIONS = [
     "VkDeviceCreateInfo",
     "VkInstanceCreateInfo",
 ]
-
 
 class Direction(Enum):
     """ Parameter direction: input, output, input_output. """
@@ -694,13 +708,6 @@ class VkFunction(object):
 
             body += p.copy(Direction.OUTPUT)
 
-        # Perform any required cleanups. Most of these are for array functions.
-        for p in self.params:
-            if not p.needs_free():
-                continue
-
-            body += p.free()
-
         # Finally return the result.
         if self.type != "void":
             body += "    return result;\n"
@@ -1112,9 +1119,6 @@ class VkMember(object):
         else:
             conversions.append(ConversionFunction(False, False, direction, struct))
 
-        if self.needs_free():
-            conversions.append(FreeFunction(self.is_dynamic_array(), struct))
-
         return conversions
 
     def is_const(self):
@@ -1179,17 +1183,6 @@ class VkMember(object):
 
         struct = self.type_info["data"]
         return struct.needs_conversion()
-
-    def needs_free(self):
-        if not self.needs_conversion():
-            return False
-
-        if self.is_dynamic_array():
-            return True
-
-        # TODO: some non-pointer structs and optional pointer structs may need freeing,
-        # though none of this type have been encountered yet.
-        return False
 
     def needs_struct_extensions_conversion(self):
         if not self.is_struct():
@@ -1275,11 +1268,6 @@ class VkParam(object):
         # Output functions require host to win conversion.
         if self._direction in [Direction.INPUT_OUTPUT, Direction.OUTPUT]:
             self.output_conv = ConversionFunction(False, self.is_dynamic_array(), Direction.OUTPUT, self.struct)
-
-        # Dynamic arrays, but also some normal structs (e.g. VkCommandBufferBeginInfo) need memory
-        # allocation and thus some cleanup.
-        if self.is_dynamic_array() or self.struct.needs_free():
-            self.free_func = FreeFunction(self.is_dynamic_array(), self.struct)
 
     def _set_direction(self):
         """ Internal helper function to set parameter direction (input/output/input_output). """
@@ -1397,6 +1385,9 @@ class VkParam(object):
 
         return self._direction
 
+    def format_string(self):
+        return self.format_str
+
     def dispatch_table(self):
         """ Return functions dispatch table pointer for dispatchable objects. """
 
@@ -1407,20 +1398,6 @@ class VkParam(object):
 
     def format_string(self):
         return self.format_str
-
-    def free(self):
-        if self.is_dynamic_array():
-            if self.struct.returnedonly:
-                # For returnedonly, counts is stored in a pointer.
-                return "    free_{0}_array({1}_host, *{2});\n".format(self.type, self.name, self.dyn_array_len)
-            else:
-                return "    free_{0}_array({1}_host, {2});\n".format(self.type, self.name, self.dyn_array_len)
-        else:
-            # We are operating on a single structure. Some structs (very rare) contain dynamic members,
-            # which would need freeing.
-            if self.struct.needs_free():
-                return "    free_{0}(&{1}_host);\n".format(self.type, self.name)
-        return ""
 
     def get_conversions(self):
         """ Get a list of conversions required for this parameter if any.
@@ -1458,8 +1435,6 @@ class VkParam(object):
             conversions.append(self.input_conv)
         if self.output_conv is not None:
             conversions.append(self.output_conv)
-        if self.free_func is not None:
-            conversions.append(self.free_func)
 
         return conversions
 
@@ -1506,9 +1481,6 @@ class VkParam(object):
             return True
 
         return False
-
-    def needs_free(self):
-        return self.free_func is not None
 
     def needs_input_conversion(self):
         return self.input_conv is not None
@@ -1739,17 +1711,6 @@ class VkStruct(Sequence):
                 return True
         return False
 
-    def needs_free(self):
-        """ Check if any struct member needs some memory freeing."""
-
-        for m in self.members:
-            if m.needs_free():
-                return True
-
-            continue
-
-        return False
-
     def needs_struct_extensions_conversion(self):
         """ Checks if structure extensions in pNext chain need conversion. """
         ret = False
@@ -1794,8 +1755,11 @@ class ConversionFunction(object):
             params = ["const {0} *in".format(self.type), "uint32_t count"]
             return_type = "{0}_host".format(self.type)
 
-        # Generate function prototype.
-        body = "static inline {0} *{1}(".format(return_type, self.name)
+        # We *must* forceinline otherwise our alloca will be
+        # garbage when this function returns.
+        # Regular inline won't cut it, alloca invalidates regular inlining.
+        body = "static WINEVULKAN_FORCEINLINE "
+        body += "{0} *{1}(".format(return_type, self.name)
         body += ", ".join(p for p in params)
         body += ")\n{\n"
 
@@ -1803,7 +1767,7 @@ class ConversionFunction(object):
         body += "    unsigned int i;\n\n"
         body += "    if (!in) return NULL;\n\n"
 
-        body += "    out = heap_alloc(count * sizeof(*out));\n"
+        body += "    out = WINEVULKAN_ALLOCA(count * sizeof(*out));\n"
 
         body += "    for (i = 0; i < count; i++)\n"
         body += "    {\n"
@@ -1826,7 +1790,8 @@ class ConversionFunction(object):
         else:
             params = ["const {0} *in".format(self.type), "{0}_host *out".format(self.type)]
 
-        body = "static inline void {0}(".format(self.name)
+        body = "static WINEVULKAN_FORCEINLINE "
+        body += "void {0}(".format(self.name)
 
         # Generate parameter list
         body += ", ".join(p for p in params)
@@ -1855,11 +1820,14 @@ class ConversionFunction(object):
 
         if self.direction == Direction.OUTPUT:
             params = ["const {0}_host *in".format(self.type), "{0} *out".format(self.type), "uint32_t count"]
+            return_type = self.type
         else:
             params = ["const {0} *in".format(self.type), "{0} *out_host".format(self.type), "uint32_t count"]
+            return_type = "{0}_host".format(self.type)
 
         # Generate function prototype.
-        body = "static inline void {0}(".format(self.name)
+        body = "static WINEVULKAN_FORCEINLINE "
+        body += "void {0}(".format(self.name)
         body += ", ".join(p for p in params)
         body += ")\n{\n"
         body += "    unsigned int i;\n\n"
@@ -1901,79 +1869,40 @@ class ConversionFunction(object):
         else:
             return self._generate_conversion_func()
 
+    def prototype(self):
+        if self.array:
+            if self.direction == Direction.OUTPUT:
+                params = ["const {0}_host *in".format(self.type), "{0} *out".format(self.type), "uint32_t count"]
+                return_type = self.type
+            else:
+                params = ["const {0} *in".format(self.type), "{0} *out_host".format(self.type), "uint32_t count"]
+                return_type = "{0}_host".format(self.type)
 
-class FreeFunction(object):
-    def __init__(self, dyn_array, struct):
-        self.dyn_array = dyn_array
-        self.struct = struct
-        self.type = struct.name
+            body = "static WINEVULKAN_FORCEINLINE void {0}(".format(self.name)
+            body += ", ".join(p for p in params)
+            body += ");\n"
+        elif self.dyn_array:
+            if self.direction == Direction.OUTPUT:
+                params = ["const {0}_host *in".format(self.type), "uint32_t count"]
+                return_type = self.type
+            else:
+                params = ["const {0} *in".format(self.type), "uint32_t count"]
+                return_type = "{0}_host".format(self.type)
 
-        if dyn_array:
-            self.name = "free_{0}_array".format(self.type)
+            body = "static WINEVULKAN_FORCEINLINE {0} *{1}(".format(return_type, self.name)
+            body += ", ".join(p for p in params)
+            body += ");\n"
         else:
-            self.name = "free_{0}".format(self.type)
+            if self.direction == Direction.OUTPUT:
+                params = ["const {0}_host *in".format(self.type), "{0} *out".format(self.type)]
+            else:
+                params = ["const {0} *in".format(self.type), "{0}_host *out".format(self.type)]
 
-    def __eq__(self, other):
-        return self.name == other.name
+            body = "static WINEVULKAN_FORCEINLINE void {0}(".format(self.name)
+            body += ", ".join(p for p in params)
+            body += ");\n"
 
-    def _generate_array_free_func(self):
-        """ Helper function for cleaning up temporary buffers required for array conversions. """
-
-        # Generate function prototype.
-        body = "static inline void {0}({1}_host *in, uint32_t count)\n{{\n".format(self.name, self.type)
-
-        # E.g. VkGraphicsPipelineCreateInfo_host needs freeing for pStages.
-        if self.struct.needs_free():
-            body += "    unsigned int i;\n\n"
-            body += "    if (!in) return;\n\n"
-            body += "    for (i = 0; i < count; i++)\n"
-            body += "    {\n"
-
-            for m in self.struct:
-                if m.needs_conversion() and m.is_dynamic_array():
-                    if m.is_const():
-                        # Add a cast to ignore const on conversion structs we allocated ourselves.
-                        body += "        free_{0}_array(({0}_host *)in[i].{1}, in[i].{2});\n".format(m.type, m.name, m.dyn_array_len)
-                    else:
-                        body += "        free_{0}_array(in[i].{1}, in[i].{2});\n".format(m.type, m.name, m.dyn_array_len)
-                elif m.needs_conversion():
-                    LOGGER.error("Unhandled conversion for {0}".format(m.name))
-            body += "    }\n"
-        else:
-            body += "    if (!in) return;\n\n"
-
-        body += "    heap_free(in);\n"
-
-        body += "}\n\n"
         return body
-
-    def _generate_free_func(self):
-        # E.g. VkCommandBufferBeginInfo.pInheritanceInfo needs freeing.
-        if not self.struct.needs_free():
-            return ""
-
-        # Generate function prototype.
-        body = "static inline void {0}({1}_host *in)\n{{\n".format(self.name, self.type)
-
-        for m in self.struct:
-            if m.needs_conversion() and m.is_dynamic_array():
-                count = m.dyn_array_len if isinstance(m.dyn_array_len, int) else "in->{0}".format(m.dyn_array_len)
-                if m.is_const():
-                    # Add a cast to ignore const on conversion structs we allocated ourselves.
-                    body += "    free_{0}_array(({0}_host *)in->{1}, {2});\n".format(m.type, m.name, count)
-                else:
-                    body += "    free_{0}_array(in->{1}, {2});\n".format(m.type, m.name, count)
-
-        body += "}\n\n"
-        return body
-
-    def definition(self):
-        if self.dyn_array:
-            return self._generate_array_free_func()
-        else:
-            # Some structures need freeing too if they contain dynamic arrays.
-            # E.g. VkCommandBufferBeginInfo
-            return self._generate_free_func()
 
 
 class StructChainConversionFunction(object):
@@ -2217,6 +2146,12 @@ class VkGenerator(object):
             f.write("    \"{0}\",\n".format(ext["name"]))
         f.write("};\n\n")
 
+        # Create array of faked device extensions.
+        f.write("static const VkExtensionProperties vk_device_extension_discards[] =\n{\n")
+        for ext in FAKED_EXTENSIONS:
+            f.write("    {{\"{0}\", {1}}},\n".format(ext["name"], ext["version"]))
+        f.write("};\n\n")
+
         # Create array of instance extensions.
         f.write("static const char * const vk_instance_extensions[] =\n{\n")
         for ext in self.registry.extensions:
@@ -2235,6 +2170,27 @@ class VkGenerator(object):
         f.write("            return TRUE;\n")
         f.write("    }\n")
         f.write("    return FALSE;\n")
+        f.write("}\n\n")
+
+        f.write("BOOL wine_vk_device_extension_faked(const char *name)\n")
+        f.write("{\n")
+        f.write("    unsigned int i;\n")
+        f.write("    for (i = 0; i < ARRAY_SIZE(vk_device_extension_discards); i++)\n")
+        f.write("    {\n")
+        f.write("        if (strcmp(vk_device_extension_discards[i].extensionName, name) == 0)\n")
+        f.write("            return TRUE;\n")
+        f.write("    }\n")
+        f.write("    return FALSE;\n")
+        f.write("}\n\n")
+
+        f.write("unsigned int wine_vk_device_extension_faked_count(void)\n")
+        f.write("{\n")
+        f.write("    return ARRAY_SIZE(vk_device_extension_discards);\n")
+        f.write("}\n\n")
+
+        f.write("const VkExtensionProperties* wine_vk_device_extension_faked_idx(unsigned int idx)\n")
+        f.write("{\n")
+        f.write("    return &vk_device_extension_discards[idx];\n")
         f.write("}\n\n")
 
         f.write("BOOL wine_vk_instance_extension_supported(const char *name)\n")
@@ -2477,6 +2433,14 @@ class VkGenerator(object):
             # stuff in there. For simplicity substitute with "void *".
             pfn = pfn.replace("PFN_vkVoidFunction", "void *")
             f.write("    {0};\n".format(pfn))
+
+        f.write("\n    /* Optional. Returns TRUE if FS hack is active, otherwise returns FALSE. If\n")
+        f.write("     * it returns TRUE, then real_sz will contain the actual display\n")
+        f.write("     * resolution; user_sz will contain the app's requested mode; and dst_blit\n")
+        f.write("     * will contain the area to blit the user image to in real coordinates.\n")
+        f.write("     * All parameters are optional. */\n")
+        f.write("    VkBool32 (*query_fs_hack)(VkExtent2D *real_sz, VkExtent2D *user_sz, VkRect2D *dst_blit, VkFilter *filter);\n")
+
         f.write("};\n\n")
 
         f.write("extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver(HDC hdc, UINT version);\n\n")
@@ -2517,6 +2481,11 @@ class VkGenerator(object):
         f.write("@ stdcall -private vk_icdGetInstanceProcAddr(ptr str) wine_vk_icdGetInstanceProcAddr\n")
         f.write("@ stdcall -private vk_icdNegotiateLoaderICDInterfaceVersion(ptr) wine_vk_icdNegotiateLoaderICDInterfaceVersion\n")
         f.write("@ cdecl -norelay native_vkGetInstanceProcAddrWINE(ptr str)\n")
+        f.write("@ stdcall __wine_get_native_VkDevice(ptr)\n")
+        f.write("@ stdcall __wine_get_native_VkInstance(ptr)\n")
+        f.write("@ stdcall __wine_get_native_VkPhysicalDevice(ptr)\n")
+        f.write("@ stdcall __wine_get_wrapped_VkPhysicalDevice(ptr)\n")
+        f.write("@ stdcall __wine_get_native_VkQueue(ptr)\n")
 
         # Export symbols for all Vulkan Core functions.
         for func in self.registry.funcs.values():

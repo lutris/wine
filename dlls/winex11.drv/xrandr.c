@@ -223,6 +223,9 @@ static void xrandr10_init_modes(void)
     int sizes_count;
     int i, j, nmodes = 0;
 
+    ERR("xrandr 1.2 support required\n");
+    return;
+
     sizes = pXRRSizes( gdi_display, DefaultScreen(gdi_display), &sizes_count );
     if (sizes_count <= 0) return;
 
@@ -499,10 +502,12 @@ static unsigned int get_frequency( const XRRModeInfo *mode )
 
 static int xrandr12_init_modes(void)
 {
-    unsigned int only_one_resolution = 1, mode_count;
+    unsigned int only_one_resolution = 1, mode_count, primary_width, primary_height;
     XRRScreenResources *resources;
     XRROutputInfo *output_info;
+    XRRModeInfo *primary_mode = NULL;
     XRRCrtcInfo *crtc_info;
+    unsigned int primary_refresh, primary_dots;
     int ret = -1;
     int i, j;
 
@@ -514,6 +519,14 @@ static int xrandr12_init_modes(void)
         pXRRFreeScreenResources( resources );
         ERR("Failed to get primary CRTC info.\n");
         return ret;
+    }
+
+    for (i = 0; i < resources->nmode; ++i)
+    {
+        if (resources->modes[i].id == crtc_info->mode)
+        {
+            primary_mode = &resources->modes[i];
+        }
     }
 
     TRACE("CRTC %d: mode %#lx, %ux%u+%d+%d.\n", primary_crtc, crtc_info->mode,
@@ -542,9 +555,33 @@ static int xrandr12_init_modes(void)
     }
 
     dd_modes = X11DRV_Settings_SetHandlers( "XRandR 1.2",
-                                            xrandr12_get_current_mode,
-                                            xrandr12_set_current_mode,
+                                            NULL,
+                                            NULL,
                                             output_info->nmode, 1 );
+
+    if(primary_mode)
+    {
+        primary_dots = primary_mode->hTotal * primary_mode->vTotal;
+        primary_refresh = primary_dots ? (primary_mode->dotClock + primary_dots / 2) / primary_dots : 0;
+        primary_width = primary_mode->width;
+        primary_height = primary_mode->height;
+
+    }
+    else
+    {
+        WARN("Couldn't find primary mode! defaulting to 60 Hz\n");
+        primary_refresh = 60;
+        primary_width = crtc_info->width;
+        primary_height = crtc_info->height;
+    }
+
+    if((crtc_info->rotation & RR_Rotate_90) ||
+            (crtc_info->rotation & RR_Rotate_270))
+    {
+        unsigned int tmp = primary_width;
+        primary_width = primary_height;
+        primary_height = tmp;
+    }
 
     xrandr_mode_count = 0;
     for (i = 0; i < output_info->nmode; ++i)
@@ -555,11 +592,22 @@ static int xrandr12_init_modes(void)
 
             if (mode->id == output_info->modes[i])
             {
-                unsigned int refresh = get_frequency( mode );
+                XRRModeInfo rotated_mode = *mode;
+                if((crtc_info->rotation & RR_Rotate_90) ||
+                        (crtc_info->rotation & RR_Rotate_270))
+                {
+                    unsigned int tmp = rotated_mode.width;
+                    rotated_mode.width = rotated_mode.height;
+                    rotated_mode.height = tmp;
+                }
 
-                TRACE("Adding mode %#lx: %ux%u@%u.\n", mode->id, mode->width, mode->height, refresh);
-                X11DRV_Settings_AddOneMode( mode->width, mode->height, 0, refresh );
-                xrandr12_modes[xrandr_mode_count++] = mode->id;
+                if(rotated_mode.width <= primary_width &&
+                        rotated_mode.height <= primary_height &&
+                        X11DRV_Settings_AddOneMode( rotated_mode.width, rotated_mode.height, 0, primary_refresh ))
+                {
+                    TRACE("Added mode %#lx: %ux%u@%u.\n", rotated_mode.id, rotated_mode.width, rotated_mode.height, primary_refresh);
+                    xrandr12_modes[xrandr_mode_count++] = rotated_mode.id;
+                }
                 break;
             }
         }
@@ -575,21 +623,7 @@ static int xrandr12_init_modes(void)
         }
     }
 
-    /* Recent (304.64, possibly earlier) versions of the nvidia driver only
-     * report a DFP's native mode through RandR 1.2 / 1.3. Standard DMT modes
-     * are only listed through RandR 1.0 / 1.1. This is completely useless,
-     * but NVIDIA considers this a feature, so it's unlikely to change. The
-     * best we can do is to fall back to RandR 1.0 and encourage users to
-     * consider more cooperative driver vendors when we detect such a
-     * configuration. */
-    if (only_one_resolution && XQueryExtension( gdi_display, "NV-CONTROL", &i, &j, &ret ))
-    {
-        ERR_(winediag)("Broken NVIDIA RandR detected, falling back to RandR 1.0. "
-                       "Please consider using the Nouveau driver instead.\n");
-        ret = -1;
-        HeapFree( GetProcessHeap(), 0, xrandr12_modes );
-        goto done;
-    }
+    X11DRV_Settings_SetRealMode(primary_width, primary_height);
 
     X11DRV_Settings_AddDepthModes();
     ret = 0;
@@ -952,7 +986,7 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
     XRRScreenResources *screen_resources = NULL;
     XRROutputInfo *output_info = NULL, *enum_output_info = NULL;
     XRRCrtcInfo *crtc_info = NULL, *enum_crtc_info;
-    INT primary_index = 0, monitor_count = 0, capacity;
+    INT primary_index = -1, monitor_count = 0, capacity;
     RECT work_rect, primary_rect;
     BOOL ret = FALSE;
     INT i;
@@ -1051,7 +1085,7 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
         }
 
         /* Make sure the first monitor is the primary */
-        if (primary_index)
+        if (primary_index > 0)
         {
             struct x11drv_monitor tmp = monitors[0];
             monitors[0] = monitors[primary_index];
@@ -1063,6 +1097,29 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
         {
             OffsetRect( &monitors[i].rc_monitor, -primary_rect.left, -primary_rect.top );
             OffsetRect( &monitors[i].rc_work, -primary_rect.left, -primary_rect.top );
+        }
+
+        if (primary_index >= 0 && fs_hack_enabled())
+        {
+            /* apply fs hack to primary monitor */
+            POINT fs_hack = fs_hack_current_mode();
+
+            monitors[0].rc_monitor.right = monitors[0].rc_monitor.left + fs_hack.x;
+            monitors[0].rc_monitor.bottom = monitors[0].rc_monitor.top + fs_hack.y;
+
+            fs_hack.x = monitors[0].rc_work.left;
+            fs_hack.y = monitors[0].rc_work.top;
+            fs_hack_real_to_user(&fs_hack);
+            monitors[0].rc_work.left = fs_hack.x;
+            monitors[0].rc_work.top = fs_hack.y;
+
+            fs_hack.x = monitors[0].rc_work.right;
+            fs_hack.y = monitors[0].rc_work.bottom;
+            fs_hack_real_to_user(&fs_hack);
+            monitors[0].rc_work.right = fs_hack.x;
+            monitors[0].rc_work.bottom = fs_hack.y;
+
+            /* TODO adjust other monitor positions */
         }
     }
 

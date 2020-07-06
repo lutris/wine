@@ -1,0 +1,68 @@
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Вт 07 июл 2020 02:28:25 MSK :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 5.7.r0.gc44e0cf60a
+Using wine-staging patchset (version 5.7.r0.g2ad422ff)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Using VKD3D for d3d12 translation
+
+
+2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted 
+( FS hack unbreak reverts applied )
+
+use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
+use_clock_monotonic-2.patch -- ( Applied clock_monotonic addon patch for 13e11d3 )
+FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
+staging-44d1a45-localreverts.patch -- ( Applied local reverts for staging 44d1a45 fshack )
+childwindow.patch -- ( Applied child window for vk patch )
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-nolegacy -W user32-rawinput-mouse-experimental -W user32-rawinput-hid -W winex11-key_translation
+
+ffxiv-launcher-workaround-4e6a477.patch -- ( Applied Final Fantasy XIV Launcher fix )
+fsync-staging-e5030a4.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
+fsync-staging-no_alloc_handle.patch -- ( Added no_alloc_handle object method to fsync )
+fsync-spincounts.patch -- ( Add a configurable spin count to fsync )
+
+valve_proton_fullscreen_hack-staging-707fcb9.patch -- ( Applied Proton fullscreen hack patch (707fcb9) )
+proton-rawinput-306c40e.patch -- ( Using rawinput patchset )
+0001-winex11-Match-keyboard-in-Unicode.patch -- ( Applied proton friendly winex11-Match-keyboard-in-Unicode )
+0002-winex11-Fix-more-key-translation.patch -- ( Applied proton friendly winex11-Fix-more-key-translation )
+0003-winex11.drv-Fix-main-Russian-keyboard-layout.patch -- ( Applied proton friendly winex11.drv-Fix-main-Russian-keyboard-layout )
+LAA-staging.patch -- ( Applied large address aware override support )
+proton-staging_winex11-MWM_Decorations.patch -- ( Applied proton friendly winex11-MWM_Decorations )
+
+proton-vk-bits-4.5-408a5a8.patch -- ( Enable Proton vulkan bits for 4.5+ )
+proton_fs_hack_integer_scaling.patch -- ( Enable Proton fs hack integer scaling )
+proton-winevulkan-d2f552d.patch -- ( Using Proton winevulkan patches )
+msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
+proton-win10-default.patch -- ( Enforce win10 as default wine version )
+dxvk_config_dxgi_support.patch -- ( Add support for dxvk_config library to Wine's dxgi )
+
+Applied your own patch Add-some-semi-stubs-in-user32.mypatch
+Applied your own patch blackops2_unhandled_exception_fix.mypatch
+Applied your own patch D3D12CreateVersionedRootSignatureDeserializer.mypatch
+Applied your own patch D3D12SerializeVersionedRootSignature.mypatch
+Applied your own patch faudio-ffmpeg.mypatch
+Applied your own patch GalaxyFix-AddSetEnvironmentStringsW-stub.mypatch
+Applied your own patch get_thread_context_diablo3_fix.mypatch
+Applied your own patch gta5_hack.mypatch
+Applied your own patch ldlibrary_chromium_fix.mypatch
+Applied your own patch legoisland_168726.mypatch
+Applied your own patch mfc42_handle.mypatch
+Applied your own patch mono-update.mypatch
+Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
+Applied your own patch origin_overlay_fix.mypatch
+Applied your own patch proton-amd_ags.mypatch
+Applied your own patch pulseaudio_app_names.mypatch
+Applied your own patch rockstar_installer_fix_heap.mypatch
+Applied your own patch rockstarlauncher_downloads.mypatch
+Applied your own patch starcitizen_tls_callback_fix.mypatch
+Applied your own patch starcitizen_voip_fix.mypatch
+Applied your own patch SW_JFO_Steam.mypatch
+Applied your own patch winex11-fs-no_above_state.mypatch
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

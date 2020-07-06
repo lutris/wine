@@ -474,6 +474,7 @@ static void update_xrender_clipping( struct xrender_physdev *dev, HRGN rgn )
     }
     else if ((data = X11DRV_GetRegionData( rgn, 0 )))
     {
+        fs_hack_rgndata_user_to_real(data);
         pXRenderSetPictureClipRectangles( gdi_display, dev->pict,
                                           dev->x11dev->dc_rect.left, dev->x11dev->dc_rect.top,
                                           (XRectangle *)data->Buffer, data->rdh.nCount );
@@ -1460,6 +1461,46 @@ static void multiply_alpha( Picture pict, XRenderPictFormat *format, int alpha,
     XFreePixmap( gdi_display, mask_pixmap );
 }
 
+/* if we are letterboxing, draw black bars */
+static void fs_hack_draw_black_bars( Picture dst_pict )
+{
+    static const XRenderColor black = { 0, 0, 0, 0xffff };
+    POINT tl, br;   /* top-left / bottom-right */
+    POINT real_mode = fs_hack_real_mode();
+    POINT size = fs_hack_get_scaled_screen_size();
+    XRenderPictureAttributes pa;
+
+    /* first unclip the picture, so that we can actually draw them */
+    pa.clip_mask = None;
+    pXRenderChangePicture( gdi_display, dst_pict, CPClipMask, &pa );
+
+    tl.x = tl.y = 0;
+    fs_hack_user_to_real(&tl);
+    br.x = tl.x + size.x;
+    br.y = tl.y + size.y;
+
+    if (tl.x > 0)
+    {
+        /* black bars left & right */
+        pXRenderFillRectangle(gdi_display, PictOpSrc, dst_pict, &black,
+                0, 0, /* x, y */
+                tl.x, real_mode.y);    /* w, h */
+        pXRenderFillRectangle(gdi_display, PictOpSrc, dst_pict, &black,
+                br.x, 0,
+                real_mode.x - br.x, real_mode.y);
+    }
+    else if (tl.y > 0)
+    {
+        /* black bars top & bottom */
+        pXRenderFillRectangle(gdi_display, PictOpSrc, dst_pict, &black,
+                0, 0,
+                real_mode.x, tl.y);
+        pXRenderFillRectangle(gdi_display, PictOpSrc, dst_pict, &black,
+                0, br.y,
+                real_mode.x, real_mode.y - br.y);
+    }
+}
+
 /* Helper function for (stretched) blitting using xrender */
 static void xrender_blit( int op, Picture src_pict, Picture mask_pict, Picture dst_pict,
                           int x_src, int y_src, int width_src, int height_src,
@@ -1467,6 +1508,20 @@ static void xrender_blit( int op, Picture src_pict, Picture mask_pict, Picture d
                           double xscale, double yscale )
 {
     int x_offset, y_offset;
+
+    if (fs_hack_mapping_required())
+    {
+        POINT p;
+        p.x = x_dst;
+        p.y = y_dst;
+        fs_hack_user_to_real(&p);
+        x_dst = p.x;
+        y_dst = p.y;
+        width_dst *= fs_hack_user_to_real_w;
+        height_dst *= fs_hack_user_to_real_h;
+        xscale /= fs_hack_user_to_real_w;
+        yscale /= fs_hack_user_to_real_h;
+    }
 
     if (width_src < 0)
     {
@@ -1507,6 +1562,9 @@ static void xrender_blit( int op, Picture src_pict, Picture mask_pict, Picture d
     }
     pXRenderComposite( gdi_display, op, src_pict, mask_pict, dst_pict,
                        x_offset, y_offset, 0, 0, x_dst, y_dst, width_dst, height_dst );
+
+    if (fs_hack_mapping_required())
+        fs_hack_draw_black_bars( dst_pict );
 }
 
 /* Helper function for (stretched) mono->color blitting using xrender */
@@ -1687,6 +1745,7 @@ static void xrender_put_image( Pixmap src_pixmap, Picture src_pict, Picture mask
         RGNDATA *clip_data = NULL;
 
         if (clip) clip_data = X11DRV_GetRegionData( clip, 0 );
+        fs_hack_rgndata_user_to_real(clip_data);
         x_dst = dst->x;
         y_dst = dst->y;
         dst_pict = pXRenderCreatePicture( gdi_display, drawable, dst_format, 0, NULL );
@@ -1726,6 +1785,10 @@ static BOOL CDECL xrenderdrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *
     struct xrender_physdev *physdev_src = get_xrender_dev( src_dev );
     BOOL stretch = (src->width != dst->width) || (src->height != dst->height);
 
+    TRACE("src %d,%d %dx%d vis=%s  dst %d,%d %dx%d vis=%s  rop=%06x\n",
+          src->x, src->y, src->width, src->height, wine_dbgstr_rect(&src->visrect),
+          dst->x, dst->y, dst->width, dst->height, wine_dbgstr_rect(&dst->visrect), rop );
+
     if (src_dev->funcs != dst_dev->funcs)
     {
         dst_dev = GET_NEXT_PHYSDEV( dst_dev, pStretchBlt );
@@ -1735,6 +1798,9 @@ static BOOL CDECL xrenderdrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *
     /* XRender is of no use for color -> mono */
     if (physdev_dst->format == WXR_FORMAT_MONO && physdev_src->format != WXR_FORMAT_MONO)
         goto x11drv_fallback;
+
+    if (fs_hack_mapping_required())
+        stretch = TRUE;
 
     /* if not stretching, we only need to handle format conversion */
     if (!stretch && physdev_dst->format == physdev_src->format) goto x11drv_fallback;
@@ -1754,8 +1820,17 @@ static BOOL CDECL xrenderdrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *
         tmpGC = XCreateGC( gdi_display, physdev_dst->x11dev->drawable, 0, NULL );
         XSetSubwindowMode( gdi_display, tmpGC, IncludeInferiors );
         XSetGraphicsExposures( gdi_display, tmpGC, False );
-        tmp_pixmap = XCreatePixmap( gdi_display, root_window, tmp.visrect.right - tmp.visrect.left,
-                                    tmp.visrect.bottom - tmp.visrect.top, physdev_dst->pict_format->depth );
+
+        if (fs_hack_mapping_required())
+        {
+            unsigned int real_width  = (tmp.visrect.right - tmp.visrect.left) * fs_hack_user_to_real_w;
+            unsigned int real_height = (tmp.visrect.bottom - tmp.visrect.top) * fs_hack_user_to_real_h;
+            tmp_pixmap = XCreatePixmap( gdi_display, root_window, real_width,
+                                        real_height, physdev_dst->pict_format->depth );
+        }
+        else
+            tmp_pixmap = XCreatePixmap( gdi_display, root_window, tmp.visrect.right - tmp.visrect.left,
+                                        tmp.visrect.bottom - tmp.visrect.top, physdev_dst->pict_format->depth );
 
         xrender_stretch_blit( physdev_src, physdev_dst, tmp_pixmap, src, &tmp );
         execute_rop( physdev_dst->x11dev, tmp_pixmap, tmpGC, &dst->visrect, rop );
@@ -1789,6 +1864,10 @@ static DWORD CDECL xrenderdrv_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info
     Pixmap src_pixmap;
     Picture src_pict, mask_pict = 0;
     BOOL use_repeat;
+
+    TRACE("src %d,%d %dx%d vis=%s  dst %d,%d %dx%d vis=%s  rop=%06x\n",
+          src->x, src->y, src->width, src->height, wine_dbgstr_rect(&src->visrect),
+          dst->x, dst->y, dst->width, dst->height, wine_dbgstr_rect(&dst->visrect), rop );
 
     dst_format = physdev->format;
     src_format = get_xrender_format_from_bitmapinfo( info );
@@ -1824,10 +1903,22 @@ static DWORD CDECL xrenderdrv_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info
             gc = XCreateGC( gdi_display, physdev->x11dev->drawable, 0, NULL );
             XSetSubwindowMode( gdi_display, gc, IncludeInferiors );
             XSetGraphicsExposures( gdi_display, gc, False );
-            tmp_pixmap = XCreatePixmap( gdi_display, root_window,
-                                        tmp.visrect.right - tmp.visrect.left,
-                                        tmp.visrect.bottom - tmp.visrect.top,
-                                        physdev->pict_format->depth );
+
+            if (fs_hack_mapping_required())
+            {
+                unsigned int real_width  = (tmp.visrect.right - tmp.visrect.left) * fs_hack_user_to_real_w;
+                unsigned int real_height = (tmp.visrect.bottom - tmp.visrect.top) * fs_hack_user_to_real_h;
+                tmp_pixmap = XCreatePixmap( gdi_display, root_window,
+                                            real_width, real_height,
+                                            physdev->pict_format->depth );
+            }
+            else
+            {
+                tmp_pixmap = XCreatePixmap( gdi_display, root_window,
+                                            tmp.visrect.right - tmp.visrect.left,
+                                            tmp.visrect.bottom - tmp.visrect.top,
+                                            physdev->pict_format->depth );
+            }
 
             xrender_put_image( src_pixmap, src_pict, mask_pict, NULL, physdev->pict_format,
                                NULL, tmp_pixmap, src, &tmp, use_repeat );

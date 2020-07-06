@@ -1603,8 +1603,18 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     if ((cs->style & WS_THICKFRAME) || !(cs->style & (WS_POPUP | WS_CHILD)))
     {
         MINMAXINFO info = WINPOS_GetMinMaxInfo( hwnd );
-        cx = max( min( cx, info.ptMaxTrackSize.x ), info.ptMinTrackSize.x );
-        cy = max( min( cy, info.ptMaxTrackSize.y ), info.ptMinTrackSize.y );
+
+        /* HACK: This code changes the window's size to fit the display. However,
+         * some games (Bayonetta, Dragon's Dogma) will then have the incorrect
+         * render size. So just let windows be too big to fit the display. */
+        if (__wine_get_window_manager() != WINE_WM_X11_STEAMCOMPMGR)
+        {
+            cx = min( cx, info.ptMaxTrackSize.x );
+            cy = min( cy, info.ptMaxTrackSize.y );
+        }
+
+        cx = max( cx, info.ptMinTrackSize.x );
+        cy = max( cy, info.ptMinTrackSize.y );
     }
 
     if (cx < 0) cx = 0;
@@ -2091,6 +2101,7 @@ HWND WINAPI GetDesktopWindow(void)
         WCHAR app[MAX_PATH + ARRAY_SIZE( explorer )];
         WCHAR cmdline[MAX_PATH + ARRAY_SIZE( explorer ) + ARRAY_SIZE( args )];
         WCHAR desktop[MAX_PATH];
+        char *ld_preload;
         HANDLE token;
         void *redir;
 
@@ -2127,6 +2138,12 @@ HWND WINAPI GetDesktopWindow(void)
         if (!(token = __wine_create_default_token( FALSE )))
             ERR( "Failed to create limited token\n" );
 
+        /* HACK: Unset LD_PRELOAD before executing explorer.exe to disable buggy gameoverlayrenderer.so
+         * It's not going to work through the CreateProcessW env parameter, as it will not be used for the loader execv.
+         */
+        if ((ld_preload = getenv("LD_PRELOAD")))
+            unsetenv("LD_PRELOAD");
+
         Wow64DisableWow64FsRedirection( &redir );
         if (CreateProcessAsUserW( token, app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
                                   NULL, windir, &si, &pi ))
@@ -2140,6 +2157,9 @@ HWND WINAPI GetDesktopWindow(void)
         Wow64RevertWow64FsRedirection( redir );
 
         if (token) CloseHandle( token );
+
+        /* HACK: Restore the previous value, just in case */
+        if (ld_preload) setenv("LD_PRELOAD", ld_preload, 1);
 
         SERVER_START_REQ( get_desktop_window )
         {

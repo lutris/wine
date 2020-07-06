@@ -125,8 +125,6 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
         return status;
     }
 
-    ext->link_handle = INVALID_HANDLE_VALUE;
-
     /* FIXME: This should probably be done in mouhid.sys. */
     if (ext->preparseData->caps.UsagePage == HID_USAGE_PAGE_GENERIC
             && ext->preparseData->caps.Usage == HID_USAGE_GENERIC_MOUSE)
@@ -134,6 +132,8 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
         if (!IoRegisterDeviceInterface(device, &GUID_DEVINTERFACE_MOUSE, NULL, &ext->mouse_link_name))
             ext->is_mouse = TRUE;
     }
+
+    ext->link_handle = INVALID_HANDLE_VALUE;
 
     return STATUS_SUCCESS;
 
