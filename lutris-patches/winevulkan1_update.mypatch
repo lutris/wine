@@ -1,0 +1,1599 @@
+From c4e35b9bce04c1cef0cc1ba2df52168a610da984 Mon Sep 17 00:00:00 2001
+From: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Date: Mon, 27 Apr 2020 08:05:20 -0700
+Subject: [PATCH 01/12] winevulkan: Update to VK spec version spec 1.2.139.
+
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Daniel Koch <dkoch@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan     |  2 +-
+ dlls/winevulkan/vulkan_thunks.c | 20 ++++++++++++++++++++
+ dlls/winevulkan/winevulkan.json |  2 +-
+ 3 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index 9cc5335c5d..5d9889620e 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -64,7 +64,7 @@ from enum import Enum
+ LOGGER = logging.Logger("vulkan")
+ LOGGER.addHandler(logging.StreamHandler())
+ 
+-VK_XML_VERSION = "1.2.138"
++VK_XML_VERSION = "1.2.139"
+ WINE_VK_VERSION = (1, 2)
+ 
+ # Filenames to create.
+diff --git a/dlls/winevulkan/vulkan_thunks.c b/dlls/winevulkan/vulkan_thunks.c
+index c5645f7db8..b36740a28e 100644
+--- a/dlls/winevulkan/vulkan_thunks.c
++++ b/dlls/winevulkan/vulkan_thunks.c
+@@ -2674,6 +2674,24 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
+             break;
+         }
+ 
++        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
++        {
++            const VkPhysicalDeviceRobustness2FeaturesEXT *in = (const VkPhysicalDeviceRobustness2FeaturesEXT *)in_header;
++            VkPhysicalDeviceRobustness2FeaturesEXT *out;
++
++            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;
++
++            out->sType = in->sType;
++            out->pNext = NULL;
++            out->robustBufferAccess2 = in->robustBufferAccess2;
++            out->robustImageAccess2 = in->robustImageAccess2;
++            out->nullDescriptor = in->nullDescriptor;
++
++            out_header->pNext = (VkBaseOutStructure *)out;
++            out_header = out_header->pNext;
++            break;
++        }
++
+         default:
+             FIXME("Application requested a linked structure of type %u.\n", in_header->sType);
+         }
+@@ -5614,6 +5632,7 @@ static const char * const vk_device_extensions[] =
+     "VK_EXT_pipeline_creation_cache_control",
+     "VK_EXT_post_depth_coverage",
+     "VK_EXT_queue_family_foreign",
++    "VK_EXT_robustness2",
+     "VK_EXT_sample_locations",
+     "VK_EXT_sampler_filter_minmax",
+     "VK_EXT_scalar_block_layout",
+@@ -5709,6 +5728,7 @@ static const char * const vk_device_extensions[] =
+     "VK_NV_shading_rate_image",
+     "VK_NV_viewport_array2",
+     "VK_NV_viewport_swizzle",
++    "VK_QCOM_render_pass_shader_resolve",
+     "VK_QCOM_render_pass_store_ops",
+     "VK_QCOM_render_pass_transform",
+ };
+diff --git a/dlls/winevulkan/winevulkan.json b/dlls/winevulkan/winevulkan.json
+index 5137b2e13c..f6a320d917 100644
+--- a/dlls/winevulkan/winevulkan.json
++++ b/dlls/winevulkan/winevulkan.json
+@@ -2,6 +2,6 @@
+     "file_format_version": "1.0.0",
+     "ICD": {
+         "library_path": ".\\winevulkan.dll",
+-        "api_version": "1.2.138"
++        "api_version": "1.2.139"
+     }
+ }
+-- 
+2.27.0
+
+
+From 727441cc24d54d9a6623d523788d4011c526ba94 Mon Sep 17 00:00:00 2001
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Date: Mon, 4 May 2020 20:29:58 +0200
+Subject: [PATCH 02/12] winevulkan: Support struct forward-declarations as base
+ types.
+
+Some types are basically forward-declared structs now, such
+as ANativeWindow.
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index 5d9889620e..e24dac9901 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -253,7 +253,10 @@ class VkBaseType(object):
+     def definition(self):
+         # Definition is similar for alias or non-alias as type
+         # is already set to alias.
+-        return "typedef {0} {1};\n".format(self.type, self.name)
++        if not self.type is None:
++            return "typedef {0} {1};\n".format(self.type, self.name)
++        else:
++            return "struct {0};\n".format(self.name)
+ 
+     def is_alias(self):
+         return bool(self.alias)
+@@ -2953,7 +2956,9 @@ class VkRegistry(object):
+ 
+             if type_info["category"] == "basetype":
+                 name = t.find("name").text
+-                _type = t.find("type").text
++                _type = None
++                if not t.find("type") is None:
++                    _type = t.find("type").text
+                 basetype = VkBaseType(name, _type)
+                 base_types.append(basetype)
+                 type_info["data"] = basetype
+-- 
+2.27.0
+
+
+From 4465ecfe0e3fa9fa14518abd1907193adb154957 Mon Sep 17 00:00:00 2001
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Date: Mon, 4 May 2020 22:12:10 +0200
+Subject: [PATCH 03/12] winevulkan: Avoid adding duplicate enum aliases.
+
+VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES_KHR is being
+defined multiple times by the current vk.xml.
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index e24dac9901..ccc3f228b0 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -395,7 +395,9 @@ class VkEnum(object):
+             if not value.is_alias() and v.value == value.value:
+                 LOGGER.debug("Adding duplicate enum value {0} to {1}".format(v, self.name))
+                 return
+-        self.values.append(value)
++        # Avoid adding duplicate aliases multiple times
++        if not any(x.name == value.name for x in self.values):
++            self.values.append(value)
+ 
+     def definition(self):
+         if self.is_alias():
+-- 
+2.27.0
+
+
+From d2f552d1508dbabb595eae23db9e5c157eaf9b41 Mon Sep 17 00:00:00 2001
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Date: Mon, 4 May 2020 20:30:00 +0200
+Subject: [PATCH 04/12] winevulkan: Update to VK spec version spec 1.2.140.
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan     |  2 +-
+ dlls/winevulkan/vulkan_thunks.c | 47 +++++++++++++++++++++++++++++++++
+ dlls/winevulkan/vulkan_thunks.h |  8 ++++++
+ dlls/winevulkan/winevulkan.json |  2 +-
+ 4 files changed, 57 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index ccc3f228b0..241686122c 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -64,7 +64,7 @@ from enum import Enum
+ LOGGER = logging.Logger("vulkan")
+ LOGGER.addHandler(logging.StreamHandler())
+ 
+-VK_XML_VERSION = "1.2.139"
++VK_XML_VERSION = "1.2.140"
+ WINE_VK_VERSION = (1, 2)
+ 
+ # Filenames to create.
+diff --git a/dlls/winevulkan/vulkan_thunks.c b/dlls/winevulkan/vulkan_thunks.c
+index b36740a28e..a7480bf2da 100644
+--- a/dlls/winevulkan/vulkan_thunks.c
++++ b/dlls/winevulkan/vulkan_thunks.c
+@@ -2642,6 +2642,23 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
+             break;
+         }
+ 
++        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT:
++        {
++            const VkPhysicalDeviceCustomBorderColorFeaturesEXT *in = (const VkPhysicalDeviceCustomBorderColorFeaturesEXT *)in_header;
++            VkPhysicalDeviceCustomBorderColorFeaturesEXT *out;
++
++            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;
++
++            out->sType = in->sType;
++            out->pNext = NULL;
++            out->customBorderColors = in->customBorderColors;
++            out->customBorderColorWithoutFormat = in->customBorderColorWithoutFormat;
++
++            out_header->pNext = (VkBaseOutStructure *)out;
++            out_header = out_header->pNext;
++            break;
++        }
++
+         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DIAGNOSTICS_CONFIG_FEATURES_NV:
+         {
+             const VkPhysicalDeviceDiagnosticsConfigFeaturesNV *in = (const VkPhysicalDeviceDiagnosticsConfigFeaturesNV *)in_header;
+@@ -3888,6 +3905,12 @@ VkResult WINAPI wine_vkCreatePipelineLayout(VkDevice device, const VkPipelineLay
+     return device->funcs.p_vkCreatePipelineLayout(device->device, pCreateInfo, NULL, pPipelineLayout);
+ }
+ 
++static VkResult WINAPI wine_vkCreatePrivateDataSlotEXT(VkDevice device, const VkPrivateDataSlotCreateInfoEXT *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkPrivateDataSlotEXT *pPrivateDataSlot)
++{
++    TRACE("%p, %p, %p, %p\n", device, pCreateInfo, pAllocator, pPrivateDataSlot);
++    return device->funcs.p_vkCreatePrivateDataSlotEXT(device->device, pCreateInfo, NULL, pPrivateDataSlot);
++}
++
+ VkResult WINAPI wine_vkCreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkQueryPool *pQueryPool)
+ {
+     TRACE("%p, %p, %p, %p\n", device, pCreateInfo, pAllocator, pQueryPool);
+@@ -4085,6 +4108,12 @@ void WINAPI wine_vkDestroyPipelineLayout(VkDevice device, VkPipelineLayout pipel
+     device->funcs.p_vkDestroyPipelineLayout(device->device, pipelineLayout, NULL);
+ }
+ 
++static void WINAPI wine_vkDestroyPrivateDataSlotEXT(VkDevice device, VkPrivateDataSlotEXT privateDataSlot, const VkAllocationCallbacks *pAllocator)
++{
++    TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(privateDataSlot), pAllocator);
++    device->funcs.p_vkDestroyPrivateDataSlotEXT(device->device, privateDataSlot, NULL);
++}
++
+ void WINAPI wine_vkDestroyQueryPool(VkDevice device, VkQueryPool queryPool, const VkAllocationCallbacks *pAllocator)
+ {
+     TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(queryPool), pAllocator);
+@@ -4949,6 +4978,12 @@ static VkResult WINAPI wine_vkGetPipelineExecutableStatisticsKHR(VkDevice device
+ #endif
+ }
+ 
++static void WINAPI wine_vkGetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlotEXT privateDataSlot, uint64_t *pData)
++{
++    TRACE("%p, %#x, 0x%s, 0x%s, %p\n", device, objectType, wine_dbgstr_longlong(objectHandle), wine_dbgstr_longlong(privateDataSlot), pData);
++    device->funcs.p_vkGetPrivateDataEXT(device->device, objectType, objectHandle, privateDataSlot, pData);
++}
++
+ VkResult WINAPI wine_vkGetQueryPoolResults(VkDevice device, VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount, size_t dataSize, void *pData, VkDeviceSize stride, VkQueryResultFlags flags)
+ {
+     TRACE("%p, 0x%s, %u, %u, 0x%s, %p, 0x%s, %#x\n", device, wine_dbgstr_longlong(queryPool), firstQuery, queryCount, wine_dbgstr_longlong(dataSize), pData, wine_dbgstr_longlong(stride), flags);
+@@ -5141,6 +5176,12 @@ VkResult WINAPI wine_vkSetEvent(VkDevice device, VkEvent event)
+     return device->funcs.p_vkSetEvent(device->device, event);
+ }
+ 
++static VkResult WINAPI wine_vkSetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlotEXT privateDataSlot, uint64_t data)
++{
++    TRACE("%p, %#x, 0x%s, 0x%s, 0x%s\n", device, objectType, wine_dbgstr_longlong(objectHandle), wine_dbgstr_longlong(privateDataSlot), wine_dbgstr_longlong(data));
++    return device->funcs.p_vkSetPrivateDataEXT(device->device, objectType, objectHandle, privateDataSlot, data);
++}
++
+ VkResult WINAPI wine_vkSignalSemaphore(VkDevice device, const VkSemaphoreSignalInfo *pSignalInfo)
+ {
+ #if defined(USE_STRUCT_CONVERSION)
+@@ -5377,6 +5418,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
+     {"vkCreateIndirectCommandsLayoutNV", &wine_vkCreateIndirectCommandsLayoutNV},
+     {"vkCreatePipelineCache", &wine_vkCreatePipelineCache},
+     {"vkCreatePipelineLayout", &wine_vkCreatePipelineLayout},
++    {"vkCreatePrivateDataSlotEXT", &wine_vkCreatePrivateDataSlotEXT},
+     {"vkCreateQueryPool", &wine_vkCreateQueryPool},
+     {"vkCreateRayTracingPipelinesNV", &wine_vkCreateRayTracingPipelinesNV},
+     {"vkCreateRenderPass", &wine_vkCreateRenderPass},
+@@ -5407,6 +5449,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
+     {"vkDestroyPipeline", &wine_vkDestroyPipeline},
+     {"vkDestroyPipelineCache", &wine_vkDestroyPipelineCache},
+     {"vkDestroyPipelineLayout", &wine_vkDestroyPipelineLayout},
++    {"vkDestroyPrivateDataSlotEXT", &wine_vkDestroyPrivateDataSlotEXT},
+     {"vkDestroyQueryPool", &wine_vkDestroyQueryPool},
+     {"vkDestroyRenderPass", &wine_vkDestroyRenderPass},
+     {"vkDestroySampler", &wine_vkDestroySampler},
+@@ -5460,6 +5503,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
+     {"vkGetPipelineExecutableInternalRepresentationsKHR", &wine_vkGetPipelineExecutableInternalRepresentationsKHR},
+     {"vkGetPipelineExecutablePropertiesKHR", &wine_vkGetPipelineExecutablePropertiesKHR},
+     {"vkGetPipelineExecutableStatisticsKHR", &wine_vkGetPipelineExecutableStatisticsKHR},
++    {"vkGetPrivateDataEXT", &wine_vkGetPrivateDataEXT},
+     {"vkGetQueryPoolResults", &wine_vkGetQueryPoolResults},
+     {"vkGetQueueCheckpointDataNV", &wine_vkGetQueueCheckpointDataNV},
+     {"vkGetRayTracingShaderGroupHandlesNV", &wine_vkGetRayTracingShaderGroupHandlesNV},
+@@ -5489,6 +5533,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
+     {"vkResetQueryPool", &wine_vkResetQueryPool},
+     {"vkResetQueryPoolEXT", &wine_vkResetQueryPoolEXT},
+     {"vkSetEvent", &wine_vkSetEvent},
++    {"vkSetPrivateDataEXT", &wine_vkSetPrivateDataEXT},
+     {"vkSignalSemaphore", &wine_vkSignalSemaphore},
+     {"vkSignalSemaphoreKHR", &wine_vkSignalSemaphoreKHR},
+     {"vkTrimCommandPool", &wine_vkTrimCommandPool},
+@@ -5613,6 +5658,7 @@ static const char * const vk_device_extensions[] =
+     "VK_EXT_buffer_device_address",
+     "VK_EXT_conditional_rendering",
+     "VK_EXT_conservative_rasterization",
++    "VK_EXT_custom_border_color",
+     "VK_EXT_depth_clip_enable",
+     "VK_EXT_depth_range_unrestricted",
+     "VK_EXT_descriptor_indexing",
+@@ -5631,6 +5677,7 @@ static const char * const vk_device_extensions[] =
+     "VK_EXT_pci_bus_info",
+     "VK_EXT_pipeline_creation_cache_control",
+     "VK_EXT_post_depth_coverage",
++    "VK_EXT_private_data",
+     "VK_EXT_queue_family_foreign",
+     "VK_EXT_robustness2",
+     "VK_EXT_sample_locations",
+diff --git a/dlls/winevulkan/vulkan_thunks.h b/dlls/winevulkan/vulkan_thunks.h
+index 301626f51a..b977cca3e3 100644
+--- a/dlls/winevulkan/vulkan_thunks.h
++++ b/dlls/winevulkan/vulkan_thunks.h
+@@ -1258,6 +1258,7 @@ struct vulkan_device_funcs
+ #endif
+     VkResult (*p_vkCreatePipelineCache)(VkDevice, const VkPipelineCacheCreateInfo *, const VkAllocationCallbacks *, VkPipelineCache *);
+     VkResult (*p_vkCreatePipelineLayout)(VkDevice, const VkPipelineLayoutCreateInfo *, const VkAllocationCallbacks *, VkPipelineLayout *);
++    VkResult (*p_vkCreatePrivateDataSlotEXT)(VkDevice, const VkPrivateDataSlotCreateInfoEXT *, const VkAllocationCallbacks *, VkPrivateDataSlotEXT *);
+     VkResult (*p_vkCreateQueryPool)(VkDevice, const VkQueryPoolCreateInfo *, const VkAllocationCallbacks *, VkQueryPool *);
+ #if defined(USE_STRUCT_CONVERSION)
+     VkResult (*p_vkCreateRayTracingPipelinesNV)(VkDevice, VkPipelineCache, uint32_t, const VkRayTracingPipelineCreateInfoNV_host *, const VkAllocationCallbacks *, VkPipeline *);
+@@ -1296,6 +1297,7 @@ struct vulkan_device_funcs
+     void (*p_vkDestroyPipeline)(VkDevice, VkPipeline, const VkAllocationCallbacks *);
+     void (*p_vkDestroyPipelineCache)(VkDevice, VkPipelineCache, const VkAllocationCallbacks *);
+     void (*p_vkDestroyPipelineLayout)(VkDevice, VkPipelineLayout, const VkAllocationCallbacks *);
++    void (*p_vkDestroyPrivateDataSlotEXT)(VkDevice, VkPrivateDataSlotEXT, const VkAllocationCallbacks *);
+     void (*p_vkDestroyQueryPool)(VkDevice, VkQueryPool, const VkAllocationCallbacks *);
+     void (*p_vkDestroyRenderPass)(VkDevice, VkRenderPass, const VkAllocationCallbacks *);
+     void (*p_vkDestroySampler)(VkDevice, VkSampler, const VkAllocationCallbacks *);
+@@ -1436,6 +1438,7 @@ struct vulkan_device_funcs
+ #else
+     VkResult (*p_vkGetPipelineExecutableStatisticsKHR)(VkDevice, const VkPipelineExecutableInfoKHR *, uint32_t *, VkPipelineExecutableStatisticKHR *);
+ #endif
++    void (*p_vkGetPrivateDataEXT)(VkDevice, VkObjectType, uint64_t, VkPrivateDataSlotEXT, uint64_t *);
+     VkResult (*p_vkGetQueryPoolResults)(VkDevice, VkQueryPool, uint32_t, uint32_t, size_t, void *, VkDeviceSize, VkQueryResultFlags);
+     void (*p_vkGetQueueCheckpointDataNV)(VkQueue, uint32_t *, VkCheckpointDataNV *);
+     VkResult (*p_vkGetRayTracingShaderGroupHandlesNV)(VkDevice, VkPipeline, uint32_t, uint32_t, size_t, void *);
+@@ -1473,6 +1476,7 @@ struct vulkan_device_funcs
+     void (*p_vkResetQueryPool)(VkDevice, VkQueryPool, uint32_t, uint32_t);
+     void (*p_vkResetQueryPoolEXT)(VkDevice, VkQueryPool, uint32_t, uint32_t);
+     VkResult (*p_vkSetEvent)(VkDevice, VkEvent);
++    VkResult (*p_vkSetPrivateDataEXT)(VkDevice, VkObjectType, uint64_t, VkPrivateDataSlotEXT, uint64_t);
+ #if defined(USE_STRUCT_CONVERSION)
+     VkResult (*p_vkSignalSemaphore)(VkDevice, const VkSemaphoreSignalInfo_host *);
+ #else
+@@ -1720,6 +1724,7 @@ struct vulkan_instance_funcs
+     USE_VK_FUNC(vkCreateIndirectCommandsLayoutNV) \
+     USE_VK_FUNC(vkCreatePipelineCache) \
+     USE_VK_FUNC(vkCreatePipelineLayout) \
++    USE_VK_FUNC(vkCreatePrivateDataSlotEXT) \
+     USE_VK_FUNC(vkCreateQueryPool) \
+     USE_VK_FUNC(vkCreateRayTracingPipelinesNV) \
+     USE_VK_FUNC(vkCreateRenderPass) \
+@@ -1750,6 +1755,7 @@ struct vulkan_instance_funcs
+     USE_VK_FUNC(vkDestroyPipeline) \
+     USE_VK_FUNC(vkDestroyPipelineCache) \
+     USE_VK_FUNC(vkDestroyPipelineLayout) \
++    USE_VK_FUNC(vkDestroyPrivateDataSlotEXT) \
+     USE_VK_FUNC(vkDestroyQueryPool) \
+     USE_VK_FUNC(vkDestroyRenderPass) \
+     USE_VK_FUNC(vkDestroySampler) \
+@@ -1802,6 +1808,7 @@ struct vulkan_instance_funcs
+     USE_VK_FUNC(vkGetPipelineExecutableInternalRepresentationsKHR) \
+     USE_VK_FUNC(vkGetPipelineExecutablePropertiesKHR) \
+     USE_VK_FUNC(vkGetPipelineExecutableStatisticsKHR) \
++    USE_VK_FUNC(vkGetPrivateDataEXT) \
+     USE_VK_FUNC(vkGetQueryPoolResults) \
+     USE_VK_FUNC(vkGetQueueCheckpointDataNV) \
+     USE_VK_FUNC(vkGetRayTracingShaderGroupHandlesNV) \
+@@ -1831,6 +1838,7 @@ struct vulkan_instance_funcs
+     USE_VK_FUNC(vkResetQueryPool) \
+     USE_VK_FUNC(vkResetQueryPoolEXT) \
+     USE_VK_FUNC(vkSetEvent) \
++    USE_VK_FUNC(vkSetPrivateDataEXT) \
+     USE_VK_FUNC(vkSignalSemaphore) \
+     USE_VK_FUNC(vkSignalSemaphoreKHR) \
+     USE_VK_FUNC(vkTrimCommandPool) \
+diff --git a/dlls/winevulkan/winevulkan.json b/dlls/winevulkan/winevulkan.json
+index f6a320d917..60f2a2fac9 100644
+--- a/dlls/winevulkan/winevulkan.json
++++ b/dlls/winevulkan/winevulkan.json
+@@ -2,6 +2,6 @@
+     "file_format_version": "1.0.0",
+     "ICD": {
+         "library_path": ".\\winevulkan.dll",
+-        "api_version": "1.2.139"
++        "api_version": "1.2.140"
+     }
+ }
+-- 
+2.27.0
+
+
+From b4310a19e96283e114fad13f7565f912a39640de Mon Sep 17 00:00:00 2001
+From: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Date: Mon, 1 Jun 2020 12:19:58 -0700
+Subject: [PATCH 05/12] winevulkan: Update to VK spec version 1.2.142.
+
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Andy Ritger <aritger@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan     |  2 +-
+ dlls/winevulkan/vulkan_thunks.c | 16 ++++++++++++++++
+ dlls/winevulkan/winevulkan.json |  2 +-
+ 3 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index 241686122c..1dee769836 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -64,7 +64,7 @@ from enum import Enum
+ LOGGER = logging.Logger("vulkan")
+ LOGGER.addHandler(logging.StreamHandler())
+ 
+-VK_XML_VERSION = "1.2.140"
++VK_XML_VERSION = "1.2.142"
+ WINE_VK_VERSION = (1, 2)
+ 
+ # Filenames to create.
+diff --git a/dlls/winevulkan/vulkan_thunks.c b/dlls/winevulkan/vulkan_thunks.c
+index a7480bf2da..8811fbbb8a 100644
+--- a/dlls/winevulkan/vulkan_thunks.c
++++ b/dlls/winevulkan/vulkan_thunks.c
+@@ -1569,6 +1569,22 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
+             break;
+         }
+ 
++        case VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO_EXT:
++        {
++            const VkDevicePrivateDataCreateInfoEXT *in = (const VkDevicePrivateDataCreateInfoEXT *)in_header;
++            VkDevicePrivateDataCreateInfoEXT *out;
++
++            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;
++
++            out->sType = in->sType;
++            out->pNext = NULL;
++            out->privateDataSlotRequestCount = in->privateDataSlotRequestCount;
++
++            out_header->pNext = (VkBaseOutStructure *)out;
++            out_header = out_header->pNext;
++            break;
++        }
++
+         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
+         {
+             const VkPhysicalDeviceFeatures2 *in = (const VkPhysicalDeviceFeatures2 *)in_header;
+diff --git a/dlls/winevulkan/winevulkan.json b/dlls/winevulkan/winevulkan.json
+index 60f2a2fac9..84b47bb610 100644
+--- a/dlls/winevulkan/winevulkan.json
++++ b/dlls/winevulkan/winevulkan.json
+@@ -2,6 +2,6 @@
+     "file_format_version": "1.0.0",
+     "ICD": {
+         "library_path": ".\\winevulkan.dll",
+-        "api_version": "1.2.140"
++        "api_version": "1.2.142"
+     }
+ }
+-- 
+2.27.0
+
+
+From 9b54cb9b8b7158060180ea6f12b33f504db57c5e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andr=C3=A9=20Hentschel?= <nerv@dawncrow.de>
+Date: Wed, 17 Jun 2020 13:33:21 +0200
+Subject: [PATCH 06/12] winevulkan: Change blacklist to a more neutral word.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: André Hentschel <nerv@dawncrow.de>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index 1dee769836..7459b8f024 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -84,7 +84,7 @@ WINE_VULKAN_THUNKS_H = "vulkan_thunks.h"
+ EXT_BASE = 1000000000
+ EXT_BLOCK_SIZE = 1000
+ 
+-BLACKLISTED_EXTENSIONS = [
++UNSUPPORTED_EXTENSIONS = [
+     # Instance extensions
+     "VK_EXT_debug_report",
+     # Handling of VK_EXT_debug_report requires some consideration. The win32
+@@ -2607,7 +2607,7 @@ class VkRegistry(object):
+     def _is_extension_supported(self, extension):
+         # We disable some extensions as either we haven't implemented
+         # support yet or because they are for platforms other than win32.
+-        return extension not in BLACKLISTED_EXTENSIONS
++        return extension not in UNSUPPORTED_EXTENSIONS
+ 
+     def _mark_command_required(self, command):
+         """ Helper function to mark a certain command and the datatypes it needs as required."""
+@@ -2847,13 +2847,12 @@ class VkRegistry(object):
+                 return
+ 
+             if not self._is_extension_supported(ext_name):
+-                LOGGER.debug("Skipping blacklisted extension: {0}".format(ext_name))
++                LOGGER.debug("Skipping unsupported extension: {0}".format(ext_name))
+                 return
+             elif "requires" in ext.attrib:
+-                # Check if this extension builds on top of another blacklisted
+-                # extension.
++                # Check if this extension builds on top of another unsupported extension.
+                 requires = ext.attrib["requires"].split(",")
+-                if len(set(requires).intersection(BLACKLISTED_EXTENSIONS)) > 0:
++                if len(set(requires).intersection(UNSUPPORTED_EXTENSIONS)) > 0:
+                     return
+ 
+             LOGGER.debug("Loading extension: {0}".format(ext_name))
+-- 
+2.27.0
+
+
+From 408a5a86ec30e293bf9e6eec4890d552073a82e8 Mon Sep 17 00:00:00 2001
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Date: Wed, 17 Jun 2020 20:02:15 +0800
+Subject: [PATCH 07/12] winevulkan: Thunk vkGetPhysicalDeviceProperties2 and
+ vkGetPhysicalDeviceProperties2KHR.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan     |  2 ++
+ dlls/winevulkan/vulkan.c        | 16 ++++++++++++++++
+ dlls/winevulkan/vulkan_thunks.c | 10 ++--------
+ dlls/winevulkan/vulkan_thunks.h |  4 ++++
+ 4 files changed, 24 insertions(+), 8 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index 7459b8f024..d027b9eaa7 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -165,6 +165,8 @@ FUNCTION_OVERRIDES = {
+     "vkGetPhysicalDeviceExternalFenceProperties" : {"dispatch" : False, "driver" : False, "thunk" : False},
+     "vkGetPhysicalDeviceExternalSemaphoreProperties" : {"dispatch" : False, "driver" : False, "thunk" : False},
+     "vkGetPhysicalDeviceImageFormatProperties2" : {"dispatch" : True, "driver" : False, "thunk" : True, "private_thunk" : True},
++    "vkGetPhysicalDeviceProperties2" : {"dispatch" : True, "driver" : False, "thunk" : True, "private_thunk" : True},
++    "vkGetPhysicalDeviceProperties2KHR" : {"dispatch" : True, "driver" : False, "thunk" : True, "private_thunk" : True},
+ 
+     # Device functions
+     "vkAllocateCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : False},
+diff --git a/dlls/winevulkan/vulkan.c b/dlls/winevulkan/vulkan.c
+index 2779f626a1..e67c398f60 100644
+--- a/dlls/winevulkan/vulkan.c
++++ b/dlls/winevulkan/vulkan.c
+@@ -1245,6 +1245,22 @@ VkResult WINAPI wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevi
+     return res;
+ }
+ 
++void WINAPI wine_vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
++        VkPhysicalDeviceProperties2 *properties2)
++{
++    TRACE("%p, %p\n", phys_dev, properties2);
++
++    thunk_vkGetPhysicalDeviceProperties2(phys_dev, properties2);
++}
++
++void WINAPI wine_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
++        VkPhysicalDeviceProperties2 *properties2)
++{
++    TRACE("%p, %p\n", phys_dev, properties2);
++
++    thunk_vkGetPhysicalDeviceProperties2KHR(phys_dev, properties2);
++}
++
+ void WINAPI wine_vkGetPhysicalDeviceExternalSemaphoreProperties(VkPhysicalDevice phys_dev,
+         const VkPhysicalDeviceExternalSemaphoreInfo *semaphore_info, VkExternalSemaphoreProperties *properties)
+ {
+diff --git a/dlls/winevulkan/vulkan_thunks.c b/dlls/winevulkan/vulkan_thunks.c
+index 8811fbbb8a..f1d24086ce 100644
+--- a/dlls/winevulkan/vulkan_thunks.c
++++ b/dlls/winevulkan/vulkan_thunks.c
+@@ -4787,34 +4787,28 @@ void WINAPI wine_vkGetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
+ #endif
+ }
+ 
+-void WINAPI wine_vkGetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties)
++void thunk_vkGetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties)
+ {
+ #if defined(USE_STRUCT_CONVERSION)
+     VkPhysicalDeviceProperties2_host pProperties_host;
+-    TRACE("%p, %p\n", physicalDevice, pProperties);
+-
+     convert_VkPhysicalDeviceProperties2_win_to_host(pProperties, &pProperties_host);
+     physicalDevice->instance->funcs.p_vkGetPhysicalDeviceProperties2(physicalDevice->phys_dev, &pProperties_host);
+ 
+     convert_VkPhysicalDeviceProperties2_host_to_win(&pProperties_host, pProperties);
+ #else
+-    TRACE("%p, %p\n", physicalDevice, pProperties);
+     physicalDevice->instance->funcs.p_vkGetPhysicalDeviceProperties2(physicalDevice->phys_dev, pProperties);
+ #endif
+ }
+ 
+-static void WINAPI wine_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties)
++void thunk_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties)
+ {
+ #if defined(USE_STRUCT_CONVERSION)
+     VkPhysicalDeviceProperties2_host pProperties_host;
+-    TRACE("%p, %p\n", physicalDevice, pProperties);
+-
+     convert_VkPhysicalDeviceProperties2_win_to_host(pProperties, &pProperties_host);
+     physicalDevice->instance->funcs.p_vkGetPhysicalDeviceProperties2KHR(physicalDevice->phys_dev, &pProperties_host);
+ 
+     convert_VkPhysicalDeviceProperties2_host_to_win(&pProperties_host, pProperties);
+ #else
+-    TRACE("%p, %p\n", physicalDevice, pProperties);
+     physicalDevice->instance->funcs.p_vkGetPhysicalDeviceProperties2KHR(physicalDevice->phys_dev, pProperties);
+ #endif
+ }
+diff --git a/dlls/winevulkan/vulkan_thunks.h b/dlls/winevulkan/vulkan_thunks.h
+index b977cca3e3..60d3676f32 100644
+--- a/dlls/winevulkan/vulkan_thunks.h
++++ b/dlls/winevulkan/vulkan_thunks.h
+@@ -64,11 +64,15 @@ void WINAPI wine_vkGetPhysicalDeviceExternalSemaphoreProperties(VkPhysicalDevice
+ void WINAPI wine_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceExternalSemaphoreInfo *pExternalSemaphoreInfo, VkExternalSemaphoreProperties *pExternalSemaphoreProperties) DECLSPEC_HIDDEN;
+ VkResult WINAPI wine_vkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceImageFormatInfo2 *pImageFormatInfo, VkImageFormatProperties2 *pImageFormatProperties);
+ VkResult WINAPI wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceImageFormatInfo2 *pImageFormatInfo, VkImageFormatProperties2 *pImageFormatProperties) DECLSPEC_HIDDEN;
++void WINAPI wine_vkGetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties);
++void WINAPI wine_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties) DECLSPEC_HIDDEN;
+ VkResult WINAPI wine_vkQueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits, VkFence fence);
+ 
+ /* Private thunks */
+ VkResult thunk_vkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceImageFormatInfo2 *pImageFormatInfo, VkImageFormatProperties2 *pImageFormatProperties) DECLSPEC_HIDDEN;
+ VkResult thunk_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceImageFormatInfo2 *pImageFormatInfo, VkImageFormatProperties2 *pImageFormatProperties) DECLSPEC_HIDDEN;
++void thunk_vkGetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties) DECLSPEC_HIDDEN;
++void thunk_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties) DECLSPEC_HIDDEN;
+ 
+ typedef struct VkAcquireNextImageInfoKHR_host
+ {
+-- 
+2.27.0
+
+
+From 8007d19c2792b5b177bd7200dc3567df4677dc0c Mon Sep 17 00:00:00 2001
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Date: Wed, 17 Jun 2020 20:02:26 +0800
+Subject: [PATCH 08/12] winevulkan: Fill Vulkan device LUID property.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/Makefile.in |  2 +-
+ dlls/winevulkan/vulkan.c    | 79 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 80 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winevulkan/Makefile.in b/dlls/winevulkan/Makefile.in
+index 251de5c68e..f95a1e3113 100644
+--- a/dlls/winevulkan/Makefile.in
++++ b/dlls/winevulkan/Makefile.in
+@@ -1,6 +1,6 @@
+ MODULE    = winevulkan.dll
+ IMPORTLIB = winevulkan
+-IMPORTS   = user32 gdi32 advapi32
++IMPORTS   = user32 gdi32 advapi32 setupapi
+ 
+ C_SRCS = \
+ 	vulkan.c \
+diff --git a/dlls/winevulkan/vulkan.c b/dlls/winevulkan/vulkan.c
+index e67c398f60..eb22e72ae3 100644
+--- a/dlls/winevulkan/vulkan.c
++++ b/dlls/winevulkan/vulkan.c
+@@ -23,11 +23,17 @@
+ #include "winbase.h"
+ #include "winreg.h"
+ #include "winuser.h"
++#include "initguid.h"
++#include "devguid.h"
++#include "setupapi.h"
+ 
+ #include "vulkan_private.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
+ 
++DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
++DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_GPU_VULKAN_UUID, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5c, 2);
++
+ /* For now default to 4 as it felt like a reasonable version feature wise to support.
+  * Don't support the optional vk_icdGetPhysicalDeviceProcAddr introduced in this version
+  * as it is unlikely we will implement physical device extensions, which the loader is not
+@@ -1245,12 +1251,84 @@ VkResult WINAPI wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevi
+     return res;
+ }
+ 
++static HANDLE get_display_device_init_mutex(void)
++{
++    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
++    HANDLE mutex = CreateMutexW(NULL, FALSE, init_mutexW);
++
++    WaitForSingleObject(mutex, INFINITE);
++    return mutex;
++}
++
++static void release_display_device_init_mutex(HANDLE mutex)
++{
++    ReleaseMutex(mutex);
++    CloseHandle(mutex);
++}
++
++/* Wait until graphics driver is loaded by explorer */
++static void wait_graphics_driver_ready(void)
++{
++    static BOOL ready = FALSE;
++
++    if (!ready)
++    {
++        SendMessageW(GetDesktopWindow(), WM_NULL, 0, 0);
++        ready = TRUE;
++    }
++}
++
++static void fill_luid_property(VkPhysicalDeviceProperties2 *properties2)
++{
++    static const WCHAR pci[] = {'P','C','I',0};
++    VkPhysicalDeviceIDProperties *id;
++    SP_DEVINFO_DATA device_data;
++    DWORD type, device_idx = 0;
++    HDEVINFO devinfo;
++    HANDLE mutex;
++    GUID uuid;
++    LUID luid;
++
++    if (!(id = wine_vk_find_struct(properties2, PHYSICAL_DEVICE_ID_PROPERTIES)))
++        return;
++
++    wait_graphics_driver_ready();
++    mutex = get_display_device_init_mutex();
++    devinfo = SetupDiGetClassDevsW(&GUID_DEVCLASS_DISPLAY, pci, NULL, 0);
++    device_data.cbSize = sizeof(device_data);
++    while (SetupDiEnumDeviceInfo(devinfo, device_idx++, &device_data))
++    {
++        if (!SetupDiGetDevicePropertyW(devinfo, &device_data, &WINE_DEVPROPKEY_GPU_VULKAN_UUID,
++                &type, (BYTE *)&uuid, sizeof(uuid), NULL, 0))
++            continue;
++
++        if (!IsEqualGUID(&uuid, id->deviceUUID))
++            continue;
++
++        if (SetupDiGetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_GPU_LUID, &type,
++                (BYTE *)&luid, sizeof(luid), NULL, 0))
++        {
++            memcpy(&id->deviceLUID, &luid, sizeof(id->deviceLUID));
++            id->deviceLUIDValid = VK_TRUE;
++            id->deviceNodeMask = 1;
++            break;
++        }
++    }
++    SetupDiDestroyDeviceInfoList(devinfo);
++    release_display_device_init_mutex(mutex);
++
++    TRACE("deviceName:%s deviceLUIDValid:%d LUID:%08x:%08x deviceNodeMask:%#x.\n",
++            properties2->properties.deviceName, id->deviceLUIDValid, luid.HighPart, luid.LowPart,
++            id->deviceNodeMask);
++}
++
+ void WINAPI wine_vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
+         VkPhysicalDeviceProperties2 *properties2)
+ {
+     TRACE("%p, %p\n", phys_dev, properties2);
+ 
+     thunk_vkGetPhysicalDeviceProperties2(phys_dev, properties2);
++    fill_luid_property(properties2);
+ }
+ 
+ void WINAPI wine_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
+@@ -1259,6 +1337,7 @@ void WINAPI wine_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
+     TRACE("%p, %p\n", phys_dev, properties2);
+ 
+     thunk_vkGetPhysicalDeviceProperties2KHR(phys_dev, properties2);
++    fill_luid_property(properties2);
+ }
+ 
+ void WINAPI wine_vkGetPhysicalDeviceExternalSemaphoreProperties(VkPhysicalDevice phys_dev,
+-- 
+2.27.0
+
+
+From c80b236366120bb420d6875f93d1bfcd9e77a7fe Mon Sep 17 00:00:00 2001
+From: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Date: Sun, 21 Jun 2020 12:18:52 -0700
+Subject: [PATCH 09/12] winevulkan: Update to VK spec version 1.2.145.
+
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Andy Ritger <aritger@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan     |   2 +-
+ dlls/winevulkan/vulkan_thunks.c | 145 ++++++++++++++++++++++++++------
+ dlls/winevulkan/vulkan_thunks.h |  52 ++++++------
+ dlls/winevulkan/winevulkan.json |   2 +-
+ dlls/winevulkan/winevulkan.spec |  28 +-----
+ 5 files changed, 146 insertions(+), 83 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index d027b9eaa7..a0bf6b0859 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -64,7 +64,7 @@ from enum import Enum
+ LOGGER = logging.Logger("vulkan")
+ LOGGER.addHandler(logging.StreamHandler())
+ 
+-VK_XML_VERSION = "1.2.142"
++VK_XML_VERSION = "1.2.145"
+ WINE_VK_VERSION = (1, 2)
+ 
+ # Filenames to create.
+diff --git a/dlls/winevulkan/vulkan_thunks.c b/dlls/winevulkan/vulkan_thunks.c
+index f1d24086ce..f8d171a6db 100644
+--- a/dlls/winevulkan/vulkan_thunks.c
++++ b/dlls/winevulkan/vulkan_thunks.c
+@@ -5,33 +5,7 @@
+  *
+  * Copyright (c) 2015-2020 The Khronos Group Inc.
+  *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- *
+- * ---- Exceptions to the Apache 2.0 License: ----
+- *
+- * As an exception, if you use this Software to generate code and portions of
+- * this Software are embedded into the generated code as a result, you may
+- * redistribute such product without providing attribution as would otherwise
+- * be required by Sections 4(a), 4(b) and 4(d) of the License.
+- *
+- * In addition, if you combine or link code generated by this Software with
+- * software that is licensed under the GPLv2 or the LGPL v2.0 or 2.1
+- * ("`Combined Software`") and if a court of competent jurisdiction determines
+- * that the patent provision (Section 3), the indemnity provision (Section 9)
+- * or other Section of the License conflicts with the conditions of the
+- * applicable GPL or LGPL license, you may retroactively and prospectively
+- * choose to deem waived or otherwise exclude such Section(s) of the License,
+- * but only in their entirety and only with respect to the Combined Software.
++ * SPDX-License-Identifier: Apache-2.0 OR MIT
+  *
+  */
+ 
+@@ -1585,6 +1559,22 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
+             break;
+         }
+ 
++        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES_EXT:
++        {
++            const VkPhysicalDevicePrivateDataFeaturesEXT *in = (const VkPhysicalDevicePrivateDataFeaturesEXT *)in_header;
++            VkPhysicalDevicePrivateDataFeaturesEXT *out;
++
++            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;
++
++            out->sType = in->sType;
++            out->pNext = NULL;
++            out->privateData = in->privateData;
++
++            out_header->pNext = (VkBaseOutStructure *)out;
++            out_header = out_header->pNext;
++            break;
++        }
++
+         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
+         {
+             const VkPhysicalDeviceFeatures2 *in = (const VkPhysicalDeviceFeatures2 *)in_header;
+@@ -2675,6 +2665,22 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
+             break;
+         }
+ 
++        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT:
++        {
++            const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *in = (const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)in_header;
++            VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *out;
++
++            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;
++
++            out->sType = in->sType;
++            out->pNext = NULL;
++            out->extendedDynamicState = in->extendedDynamicState;
++
++            out_header->pNext = (VkBaseOutStructure *)out;
++            out_header = out_header->pNext;
++            break;
++        }
++
+         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DIAGNOSTICS_CONFIG_FEATURES_NV:
+         {
+             const VkPhysicalDeviceDiagnosticsConfigFeaturesNV *in = (const VkPhysicalDeviceDiagnosticsConfigFeaturesNV *)in_header;
+@@ -3108,6 +3114,12 @@ void WINAPI wine_vkCmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t
+     commandBuffer->device->funcs.p_vkCmdBindVertexBuffers(commandBuffer->command_buffer, firstBinding, bindingCount, pBuffers, pOffsets);
+ }
+ 
++static void WINAPI wine_vkCmdBindVertexBuffers2EXT(VkCommandBuffer commandBuffer, uint32_t firstBinding, uint32_t bindingCount, const VkBuffer *pBuffers, const VkDeviceSize *pOffsets, const VkDeviceSize *pSizes, const VkDeviceSize *pStrides)
++{
++    TRACE("%p, %u, %u, %p, %p, %p, %p\n", commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets, pSizes, pStrides);
++    commandBuffer->device->funcs.p_vkCmdBindVertexBuffers2EXT(commandBuffer->command_buffer, firstBinding, bindingCount, pBuffers, pOffsets, pSizes, pStrides);
++}
++
+ void WINAPI wine_vkCmdBlitImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount, const VkImageBlit *pRegions, VkFilter filter)
+ {
+     TRACE("%p, 0x%s, %#x, 0x%s, %#x, %u, %p, %#x\n", commandBuffer, wine_dbgstr_longlong(srcImage), srcImageLayout, wine_dbgstr_longlong(dstImage), dstImageLayout, regionCount, pRegions, filter);
+@@ -3503,6 +3515,12 @@ static void WINAPI wine_vkCmdSetCoarseSampleOrderNV(VkCommandBuffer commandBuffe
+     commandBuffer->device->funcs.p_vkCmdSetCoarseSampleOrderNV(commandBuffer->command_buffer, sampleOrderType, customSampleOrderCount, pCustomSampleOrders);
+ }
+ 
++static void WINAPI wine_vkCmdSetCullModeEXT(VkCommandBuffer commandBuffer, VkCullModeFlags cullMode)
++{
++    TRACE("%p, %#x\n", commandBuffer, cullMode);
++    commandBuffer->device->funcs.p_vkCmdSetCullModeEXT(commandBuffer->command_buffer, cullMode);
++}
++
+ void WINAPI wine_vkCmdSetDepthBias(VkCommandBuffer commandBuffer, float depthBiasConstantFactor, float depthBiasClamp, float depthBiasSlopeFactor)
+ {
+     TRACE("%p, %f, %f, %f\n", commandBuffer, depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor);
+@@ -3515,6 +3533,30 @@ void WINAPI wine_vkCmdSetDepthBounds(VkCommandBuffer commandBuffer, float minDep
+     commandBuffer->device->funcs.p_vkCmdSetDepthBounds(commandBuffer->command_buffer, minDepthBounds, maxDepthBounds);
+ }
+ 
++static void WINAPI wine_vkCmdSetDepthBoundsTestEnableEXT(VkCommandBuffer commandBuffer, VkBool32 depthBoundsTestEnable)
++{
++    TRACE("%p, %u\n", commandBuffer, depthBoundsTestEnable);
++    commandBuffer->device->funcs.p_vkCmdSetDepthBoundsTestEnableEXT(commandBuffer->command_buffer, depthBoundsTestEnable);
++}
++
++static void WINAPI wine_vkCmdSetDepthCompareOpEXT(VkCommandBuffer commandBuffer, VkCompareOp depthCompareOp)
++{
++    TRACE("%p, %#x\n", commandBuffer, depthCompareOp);
++    commandBuffer->device->funcs.p_vkCmdSetDepthCompareOpEXT(commandBuffer->command_buffer, depthCompareOp);
++}
++
++static void WINAPI wine_vkCmdSetDepthTestEnableEXT(VkCommandBuffer commandBuffer, VkBool32 depthTestEnable)
++{
++    TRACE("%p, %u\n", commandBuffer, depthTestEnable);
++    commandBuffer->device->funcs.p_vkCmdSetDepthTestEnableEXT(commandBuffer->command_buffer, depthTestEnable);
++}
++
++static void WINAPI wine_vkCmdSetDepthWriteEnableEXT(VkCommandBuffer commandBuffer, VkBool32 depthWriteEnable)
++{
++    TRACE("%p, %u\n", commandBuffer, depthWriteEnable);
++    commandBuffer->device->funcs.p_vkCmdSetDepthWriteEnableEXT(commandBuffer->command_buffer, depthWriteEnable);
++}
++
+ void WINAPI wine_vkCmdSetDeviceMask(VkCommandBuffer commandBuffer, uint32_t deviceMask)
+ {
+     TRACE("%p, %u\n", commandBuffer, deviceMask);
+@@ -3545,6 +3587,12 @@ static void WINAPI wine_vkCmdSetExclusiveScissorNV(VkCommandBuffer commandBuffer
+     commandBuffer->device->funcs.p_vkCmdSetExclusiveScissorNV(commandBuffer->command_buffer, firstExclusiveScissor, exclusiveScissorCount, pExclusiveScissors);
+ }
+ 
++static void WINAPI wine_vkCmdSetFrontFaceEXT(VkCommandBuffer commandBuffer, VkFrontFace frontFace)
++{
++    TRACE("%p, %#x\n", commandBuffer, frontFace);
++    commandBuffer->device->funcs.p_vkCmdSetFrontFaceEXT(commandBuffer->command_buffer, frontFace);
++}
++
+ static void WINAPI wine_vkCmdSetLineStippleEXT(VkCommandBuffer commandBuffer, uint32_t lineStippleFactor, uint16_t lineStipplePattern)
+ {
+     TRACE("%p, %u, %u\n", commandBuffer, lineStippleFactor, lineStipplePattern);
+@@ -3597,6 +3645,12 @@ static VkResult WINAPI wine_vkCmdSetPerformanceStreamMarkerINTEL(VkCommandBuffer
+     return commandBuffer->device->funcs.p_vkCmdSetPerformanceStreamMarkerINTEL(commandBuffer->command_buffer, pMarkerInfo);
+ }
+ 
++static void WINAPI wine_vkCmdSetPrimitiveTopologyEXT(VkCommandBuffer commandBuffer, VkPrimitiveTopology primitiveTopology)
++{
++    TRACE("%p, %#x\n", commandBuffer, primitiveTopology);
++    commandBuffer->device->funcs.p_vkCmdSetPrimitiveTopologyEXT(commandBuffer->command_buffer, primitiveTopology);
++}
++
+ static void WINAPI wine_vkCmdSetSampleLocationsEXT(VkCommandBuffer commandBuffer, const VkSampleLocationsInfoEXT *pSampleLocationsInfo)
+ {
+     TRACE("%p, %p\n", commandBuffer, pSampleLocationsInfo);
+@@ -3609,18 +3663,36 @@ void WINAPI wine_vkCmdSetScissor(VkCommandBuffer commandBuffer, uint32_t firstSc
+     commandBuffer->device->funcs.p_vkCmdSetScissor(commandBuffer->command_buffer, firstScissor, scissorCount, pScissors);
+ }
+ 
++static void WINAPI wine_vkCmdSetScissorWithCountEXT(VkCommandBuffer commandBuffer, uint32_t scissorCount, const VkRect2D *pScissors)
++{
++    TRACE("%p, %u, %p\n", commandBuffer, scissorCount, pScissors);
++    commandBuffer->device->funcs.p_vkCmdSetScissorWithCountEXT(commandBuffer->command_buffer, scissorCount, pScissors);
++}
++
+ void WINAPI wine_vkCmdSetStencilCompareMask(VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, uint32_t compareMask)
+ {
+     TRACE("%p, %#x, %u\n", commandBuffer, faceMask, compareMask);
+     commandBuffer->device->funcs.p_vkCmdSetStencilCompareMask(commandBuffer->command_buffer, faceMask, compareMask);
+ }
+ 
++static void WINAPI wine_vkCmdSetStencilOpEXT(VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, VkStencilOp failOp, VkStencilOp passOp, VkStencilOp depthFailOp, VkCompareOp compareOp)
++{
++    TRACE("%p, %#x, %#x, %#x, %#x, %#x\n", commandBuffer, faceMask, failOp, passOp, depthFailOp, compareOp);
++    commandBuffer->device->funcs.p_vkCmdSetStencilOpEXT(commandBuffer->command_buffer, faceMask, failOp, passOp, depthFailOp, compareOp);
++}
++
+ void WINAPI wine_vkCmdSetStencilReference(VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, uint32_t reference)
+ {
+     TRACE("%p, %#x, %u\n", commandBuffer, faceMask, reference);
+     commandBuffer->device->funcs.p_vkCmdSetStencilReference(commandBuffer->command_buffer, faceMask, reference);
+ }
+ 
++static void WINAPI wine_vkCmdSetStencilTestEnableEXT(VkCommandBuffer commandBuffer, VkBool32 stencilTestEnable)
++{
++    TRACE("%p, %u\n", commandBuffer, stencilTestEnable);
++    commandBuffer->device->funcs.p_vkCmdSetStencilTestEnableEXT(commandBuffer->command_buffer, stencilTestEnable);
++}
++
+ void WINAPI wine_vkCmdSetStencilWriteMask(VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, uint32_t writeMask)
+ {
+     TRACE("%p, %#x, %u\n", commandBuffer, faceMask, writeMask);
+@@ -3645,6 +3717,12 @@ static void WINAPI wine_vkCmdSetViewportWScalingNV(VkCommandBuffer commandBuffer
+     commandBuffer->device->funcs.p_vkCmdSetViewportWScalingNV(commandBuffer->command_buffer, firstViewport, viewportCount, pViewportWScalings);
+ }
+ 
++static void WINAPI wine_vkCmdSetViewportWithCountEXT(VkCommandBuffer commandBuffer, uint32_t viewportCount, const VkViewport *pViewports)
++{
++    TRACE("%p, %u, %p\n", commandBuffer, viewportCount, pViewports);
++    commandBuffer->device->funcs.p_vkCmdSetViewportWithCountEXT(commandBuffer->command_buffer, viewportCount, pViewports);
++}
++
+ static void WINAPI wine_vkCmdTraceRaysNV(VkCommandBuffer commandBuffer, VkBuffer raygenShaderBindingTableBuffer, VkDeviceSize raygenShaderBindingOffset, VkBuffer missShaderBindingTableBuffer, VkDeviceSize missShaderBindingOffset, VkDeviceSize missShaderBindingStride, VkBuffer hitShaderBindingTableBuffer, VkDeviceSize hitShaderBindingOffset, VkDeviceSize hitShaderBindingStride, VkBuffer callableShaderBindingTableBuffer, VkDeviceSize callableShaderBindingOffset, VkDeviceSize callableShaderBindingStride, uint32_t width, uint32_t height, uint32_t depth)
+ {
+     TRACE("%p, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, %u, %u, %u\n", commandBuffer, wine_dbgstr_longlong(raygenShaderBindingTableBuffer), wine_dbgstr_longlong(raygenShaderBindingOffset), wine_dbgstr_longlong(missShaderBindingTableBuffer), wine_dbgstr_longlong(missShaderBindingOffset), wine_dbgstr_longlong(missShaderBindingStride), wine_dbgstr_longlong(hitShaderBindingTableBuffer), wine_dbgstr_longlong(hitShaderBindingOffset), wine_dbgstr_longlong(hitShaderBindingStride), wine_dbgstr_longlong(callableShaderBindingTableBuffer), wine_dbgstr_longlong(callableShaderBindingOffset), wine_dbgstr_longlong(callableShaderBindingStride), width, height, depth);
+@@ -5330,6 +5408,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
+     {"vkCmdBindShadingRateImageNV", &wine_vkCmdBindShadingRateImageNV},
+     {"vkCmdBindTransformFeedbackBuffersEXT", &wine_vkCmdBindTransformFeedbackBuffersEXT},
+     {"vkCmdBindVertexBuffers", &wine_vkCmdBindVertexBuffers},
++    {"vkCmdBindVertexBuffers2EXT", &wine_vkCmdBindVertexBuffers2EXT},
+     {"vkCmdBlitImage", &wine_vkCmdBlitImage},
+     {"vkCmdBuildAccelerationStructureNV", &wine_vkCmdBuildAccelerationStructureNV},
+     {"vkCmdClearAttachments", &wine_vkCmdClearAttachments},
+@@ -5383,26 +5462,37 @@ static const struct vulkan_func vk_device_dispatch_table[] =
+     {"vkCmdSetBlendConstants", &wine_vkCmdSetBlendConstants},
+     {"vkCmdSetCheckpointNV", &wine_vkCmdSetCheckpointNV},
+     {"vkCmdSetCoarseSampleOrderNV", &wine_vkCmdSetCoarseSampleOrderNV},
++    {"vkCmdSetCullModeEXT", &wine_vkCmdSetCullModeEXT},
+     {"vkCmdSetDepthBias", &wine_vkCmdSetDepthBias},
+     {"vkCmdSetDepthBounds", &wine_vkCmdSetDepthBounds},
++    {"vkCmdSetDepthBoundsTestEnableEXT", &wine_vkCmdSetDepthBoundsTestEnableEXT},
++    {"vkCmdSetDepthCompareOpEXT", &wine_vkCmdSetDepthCompareOpEXT},
++    {"vkCmdSetDepthTestEnableEXT", &wine_vkCmdSetDepthTestEnableEXT},
++    {"vkCmdSetDepthWriteEnableEXT", &wine_vkCmdSetDepthWriteEnableEXT},
+     {"vkCmdSetDeviceMask", &wine_vkCmdSetDeviceMask},
+     {"vkCmdSetDeviceMaskKHR", &wine_vkCmdSetDeviceMaskKHR},
+     {"vkCmdSetDiscardRectangleEXT", &wine_vkCmdSetDiscardRectangleEXT},
+     {"vkCmdSetEvent", &wine_vkCmdSetEvent},
+     {"vkCmdSetExclusiveScissorNV", &wine_vkCmdSetExclusiveScissorNV},
++    {"vkCmdSetFrontFaceEXT", &wine_vkCmdSetFrontFaceEXT},
+     {"vkCmdSetLineStippleEXT", &wine_vkCmdSetLineStippleEXT},
+     {"vkCmdSetLineWidth", &wine_vkCmdSetLineWidth},
+     {"vkCmdSetPerformanceMarkerINTEL", &wine_vkCmdSetPerformanceMarkerINTEL},
+     {"vkCmdSetPerformanceOverrideINTEL", &wine_vkCmdSetPerformanceOverrideINTEL},
+     {"vkCmdSetPerformanceStreamMarkerINTEL", &wine_vkCmdSetPerformanceStreamMarkerINTEL},
++    {"vkCmdSetPrimitiveTopologyEXT", &wine_vkCmdSetPrimitiveTopologyEXT},
+     {"vkCmdSetSampleLocationsEXT", &wine_vkCmdSetSampleLocationsEXT},
+     {"vkCmdSetScissor", &wine_vkCmdSetScissor},
++    {"vkCmdSetScissorWithCountEXT", &wine_vkCmdSetScissorWithCountEXT},
+     {"vkCmdSetStencilCompareMask", &wine_vkCmdSetStencilCompareMask},
++    {"vkCmdSetStencilOpEXT", &wine_vkCmdSetStencilOpEXT},
+     {"vkCmdSetStencilReference", &wine_vkCmdSetStencilReference},
++    {"vkCmdSetStencilTestEnableEXT", &wine_vkCmdSetStencilTestEnableEXT},
+     {"vkCmdSetStencilWriteMask", &wine_vkCmdSetStencilWriteMask},
+     {"vkCmdSetViewport", &wine_vkCmdSetViewport},
+     {"vkCmdSetViewportShadingRatePaletteNV", &wine_vkCmdSetViewportShadingRatePaletteNV},
+     {"vkCmdSetViewportWScalingNV", &wine_vkCmdSetViewportWScalingNV},
++    {"vkCmdSetViewportWithCountEXT", &wine_vkCmdSetViewportWithCountEXT},
+     {"vkCmdTraceRaysNV", &wine_vkCmdTraceRaysNV},
+     {"vkCmdUpdateBuffer", &wine_vkCmdUpdateBuffer},
+     {"vkCmdWaitEvents", &wine_vkCmdWaitEvents},
+@@ -5673,6 +5763,7 @@ static const char * const vk_device_extensions[] =
+     "VK_EXT_depth_range_unrestricted",
+     "VK_EXT_descriptor_indexing",
+     "VK_EXT_discard_rectangles",
++    "VK_EXT_extended_dynamic_state",
+     "VK_EXT_external_memory_host",
+     "VK_EXT_filter_cubic",
+     "VK_EXT_fragment_density_map",
+diff --git a/dlls/winevulkan/vulkan_thunks.h b/dlls/winevulkan/vulkan_thunks.h
+index 60d3676f32..9580c6bbcd 100644
+--- a/dlls/winevulkan/vulkan_thunks.h
++++ b/dlls/winevulkan/vulkan_thunks.h
+@@ -5,33 +5,7 @@
+  *
+  * Copyright (c) 2015-2020 The Khronos Group Inc.
+  *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- *
+- * ---- Exceptions to the Apache 2.0 License: ----
+- *
+- * As an exception, if you use this Software to generate code and portions of
+- * this Software are embedded into the generated code as a result, you may
+- * redistribute such product without providing attribution as would otherwise
+- * be required by Sections 4(a), 4(b) and 4(d) of the License.
+- *
+- * In addition, if you combine or link code generated by this Software with
+- * software that is licensed under the GPLv2 or the LGPL v2.0 or 2.1
+- * ("`Combined Software`") and if a court of competent jurisdiction determines
+- * that the patent provision (Section 3), the indemnity provision (Section 9)
+- * or other Section of the License conflicts with the conditions of the
+- * applicable GPL or LGPL license, you may retroactively and prospectively
+- * choose to deem waived or otherwise exclude such Section(s) of the License,
+- * but only in their entirety and only with respect to the Combined Software.
++ * SPDX-License-Identifier: Apache-2.0 OR MIT
+  *
+  */
+ 
+@@ -1080,6 +1054,7 @@ struct vulkan_device_funcs
+     void (*p_vkCmdBindShadingRateImageNV)(VkCommandBuffer, VkImageView, VkImageLayout);
+     void (*p_vkCmdBindTransformFeedbackBuffersEXT)(VkCommandBuffer, uint32_t, uint32_t, const VkBuffer *, const VkDeviceSize *, const VkDeviceSize *);
+     void (*p_vkCmdBindVertexBuffers)(VkCommandBuffer, uint32_t, uint32_t, const VkBuffer *, const VkDeviceSize *);
++    void (*p_vkCmdBindVertexBuffers2EXT)(VkCommandBuffer, uint32_t, uint32_t, const VkBuffer *, const VkDeviceSize *, const VkDeviceSize *, const VkDeviceSize *);
+     void (*p_vkCmdBlitImage)(VkCommandBuffer, VkImage, VkImageLayout, VkImage, VkImageLayout, uint32_t, const VkImageBlit *, VkFilter);
+ #if defined(USE_STRUCT_CONVERSION)
+     void (*p_vkCmdBuildAccelerationStructureNV)(VkCommandBuffer, const VkAccelerationStructureInfoNV_host *, VkBuffer, VkDeviceSize, VkBool32, VkAccelerationStructureKHR, VkAccelerationStructureKHR, VkBuffer, VkDeviceSize);
+@@ -1165,13 +1140,19 @@ struct vulkan_device_funcs
+     void (*p_vkCmdSetBlendConstants)(VkCommandBuffer, const float[4]);
+     void (*p_vkCmdSetCheckpointNV)(VkCommandBuffer, const void *);
+     void (*p_vkCmdSetCoarseSampleOrderNV)(VkCommandBuffer, VkCoarseSampleOrderTypeNV, uint32_t, const VkCoarseSampleOrderCustomNV *);
++    void (*p_vkCmdSetCullModeEXT)(VkCommandBuffer, VkCullModeFlags);
+     void (*p_vkCmdSetDepthBias)(VkCommandBuffer, float, float, float);
+     void (*p_vkCmdSetDepthBounds)(VkCommandBuffer, float, float);
++    void (*p_vkCmdSetDepthBoundsTestEnableEXT)(VkCommandBuffer, VkBool32);
++    void (*p_vkCmdSetDepthCompareOpEXT)(VkCommandBuffer, VkCompareOp);
++    void (*p_vkCmdSetDepthTestEnableEXT)(VkCommandBuffer, VkBool32);
++    void (*p_vkCmdSetDepthWriteEnableEXT)(VkCommandBuffer, VkBool32);
+     void (*p_vkCmdSetDeviceMask)(VkCommandBuffer, uint32_t);
+     void (*p_vkCmdSetDeviceMaskKHR)(VkCommandBuffer, uint32_t);
+     void (*p_vkCmdSetDiscardRectangleEXT)(VkCommandBuffer, uint32_t, uint32_t, const VkRect2D *);
+     void (*p_vkCmdSetEvent)(VkCommandBuffer, VkEvent, VkPipelineStageFlags);
+     void (*p_vkCmdSetExclusiveScissorNV)(VkCommandBuffer, uint32_t, uint32_t, const VkRect2D *);
++    void (*p_vkCmdSetFrontFaceEXT)(VkCommandBuffer, VkFrontFace);
+     void (*p_vkCmdSetLineStippleEXT)(VkCommandBuffer, uint32_t, uint16_t);
+     void (*p_vkCmdSetLineWidth)(VkCommandBuffer, float);
+ #if defined(USE_STRUCT_CONVERSION)
+@@ -1185,14 +1166,19 @@ struct vulkan_device_funcs
+     VkResult (*p_vkCmdSetPerformanceOverrideINTEL)(VkCommandBuffer, const VkPerformanceOverrideInfoINTEL *);
+ #endif
+     VkResult (*p_vkCmdSetPerformanceStreamMarkerINTEL)(VkCommandBuffer, const VkPerformanceStreamMarkerInfoINTEL *);
++    void (*p_vkCmdSetPrimitiveTopologyEXT)(VkCommandBuffer, VkPrimitiveTopology);
+     void (*p_vkCmdSetSampleLocationsEXT)(VkCommandBuffer, const VkSampleLocationsInfoEXT *);
+     void (*p_vkCmdSetScissor)(VkCommandBuffer, uint32_t, uint32_t, const VkRect2D *);
++    void (*p_vkCmdSetScissorWithCountEXT)(VkCommandBuffer, uint32_t, const VkRect2D *);
+     void (*p_vkCmdSetStencilCompareMask)(VkCommandBuffer, VkStencilFaceFlags, uint32_t);
++    void (*p_vkCmdSetStencilOpEXT)(VkCommandBuffer, VkStencilFaceFlags, VkStencilOp, VkStencilOp, VkStencilOp, VkCompareOp);
+     void (*p_vkCmdSetStencilReference)(VkCommandBuffer, VkStencilFaceFlags, uint32_t);
++    void (*p_vkCmdSetStencilTestEnableEXT)(VkCommandBuffer, VkBool32);
+     void (*p_vkCmdSetStencilWriteMask)(VkCommandBuffer, VkStencilFaceFlags, uint32_t);
+     void (*p_vkCmdSetViewport)(VkCommandBuffer, uint32_t, uint32_t, const VkViewport *);
+     void (*p_vkCmdSetViewportShadingRatePaletteNV)(VkCommandBuffer, uint32_t, uint32_t, const VkShadingRatePaletteNV *);
+     void (*p_vkCmdSetViewportWScalingNV)(VkCommandBuffer, uint32_t, uint32_t, const VkViewportWScalingNV *);
++    void (*p_vkCmdSetViewportWithCountEXT)(VkCommandBuffer, uint32_t, const VkViewport *);
+     void (*p_vkCmdTraceRaysNV)(VkCommandBuffer, VkBuffer, VkDeviceSize, VkBuffer, VkDeviceSize, VkDeviceSize, VkBuffer, VkDeviceSize, VkDeviceSize, VkBuffer, VkDeviceSize, VkDeviceSize, uint32_t, uint32_t, uint32_t);
+     void (*p_vkCmdUpdateBuffer)(VkCommandBuffer, VkBuffer, VkDeviceSize, VkDeviceSize, const void *);
+ #if defined(USE_STRUCT_CONVERSION)
+@@ -1630,6 +1616,7 @@ struct vulkan_instance_funcs
+     USE_VK_FUNC(vkCmdBindShadingRateImageNV) \
+     USE_VK_FUNC(vkCmdBindTransformFeedbackBuffersEXT) \
+     USE_VK_FUNC(vkCmdBindVertexBuffers) \
++    USE_VK_FUNC(vkCmdBindVertexBuffers2EXT) \
+     USE_VK_FUNC(vkCmdBlitImage) \
+     USE_VK_FUNC(vkCmdBuildAccelerationStructureNV) \
+     USE_VK_FUNC(vkCmdClearAttachments) \
+@@ -1683,26 +1670,37 @@ struct vulkan_instance_funcs
+     USE_VK_FUNC(vkCmdSetBlendConstants) \
+     USE_VK_FUNC(vkCmdSetCheckpointNV) \
+     USE_VK_FUNC(vkCmdSetCoarseSampleOrderNV) \
++    USE_VK_FUNC(vkCmdSetCullModeEXT) \
+     USE_VK_FUNC(vkCmdSetDepthBias) \
+     USE_VK_FUNC(vkCmdSetDepthBounds) \
++    USE_VK_FUNC(vkCmdSetDepthBoundsTestEnableEXT) \
++    USE_VK_FUNC(vkCmdSetDepthCompareOpEXT) \
++    USE_VK_FUNC(vkCmdSetDepthTestEnableEXT) \
++    USE_VK_FUNC(vkCmdSetDepthWriteEnableEXT) \
+     USE_VK_FUNC(vkCmdSetDeviceMask) \
+     USE_VK_FUNC(vkCmdSetDeviceMaskKHR) \
+     USE_VK_FUNC(vkCmdSetDiscardRectangleEXT) \
+     USE_VK_FUNC(vkCmdSetEvent) \
+     USE_VK_FUNC(vkCmdSetExclusiveScissorNV) \
++    USE_VK_FUNC(vkCmdSetFrontFaceEXT) \
+     USE_VK_FUNC(vkCmdSetLineStippleEXT) \
+     USE_VK_FUNC(vkCmdSetLineWidth) \
+     USE_VK_FUNC(vkCmdSetPerformanceMarkerINTEL) \
+     USE_VK_FUNC(vkCmdSetPerformanceOverrideINTEL) \
+     USE_VK_FUNC(vkCmdSetPerformanceStreamMarkerINTEL) \
++    USE_VK_FUNC(vkCmdSetPrimitiveTopologyEXT) \
+     USE_VK_FUNC(vkCmdSetSampleLocationsEXT) \
+     USE_VK_FUNC(vkCmdSetScissor) \
++    USE_VK_FUNC(vkCmdSetScissorWithCountEXT) \
+     USE_VK_FUNC(vkCmdSetStencilCompareMask) \
++    USE_VK_FUNC(vkCmdSetStencilOpEXT) \
+     USE_VK_FUNC(vkCmdSetStencilReference) \
++    USE_VK_FUNC(vkCmdSetStencilTestEnableEXT) \
+     USE_VK_FUNC(vkCmdSetStencilWriteMask) \
+     USE_VK_FUNC(vkCmdSetViewport) \
+     USE_VK_FUNC(vkCmdSetViewportShadingRatePaletteNV) \
+     USE_VK_FUNC(vkCmdSetViewportWScalingNV) \
++    USE_VK_FUNC(vkCmdSetViewportWithCountEXT) \
+     USE_VK_FUNC(vkCmdTraceRaysNV) \
+     USE_VK_FUNC(vkCmdUpdateBuffer) \
+     USE_VK_FUNC(vkCmdWaitEvents) \
+diff --git a/dlls/winevulkan/winevulkan.json b/dlls/winevulkan/winevulkan.json
+index 84b47bb610..fbef9494a6 100644
+--- a/dlls/winevulkan/winevulkan.json
++++ b/dlls/winevulkan/winevulkan.json
+@@ -2,6 +2,6 @@
+     "file_format_version": "1.0.0",
+     "ICD": {
+         "library_path": ".\\winevulkan.dll",
+-        "api_version": "1.2.142"
++        "api_version": "1.2.145"
+     }
+ }
+diff --git a/dlls/winevulkan/winevulkan.spec b/dlls/winevulkan/winevulkan.spec
+index e024a43586..44ac8c6d2f 100644
+--- a/dlls/winevulkan/winevulkan.spec
++++ b/dlls/winevulkan/winevulkan.spec
+@@ -5,33 +5,7 @@
+ #
+ # Copyright (c) 2015-2020 The Khronos Group Inc.
+ #
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-#
+-# ---- Exceptions to the Apache 2.0 License: ----
+-#
+-# As an exception, if you use this Software to generate code and portions of
+-# this Software are embedded into the generated code as a result, you may
+-# redistribute such product without providing attribution as would otherwise
+-# be required by Sections 4(a), 4(b) and 4(d) of the License.
+-#
+-# In addition, if you combine or link code generated by this Software with
+-# software that is licensed under the GPLv2 or the LGPL v2.0 or 2.1
+-# ("`Combined Software`") and if a court of competent jurisdiction determines
+-# that the patent provision (Section 3), the indemnity provision (Section 9)
+-# or other Section of the License conflicts with the conditions of the
+-# applicable GPL or LGPL license, you may retroactively and prospectively
+-# choose to deem waived or otherwise exclude such Section(s) of the License,
+-# but only in their entirety and only with respect to the Combined Software.
++# SPDX-License-Identifier: Apache-2.0 OR MIT
+ #
+ 
+ @ stdcall -private vk_icdGetInstanceProcAddr(ptr str) wine_vk_icdGetInstanceProcAddr
+-- 
+2.27.0
+
+
+From aec196878875e92d0b404a6f982cea6667768696 Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Fri, 26 Jun 2020 16:21:54 -0700
+Subject: [PATCH 10/12] winevulkan: Don't initialize the Vulkan driver in
+ DllMain().
+
+Fixes an issue where winevulkan would not be registered if no Vulkan
+driver was present during prefix creation (such as in a build VM).
+
+Signed-off-by: Brendan Shanks <bshanks@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/vulkan.c | 29 ++++++++++++++++++++++-------
+ 1 file changed, 22 insertions(+), 7 deletions(-)
+
+diff --git a/dlls/winevulkan/vulkan.c b/dlls/winevulkan/vulkan.c
+index eb22e72ae3..d2da92cfa2 100644
+--- a/dlls/winevulkan/vulkan.c
++++ b/dlls/winevulkan/vulkan.c
+@@ -306,7 +306,7 @@ static void wine_vk_device_free(struct VkDevice_T *device)
+     heap_free(device);
+ }
+ 
+-static BOOL wine_vk_init(void)
++static BOOL WINAPI wine_vk_init(INIT_ONCE *once, void *param, void **context)
+ {
+     HDC hdc;
+ 
+@@ -314,16 +314,20 @@ static BOOL wine_vk_init(void)
+     vk_funcs = __wine_get_vulkan_driver(hdc, WINE_VULKAN_DRIVER_VERSION);
+     ReleaseDC(0, hdc);
+     if (!vk_funcs)
+-    {
+         ERR("Failed to load Wine graphics driver supporting Vulkan.\n");
+-        return FALSE;
+-    }
+-
+-    p_vkEnumerateInstanceVersion = vk_funcs->p_vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion");
++    else
++        p_vkEnumerateInstanceVersion = vk_funcs->p_vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion");
+ 
+     return TRUE;
+ }
+ 
++static void wine_vk_init_once(void)
++{
++    static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
++
++    InitOnceExecuteOnce(&init_once, wine_vk_init, NULL, NULL);
++}
++
+ /* Helper function for converting between win32 and host compatible VkInstanceCreateInfo.
+  * This function takes care of extensions handled at winevulkan layer, a Wine graphics
+  * driver is responsible for handling e.g. surface extensions.
+@@ -653,6 +657,10 @@ VkResult WINAPI wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
+ 
+     TRACE("create_info %p, allocator %p, instance %p\n", create_info, allocator, instance);
+ 
++    wine_vk_init_once();
++    if (!vk_funcs)
++        return VK_ERROR_INITIALIZATION_FAILED;
++
+     if (allocator)
+         FIXME("Support for allocation callbacks not implemented yet\n");
+ 
+@@ -779,6 +787,10 @@ VkResult WINAPI wine_vkEnumerateInstanceExtensionProperties(const char *layer_na
+         return VK_ERROR_LAYER_NOT_PRESENT;
+     }
+ 
++    wine_vk_init_once();
++    if (!vk_funcs)
++        return VK_ERROR_INITIALIZATION_FAILED;
++
+     res = vk_funcs->p_vkEnumerateInstanceExtensionProperties(NULL, &num_host_properties, NULL);
+     if (res != VK_SUCCESS)
+         return res;
+@@ -847,6 +859,8 @@ VkResult WINAPI wine_vkEnumerateInstanceVersion(uint32_t *version)
+ 
+     TRACE("%p\n", version);
+ 
++    wine_vk_init_once();
++
+     if (p_vkEnumerateInstanceVersion)
+     {
+         res = p_vkEnumerateInstanceVersion(version);
+@@ -1367,13 +1381,14 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
+         case DLL_PROCESS_ATTACH:
+             hinstance = hinst;
+             DisableThreadLibraryCalls(hinst);
+-            return wine_vk_init();
++            break;
+     }
+     return TRUE;
+ }
+ 
+ static const struct vulkan_func vk_global_dispatch_table[] =
+ {
++    /* These functions must call wine_vk_init_once() before accessing vk_funcs. */
+     {"vkCreateInstance", &wine_vkCreateInstance},
+     {"vkEnumerateInstanceExtensionProperties", &wine_vkEnumerateInstanceExtensionProperties},
+     {"vkEnumerateInstanceLayerProperties", &wine_vkEnumerateInstanceLayerProperties},
+-- 
+2.27.0
+
+
+From 380b7f28253c048d04c1fbd0cfbc7e804bb1b0e1 Mon Sep 17 00:00:00 2001
+From: Georg Lehmann <dadschoorse@gmail.com>
+Date: Wed, 8 Jul 2020 15:43:22 +0200
+Subject: [PATCH 11/12] winevulkan: Unwrap object for VK_EXT_private_data when
+ needed.
+
+Signed-off-by: Georg Lehmann <dadschoorse@gmail.com>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan     |  7 +++++++
+ dlls/winevulkan/vulkan.c        | 37 +++++++++++++++++++++++++++++++++
+ dlls/winevulkan/vulkan_thunks.c | 12 -----------
+ dlls/winevulkan/vulkan_thunks.h |  2 ++
+ 4 files changed, 46 insertions(+), 12 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index a0bf6b0859..b84eb39587 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -217,6 +217,10 @@ FUNCTION_OVERRIDES = {
+     # VK_KHR_device_group
+     "vkGetDeviceGroupSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
+     "vkGetPhysicalDevicePresentRectanglesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
++
++    # VK_EXT_private_data
++    "vkGetPrivateDataEXT" : {"dispatch": True, "driver" : False, "thunk" : False},
++    "vkSetPrivateDataEXT" : {"dispatch": True, "driver" : False, "thunk" : False},
+ }
+ 
+ STRUCT_CHAIN_CONVERSIONS = [
+@@ -919,6 +923,9 @@ class VkHandle(object):
+     def native_handle(self, name):
+         """ Provide access to the native handle of a wrapped object. """
+ 
++        # Remember to add any new native handle whose parent is VkDevice
++        # to unwrap_object_handle() in vulkan.c
++
+         if self.name == "VkCommandPool":
+             return "wine_cmd_pool_from_handle({0})->command_pool".format(name)
+ 
+diff --git a/dlls/winevulkan/vulkan.c b/dlls/winevulkan/vulkan.c
+index d2da92cfa2..4642975ad0 100644
+--- a/dlls/winevulkan/vulkan.c
++++ b/dlls/winevulkan/vulkan.c
+@@ -1372,6 +1372,43 @@ void WINAPI wine_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR(VkPhysicalDev
+     properties->externalSemaphoreFeatures = 0;
+ }
+ 
++static uint64_t unwrap_object_handle(VkObjectType type, uint64_t handle)
++{
++    switch (type)
++    {
++        case VK_OBJECT_TYPE_DEVICE:
++            return (uint64_t) (uintptr_t) ((VkDevice) (uintptr_t) handle)->device;
++        case VK_OBJECT_TYPE_QUEUE:
++            return (uint64_t) (uintptr_t) ((VkQueue) (uintptr_t) handle)->queue;
++        case VK_OBJECT_TYPE_COMMAND_BUFFER:
++            return (uint64_t) (uintptr_t) ((VkCommandBuffer) (uintptr_t) handle)->command_buffer;
++        case VK_OBJECT_TYPE_COMMAND_POOL:
++            return (uint64_t) wine_cmd_pool_from_handle(handle)->command_pool;
++        default:
++            return handle;
++    }
++}
++
++VkResult WINAPI wine_vkSetPrivateDataEXT(VkDevice device, VkObjectType object_type, uint64_t object_handle,
++        VkPrivateDataSlotEXT private_data_slot, uint64_t data)
++{
++    TRACE("%p, %#x, 0x%s, 0x%s, 0x%s\n", device, object_type, wine_dbgstr_longlong(object_handle),
++            wine_dbgstr_longlong(private_data_slot), wine_dbgstr_longlong(data));
++
++    object_handle = unwrap_object_handle(object_type, object_handle);
++    return device->funcs.p_vkSetPrivateDataEXT(device->device, object_type, object_handle, private_data_slot, data);
++}
++
++void WINAPI wine_vkGetPrivateDataEXT(VkDevice device, VkObjectType object_type, uint64_t object_handle,
++        VkPrivateDataSlotEXT private_data_slot, uint64_t *data)
++{
++    TRACE("%p, %#x, 0x%s, 0x%s, %p\n", device, object_type, wine_dbgstr_longlong(object_handle),
++            wine_dbgstr_longlong(private_data_slot), data);
++
++    object_handle = unwrap_object_handle(object_type, object_handle);
++    device->funcs.p_vkGetPrivateDataEXT(device->device, object_type, object_handle, private_data_slot, data);
++}
++
+ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
+ {
+     TRACE("%p, %u, %p\n", hinst, reason, reserved);
+diff --git a/dlls/winevulkan/vulkan_thunks.c b/dlls/winevulkan/vulkan_thunks.c
+index f8d171a6db..94aa1e3fb7 100644
+--- a/dlls/winevulkan/vulkan_thunks.c
++++ b/dlls/winevulkan/vulkan_thunks.c
+@@ -5066,12 +5066,6 @@ static VkResult WINAPI wine_vkGetPipelineExecutableStatisticsKHR(VkDevice device
+ #endif
+ }
+ 
+-static void WINAPI wine_vkGetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlotEXT privateDataSlot, uint64_t *pData)
+-{
+-    TRACE("%p, %#x, 0x%s, 0x%s, %p\n", device, objectType, wine_dbgstr_longlong(objectHandle), wine_dbgstr_longlong(privateDataSlot), pData);
+-    device->funcs.p_vkGetPrivateDataEXT(device->device, objectType, objectHandle, privateDataSlot, pData);
+-}
+-
+ VkResult WINAPI wine_vkGetQueryPoolResults(VkDevice device, VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount, size_t dataSize, void *pData, VkDeviceSize stride, VkQueryResultFlags flags)
+ {
+     TRACE("%p, 0x%s, %u, %u, 0x%s, %p, 0x%s, %#x\n", device, wine_dbgstr_longlong(queryPool), firstQuery, queryCount, wine_dbgstr_longlong(dataSize), pData, wine_dbgstr_longlong(stride), flags);
+@@ -5264,12 +5258,6 @@ VkResult WINAPI wine_vkSetEvent(VkDevice device, VkEvent event)
+     return device->funcs.p_vkSetEvent(device->device, event);
+ }
+ 
+-static VkResult WINAPI wine_vkSetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlotEXT privateDataSlot, uint64_t data)
+-{
+-    TRACE("%p, %#x, 0x%s, 0x%s, 0x%s\n", device, objectType, wine_dbgstr_longlong(objectHandle), wine_dbgstr_longlong(privateDataSlot), wine_dbgstr_longlong(data));
+-    return device->funcs.p_vkSetPrivateDataEXT(device->device, objectType, objectHandle, privateDataSlot, data);
+-}
+-
+ VkResult WINAPI wine_vkSignalSemaphore(VkDevice device, const VkSemaphoreSignalInfo *pSignalInfo)
+ {
+ #if defined(USE_STRUCT_CONVERSION)
+diff --git a/dlls/winevulkan/vulkan_thunks.h b/dlls/winevulkan/vulkan_thunks.h
+index 9580c6bbcd..7055d4fb13 100644
+--- a/dlls/winevulkan/vulkan_thunks.h
++++ b/dlls/winevulkan/vulkan_thunks.h
+@@ -40,7 +40,9 @@ VkResult WINAPI wine_vkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice
+ VkResult WINAPI wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceImageFormatInfo2 *pImageFormatInfo, VkImageFormatProperties2 *pImageFormatProperties) DECLSPEC_HIDDEN;
+ void WINAPI wine_vkGetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties);
+ void WINAPI wine_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *pProperties) DECLSPEC_HIDDEN;
++void WINAPI wine_vkGetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlotEXT privateDataSlot, uint64_t *pData) DECLSPEC_HIDDEN;
+ VkResult WINAPI wine_vkQueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits, VkFence fence);
++VkResult WINAPI wine_vkSetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlotEXT privateDataSlot, uint64_t data) DECLSPEC_HIDDEN;
+ 
+ /* Private thunks */
+ VkResult thunk_vkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceImageFormatInfo2 *pImageFormatInfo, VkImageFormatProperties2 *pImageFormatProperties) DECLSPEC_HIDDEN;
+-- 
+2.27.0
+
+
+From 314cd9cdd542db658ce7a01ef0a7621fc2d9d335 Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Mon, 13 Jul 2020 11:45:30 -0700
+Subject: [PATCH 12/12] winevulkan: Export VK_KHR_get_surface_capabilities2
+ functions from vulkan-1.
+
+Signed-off-by: Brendan Shanks <bshanks@codeweavers.com>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winevulkan/make_vulkan     | 1 +
+ dlls/winevulkan/vulkan_thunks.c | 4 ++--
+ dlls/winevulkan/winevulkan.spec | 2 ++
+ 3 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index b84eb39587..04b263e3e4 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -130,6 +130,7 @@ UNSUPPORTED_EXTENSIONS = [
+ CORE_EXTENSIONS = [
+     "VK_KHR_display",
+     "VK_KHR_display_swapchain",
++    "VK_KHR_get_surface_capabilities2",
+     "VK_KHR_surface",
+     "VK_KHR_swapchain",
+     "VK_KHR_win32_surface",
+diff --git a/dlls/winevulkan/vulkan_thunks.c b/dlls/winevulkan/vulkan_thunks.c
+index 94aa1e3fb7..06d79b8fae 100644
+--- a/dlls/winevulkan/vulkan_thunks.c
++++ b/dlls/winevulkan/vulkan_thunks.c
+@@ -4939,7 +4939,7 @@ static VkResult WINAPI wine_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesC
+     return physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV(physicalDevice->phys_dev, pCombinationCount, pCombinations);
+ }
+ 
+-static VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, VkSurfaceCapabilities2KHR *pSurfaceCapabilities)
++VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, VkSurfaceCapabilities2KHR *pSurfaceCapabilities)
+ {
+ #if defined(USE_STRUCT_CONVERSION)
+     VkResult result;
+@@ -4962,7 +4962,7 @@ VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice
+     return physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice->phys_dev, surface, pSurfaceCapabilities);
+ }
+ 
+-static VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceFormats2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, uint32_t *pSurfaceFormatCount, VkSurfaceFormat2KHR *pSurfaceFormats)
++VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceFormats2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, uint32_t *pSurfaceFormatCount, VkSurfaceFormat2KHR *pSurfaceFormats)
+ {
+ #if defined(USE_STRUCT_CONVERSION)
+     VkResult result;
+diff --git a/dlls/winevulkan/winevulkan.spec b/dlls/winevulkan/winevulkan.spec
+index 44ac8c6d2f..383e6b9b8f 100644
+--- a/dlls/winevulkan/winevulkan.spec
++++ b/dlls/winevulkan/winevulkan.spec
+@@ -182,7 +182,9 @@
+ @ stdcall -private wine_vkGetPhysicalDeviceQueueFamilyProperties2(ptr ptr ptr)
+ @ stdcall -private wine_vkGetPhysicalDeviceSparseImageFormatProperties(ptr long long long long long ptr ptr)
+ @ stdcall -private wine_vkGetPhysicalDeviceSparseImageFormatProperties2(ptr ptr ptr ptr)
++@ stdcall -private wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(ptr ptr ptr)
+ @ stdcall -private wine_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ptr int64 ptr)
++@ stdcall -private wine_vkGetPhysicalDeviceSurfaceFormats2KHR(ptr ptr ptr ptr)
+ @ stdcall -private wine_vkGetPhysicalDeviceSurfaceFormatsKHR(ptr int64 ptr ptr)
+ @ stdcall -private wine_vkGetPhysicalDeviceSurfacePresentModesKHR(ptr int64 ptr ptr)
+ @ stdcall -private wine_vkGetPhysicalDeviceSurfaceSupportKHR(ptr long int64 ptr)
+-- 
+2.27.0
+
