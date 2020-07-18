@@ -21,6 +21,14 @@
 #ifndef __WINE_UXTHEMEDLL_H
 #define __WINE_UXTHEMEDLL_H
 
+#include "windef.h"
+#include "winbase.h"
+#include "wingdi.h"
+#include "winuser.h"
+#include "winerror.h"
+#include "winreg.h"
+#include "uxtheme.h"
+
 typedef HANDLE HTHEMEFILE;
 
 /**********************************************************************
@@ -95,6 +103,70 @@ HRESULT WINAPI ParseThemeIniFile(LPCWSTR pszIniFileName, LPWSTR pszUnknown,
                                  ParseThemeIniFileProc callback, LPVOID lpData) DECLSPEC_HIDDEN;
 
 extern void UXTHEME_InitSystem(HINSTANCE hInst) DECLSPEC_HIDDEN;
+
+BOOL uxtheme_gtk_enabled(void) DECLSPEC_HIDDEN;
+
+HRESULT uxtheme_gtk_CloseThemeData(HTHEME theme) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_EnableThemeDialogTexture(HWND hwnd, DWORD flags) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_EnableTheming(BOOL enable) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetCurrentThemeName(LPWSTR filename, int filename_maxlen,
+                                        LPWSTR color, int color_maxlen,
+                                        LPWSTR size, int size_maxlen) DECLSPEC_HIDDEN;
+DWORD uxtheme_gtk_GetThemeAppProperties(void) DECLSPEC_HIDDEN;
+BOOL uxtheme_gtk_IsThemeDialogTextureEnabled(HWND hwnd) DECLSPEC_HIDDEN;
+HTHEME uxtheme_gtk_OpenThemeDataEx(HWND hwnd, LPCWSTR classlist, DWORD flags) DECLSPEC_HIDDEN;
+void uxtheme_gtk_SetThemeAppProperties(DWORD flags) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_SetWindowTheme(HWND hwnd, LPCWSTR sub_app_name, LPCWSTR sub_id_list) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeBool(HTHEME htheme, int part_id, int state_id,
+                                 int prop_id, BOOL *value) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeColor(HTHEME htheme, int part_id, int state_id,
+                                  int prop_id, COLORREF *color) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeEnumValue(HTHEME htheme, int part_id, int state_id,
+                                      int prop_id, int *value) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeFilename(HTHEME htheme, int part_id, int state_id,
+                                     int prop_id, LPWSTR filename, int maxlen) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeFont(HTHEME htheme, HDC hdc, int part_id, int state_id,
+                                 int prop_id, LOGFONTW *font) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeInt(HTHEME htheme, int part_id, int state_id,
+                                int prop_id, int *value) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeIntList(HTHEME htheme, int part_id, int state_id,
+                                    int prop_id, INTLIST *intlist) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeMargins(HTHEME htheme, HDC hdc, int part_id, int state_id,
+                                    int prop_id, LPRECT rect, MARGINS *margins) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeMetric(HTHEME htheme, HDC hdc, int part_id, int state_id,
+                                   int prop_id, int *value) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemePosition(HTHEME htheme, int part_id, int state_id,
+                                     int prop_id, POINT *point) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemePropertyOrigin(HTHEME htheme, int part_id, int state_id,
+                                           int prop_id, PROPERTYORIGIN *origin) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeRect(HTHEME htheme, int part_id, int state_id,
+                                 int prop_id, RECT *rect) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeString(HTHEME htheme, int part_id, int state_id,
+                                   int prop_id, LPWSTR buffer, int maxlen) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeTransitionDuration(HTHEME htheme, int part_id, int state_id_from,
+                                               int state_id_to, int prop_id, DWORD *duration) DECLSPEC_HIDDEN;
+BOOL uxtheme_gtk_GetThemeSysBool(HTHEME htheme, int bool_id) DECLSPEC_HIDDEN;
+COLORREF uxtheme_gtk_GetThemeSysColor(HTHEME htheme, int color_id) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeSysFont(HTHEME htheme, int font_id, LOGFONTW *font) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeSysInt(HTHEME htheme, int int_id, int *value) DECLSPEC_HIDDEN;
+int uxtheme_gtk_GetThemeSysSize(HTHEME htheme, int size_id) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeSysString(HTHEME htheme, int string_id, LPWSTR buffer, int maxlen) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_DrawThemeBackgroundEx(HTHEME htheme, HDC hdc, int part_id, int state_id,
+                                          LPCRECT rect, const DTBGOPTS *options) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_DrawThemeTextEx(HTHEME htheme, HDC hdc, int part_id, int state_id,
+                                    LPCWSTR text, int length, DWORD flags, RECT *rect,
+                                    const DTTOPTS *options) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeBackgroundRegion(HTHEME htheme, HDC hdc, int part_id,
+                                             int state_id, LPCRECT rect, HRGN *region) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemePartSize(HTHEME htheme, HDC hdc, int part_id, int state_id,
+                                     RECT *rect, THEMESIZE type, SIZE *size) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeTextExtent(HTHEME htheme, HDC hdc, int part_id, int state_id,
+                                       LPCWSTR text, int length, DWORD flags,
+                                       LPCRECT bounding_rect, LPRECT extent_rect) DECLSPEC_HIDDEN;
+HRESULT uxtheme_gtk_GetThemeTextMetrics(HTHEME htheme, HDC hdc, int part_id, int state_id,
+                                        TEXTMETRICW *metric) DECLSPEC_HIDDEN;
+BOOL uxtheme_gtk_IsThemeBackgroundPartiallyTransparent(HTHEME htheme, int part_id, int state_id) DECLSPEC_HIDDEN;
+BOOL uxtheme_gtk_IsThemePartDefined(HTHEME htheme, int part_id, int state_id) DECLSPEC_HIDDEN;
 
 /* No alpha blending */
 #define ALPHABLEND_NONE             0

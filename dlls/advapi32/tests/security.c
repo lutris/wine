@@ -1466,10 +1466,8 @@ static void test_AccessCheck(void)
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
                       0, &PrivSetLen, &Access, &AccessStatus);
     err = GetLastError();
-todo_wine
     ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "AccessCheck should have "
        "failed with ERROR_INSUFFICIENT_BUFFER, instead of %d\n", err);
-todo_wine
     ok(PrivSetLen == sizeof(PRIVILEGE_SET), "PrivSetLen returns %d\n", PrivSetLen);
     ok(Access == 0x1abe11ed && AccessStatus == 0x1abe11ed,
        "Access and/or AccessStatus were changed!\n");
@@ -1520,12 +1518,9 @@ todo_wine
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
                       PrivSet, &PrivSetLen, &Access, &AccessStatus);
     err = GetLastError();
-todo_wine
     ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "AccessCheck should have "
        "failed with ERROR_INSUFFICIENT_BUFFER, instead of %d\n", err);
-todo_wine
     ok(PrivSetLen == sizeof(PRIVILEGE_SET), "PrivSetLen returns %d\n", PrivSetLen);
-todo_wine
     ok(Access == 0x1abe11ed && AccessStatus == 0x1abe11ed,
        "Access and/or AccessStatus were changed!\n");
 
@@ -1557,7 +1552,6 @@ todo_wine
        "failed with ERROR_INSUFFICIENT_BUFFER, instead of %d\n", err);
 todo_wine
     ok(PrivSetLen == sizeof(PRIVILEGE_SET), "PrivSetLen returns %d\n", PrivSetLen);
-todo_wine
     ok(Access == 0x1abe11ed && AccessStatus == 0x1abe11ed,
        "Access and/or AccessStatus were changed!\n");
 
@@ -1637,12 +1631,9 @@ todo_wine
         ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
                           PrivSet, &PrivSetLen, &Access, &AccessStatus);
         err = GetLastError();
-    todo_wine
         ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "AccessCheck should have "
            "failed with ERROR_INSUFFICIENT_BUFFER, instead of %d\n", err);
-    todo_wine
         ok(PrivSetLen == sizeof(PRIVILEGE_SET), "PrivSetLen returns %d\n", PrivSetLen);
-    todo_wine
         ok(Access == 0x1abe11ed && AccessStatus == 0x1abe11ed,
            "Access and/or AccessStatus were changed!\n");
 
@@ -3648,7 +3639,7 @@ static void test_CreateDirectoryA(void)
     }
     ok(!error, "GetNamedSecurityInfo failed with error %d\n", error);
     test_inherited_dacl(pDacl, admin_sid, user_sid, OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE,
-                        0x1f01ff, FALSE, TRUE, FALSE, __LINE__);
+                        0x1f01ff, FALSE, FALSE, FALSE, __LINE__);
     LocalFree(pSD);
 
     /* Test inheritance of ACLs in CreateFile without security descriptor */
@@ -3664,7 +3655,7 @@ static void test_CreateDirectoryA(void)
                                    (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
     ok(error == ERROR_SUCCESS, "Failed to get permissions on file\n");
     test_inherited_dacl(pDacl, admin_sid, user_sid, INHERITED_ACE,
-                        0x1f01ff, TRUE, TRUE, TRUE, __LINE__);
+                        0x1f01ff, FALSE, FALSE, FALSE, __LINE__);
     LocalFree(pSD);
     CloseHandle(hTemp);
 
@@ -3694,7 +3685,6 @@ static void test_CreateDirectoryA(void)
     ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
     bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
     ok(bret, "GetAclInformation failed\n");
-    todo_wine
     ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
                                acl_size.AceCount);
     LocalFree(pSD);
@@ -3702,17 +3692,12 @@ static void test_CreateDirectoryA(void)
     error = pGetNamedSecurityInfoA(tmpfile, SE_FILE_OBJECT,
                                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
                                    (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
-    todo_wine
     ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
-    if (error == ERROR_SUCCESS)
-    {
-        bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
-        ok(bret, "GetAclInformation failed\n");
-        todo_wine
-        ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
-                                   acl_size.AceCount);
-        LocalFree(pSD);
-    }
+    bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
+    ok(bret, "GetAclInformation failed\n");
+    ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
+                               acl_size.AceCount);
+    LocalFree(pSD);
     CloseHandle(hTemp);
 
     /* Test inheritance of ACLs in NtCreateFile without security descriptor */
@@ -3737,7 +3722,7 @@ static void test_CreateDirectoryA(void)
                                    (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
     ok(error == ERROR_SUCCESS, "Failed to get permissions on file\n");
     test_inherited_dacl(pDacl, admin_sid, user_sid, INHERITED_ACE,
-                        0x1f01ff, TRUE, TRUE, TRUE, __LINE__);
+                        0x1f01ff, FALSE, FALSE, FALSE, __LINE__);
     LocalFree(pSD);
     CloseHandle(hTemp);
 
@@ -3781,17 +3766,158 @@ static void test_CreateDirectoryA(void)
     error = pGetNamedSecurityInfoA(tmpfile, SE_FILE_OBJECT,
                                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
                                    (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
-    todo_wine
     ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
-    if (error == ERROR_SUCCESS)
-    {
-        bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
-        ok(bret, "GetAclInformation failed\n");
-        todo_wine
-        ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
-                                   acl_size.AceCount);
-        LocalFree(pSD);
-    }
+    bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
+    ok(bret, "GetAclInformation failed\n");
+    todo_wine
+    ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
+                               acl_size.AceCount);
+    LocalFree(pSD);
+    CloseHandle(hTemp);
+
+    /* Test inheritance of ACLs in CreateDirectory without security descriptor */
+    strcpy(tmpfile, tmpdir);
+    lstrcatA(tmpfile, "/tmpdir");
+    bret = CreateDirectoryA(tmpfile, NULL);
+    ok(bret == TRUE, "CreateDirectoryA failed with error %u\n", GetLastError());
+
+    error = pGetNamedSecurityInfoA(tmpfile, SE_FILE_OBJECT,
+                                   OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                   (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
+    ok(error == ERROR_SUCCESS, "Failed to get permissions on file\n");
+    test_inherited_dacl(pDacl, admin_sid, user_sid,
+                        OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERITED_ACE,
+                        0x1f01ff, FALSE, FALSE, FALSE, __LINE__);
+    LocalFree(pSD);
+    bret = RemoveDirectoryA(tmpfile);
+    ok(bret == TRUE, "RemoveDirectoryA failed with error %u\n", GetLastError());
+
+    /* Test inheritance of ACLs in CreateDirectory with security descriptor */
+    pSD = &sd;
+    InitializeSecurityDescriptor(pSD, SECURITY_DESCRIPTOR_REVISION);
+    pDacl = HeapAlloc(GetProcessHeap(), 0, sizeof(ACL));
+    bret = InitializeAcl(pDacl, sizeof(ACL), ACL_REVISION);
+    ok(bret, "Failed to initialize ACL\n");
+    bret = SetSecurityDescriptorDacl(pSD, TRUE, pDacl, FALSE);
+    ok(bret, "Failed to add ACL to security desciptor\n");
+
+    strcpy(tmpfile, tmpdir);
+    lstrcatA(tmpfile, "/tmpdir1");
+
+    sa.nLength = sizeof(sa);
+    sa.lpSecurityDescriptor = pSD;
+    sa.bInheritHandle = TRUE;
+    bret = CreateDirectoryA(tmpfile, &sa);
+    ok(bret == TRUE, "CreateDirectoryA failed with error %u\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, pDacl);
+
+    error = pGetNamedSecurityInfoA(tmpfile, SE_FILE_OBJECT,
+                                   OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                   (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
+    ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
+    bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
+    ok(bret, "GetAclInformation failed\n");
+    ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
+                               acl_size.AceCount);
+    LocalFree(pSD);
+
+    SetLastError(0xdeadbeef);
+    bret = RemoveDirectoryA(tmpfile);
+    error = GetLastError();
+    ok(bret == FALSE, "RemoveDirectoryA unexpected succeeded\n");
+    ok(error == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %u\n", error);
+
+    pSD = &sd;
+    InitializeSecurityDescriptor(pSD, SECURITY_DESCRIPTOR_REVISION);
+    pDacl = HeapAlloc(GetProcessHeap(), 0, 100);
+    bret = InitializeAcl(pDacl, 100, ACL_REVISION);
+    ok(bret, "Failed to initialize ACL.\n");
+    bret = pAddAccessAllowedAceEx(pDacl, ACL_REVISION, 0, GENERIC_ALL, user_sid);
+    ok(bret, "Failed to add Current User to ACL.\n");
+    bret = SetSecurityDescriptorDacl(pSD, TRUE, pDacl, FALSE);
+    ok(bret, "Failed to add ACL to security desciptor.\n");
+    error = pSetNamedSecurityInfoA(tmpfile, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL,
+                                   NULL, pDacl, NULL);
+    ok(error == ERROR_SUCCESS, "SetNamedSecurityInfoA failed with error %u\n", error);
+    HeapFree(GetProcessHeap(), 0, pDacl);
+
+    bret = RemoveDirectoryA(tmpfile);
+    ok(bret == TRUE, "RemoveDirectoryA failed with error %u\n", GetLastError());
+
+    /* Test inheritance of ACLs in NtCreateFile(..., FILE_DIRECTORY_FILE, ...) without security descriptor */
+    strcpy(tmpfile, tmpdir);
+    lstrcatA(tmpfile, "/tmpdir");
+    get_nt_pathW(tmpfile, &tmpfileW);
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &tmpfileW;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    status = pNtCreateFile(&hTemp, GENERIC_READ | DELETE, &attr, &io, NULL, FILE_ATTRIBUTE_NORMAL,
+                           FILE_SHARE_READ, FILE_CREATE, FILE_DIRECTORY_FILE | FILE_DELETE_ON_CLOSE, NULL, 0);
+    ok(!status, "NtCreateFile failed with %08x\n", status);
+    RtlFreeUnicodeString(&tmpfileW);
+
+    error = pGetNamedSecurityInfoA(tmpfile, SE_FILE_OBJECT,
+                                   OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                   (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
+    ok(error == ERROR_SUCCESS, "Failed to get permissions on file\n");
+    test_inherited_dacl(pDacl, admin_sid, user_sid,
+                        OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERITED_ACE,
+                        0x1f01ff, FALSE, FALSE, FALSE, __LINE__);
+    LocalFree(pSD);
+    CloseHandle(hTemp);
+
+    /* Test inheritance of ACLs in NtCreateFile(..., FILE_DIRECTORY_FILE, ...) with security descriptor */
+    pSD = &sd;
+    InitializeSecurityDescriptor(pSD, SECURITY_DESCRIPTOR_REVISION);
+    pDacl = HeapAlloc(GetProcessHeap(), 0, sizeof(ACL));
+    bret = InitializeAcl(pDacl, sizeof(ACL), ACL_REVISION);
+    ok(bret, "Failed to initialize ACL\n");
+    bret = SetSecurityDescriptorDacl(pSD, TRUE, pDacl, FALSE);
+    ok(bret, "Failed to add ACL to security desciptor\n");
+
+    strcpy(tmpfile, tmpdir);
+    lstrcatA(tmpfile, "/tmpdir2");
+    get_nt_pathW(tmpfile, &tmpfileW);
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &tmpfileW;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = pSD;
+    attr.SecurityQualityOfService = NULL;
+
+    status = pNtCreateFile(&hTemp, GENERIC_READ | DELETE, &attr, &io, NULL, FILE_ATTRIBUTE_NORMAL,
+                           FILE_SHARE_READ, FILE_CREATE, FILE_DIRECTORY_FILE | FILE_DELETE_ON_CLOSE, NULL, 0);
+    ok(!status, "NtCreateFile failed with %08x\n", status);
+    RtlFreeUnicodeString(&tmpfileW);
+    HeapFree(GetProcessHeap(), 0, pDacl);
+
+    error = GetSecurityInfo(hTemp, SE_FILE_OBJECT,
+                             OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                             (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
+    ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
+    bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
+    ok(bret, "GetAclInformation failed\n");
+    todo_wine
+    ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
+                               acl_size.AceCount);
+    LocalFree(pSD);
+
+    error = pGetNamedSecurityInfoA(tmpfile, SE_FILE_OBJECT,
+                                   OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                   (PSID *)&owner, NULL, &pDacl, NULL, &pSD);
+    ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
+    bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
+    ok(bret, "GetAclInformation failed\n");
+    todo_wine
+    ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
+                               acl_size.AceCount);
+    LocalFree(pSD);
     CloseHandle(hTemp);
 
 done:
@@ -3967,21 +4093,20 @@ static void test_GetNamedSecurityInfoA(void)
         bret = GetAce(pDacl, 0, (VOID **)&ace);
         ok(bret, "Failed to get Current User ACE.\n");
         bret = EqualSid(&ace->SidStart, user_sid);
-        todo_wine ok(bret, "Current User ACE (%s) != Current User SID (%s).\n",
-                     debugstr_sid(&ace->SidStart), debugstr_sid(user_sid));
+        ok(bret, "Current User ACE (%s) != Current User SID (%s).\n",
+           debugstr_sid(&ace->SidStart), debugstr_sid(user_sid));
         ok(((ACE_HEADER *)ace)->AceFlags == 0,
            "Current User ACE has unexpected flags (0x%x != 0x0)\n", ((ACE_HEADER *)ace)->AceFlags);
-        ok(ace->Mask == 0x1f01ff, "Current User ACE has unexpected mask (0x%x != 0x1f01ff)\n",
-                                  ace->Mask);
+        ok(ace->Mask == 0x1f01ff,
+           "Current User ACE has unexpected mask (0x%x != 0x1f01ff)\n", ace->Mask);
     }
     if (acl_size.AceCount > 1)
     {
         bret = GetAce(pDacl, 1, (VOID **)&ace);
         ok(bret, "Failed to get Administators Group ACE.\n");
         bret = EqualSid(&ace->SidStart, admin_sid);
-        todo_wine ok(bret || broken(!bret) /* win2k */,
-                     "Administators Group ACE (%s) != Administators Group SID (%s).\n",
-                     debugstr_sid(&ace->SidStart), debugstr_sid(admin_sid));
+        ok(bret || broken(!bret) /* win2k */, "Administators Group ACE (%s) != Administators Group SID (%s).\n",
+           debugstr_sid(&ace->SidStart), debugstr_sid(admin_sid));
         ok(((ACE_HEADER *)ace)->AceFlags == 0,
            "Administators Group ACE has unexpected flags (0x%x != 0x0)\n", ((ACE_HEADER *)ace)->AceFlags);
         ok(ace->Mask == 0x1f01ff || broken(ace->Mask == GENERIC_ALL) /* win2k */,
@@ -4008,8 +4133,8 @@ static void test_GetNamedSecurityInfoA(void)
     {
         bret = GetAce(pDacl, 0, (VOID **)&ace);
         ok(bret, "Failed to get ACE.\n");
-        todo_wine ok(((ACE_HEADER *)ace)->AceFlags & INHERITED_ACE,
-                "ACE has unexpected flags: 0x%x\n", ((ACE_HEADER *)ace)->AceFlags);
+        ok(((ACE_HEADER *)ace)->AceFlags & INHERITED_ACE,
+           "ACE has unexpected flags: 0x%x\n", ((ACE_HEADER *)ace)->AceFlags);
     }
     LocalFree(pSD);
 
@@ -4784,23 +4909,22 @@ static void test_GetSecurityInfo(void)
         bret = GetAce(pDacl, 0, (VOID **)&ace);
         ok(bret, "Failed to get Current User ACE.\n");
         bret = EqualSid(&ace->SidStart, user_sid);
-        todo_wine ok(bret, "Current User ACE (%s) != Current User SID (%s).\n",
-                     debugstr_sid(&ace->SidStart), debugstr_sid(user_sid));
+        ok(bret, "Current User ACE (%s) != Current User SID (%s).\n", debugstr_sid(&ace->SidStart), debugstr_sid(user_sid));
         ok(((ACE_HEADER *)ace)->AceFlags == 0,
            "Current User ACE has unexpected flags (0x%x != 0x0)\n", ((ACE_HEADER *)ace)->AceFlags);
         ok(ace->Mask == 0x1f01ff, "Current User ACE has unexpected mask (0x%x != 0x1f01ff)\n",
-                                    ace->Mask);
+                                  ace->Mask);
     }
     if (acl_size.AceCount > 1)
     {
         bret = GetAce(pDacl, 1, (VOID **)&ace);
         ok(bret, "Failed to get Administators Group ACE.\n");
         bret = EqualSid(&ace->SidStart, admin_sid);
-        todo_wine ok(bret, "Administators Group ACE (%s) != Administators Group SID (%s).\n", debugstr_sid(&ace->SidStart), debugstr_sid(admin_sid));
+        ok(bret, "Administators Group ACE (%s) != Administators Group SID (%s).\n", debugstr_sid(&ace->SidStart), debugstr_sid(admin_sid));
         ok(((ACE_HEADER *)ace)->AceFlags == 0,
            "Administators Group ACE has unexpected flags (0x%x != 0x0)\n", ((ACE_HEADER *)ace)->AceFlags);
-        ok(ace->Mask == 0x1f01ff, "Administators Group ACE has unexpected mask (0x%x != 0x1f01ff)\n",
-                                  ace->Mask);
+        ok(ace->Mask == 0x1f01ff,
+                     "Administators Group ACE has unexpected mask (0x%x != 0x1f01ff)\n", ace->Mask);
     }
     LocalFree(pSD);
     CloseHandle(obj);
@@ -7005,13 +7129,19 @@ static void test_token_security_descriptor(void)
 {
     static SID low_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
                             {SECURITY_MANDATORY_LOW_RID}};
+    static SID medium_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
+                               {SECURITY_MANDATORY_MEDIUM_RID}};
+    static SID high_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
+                             {SECURITY_MANDATORY_HIGH_RID}};
     char buffer_sd[SECURITY_DESCRIPTOR_MIN_LENGTH];
-    SECURITY_DESCRIPTOR *sd = (SECURITY_DESCRIPTOR *)&buffer_sd, *sd2;
+    SECURITY_DESCRIPTOR *sd = (SECURITY_DESCRIPTOR *)&buffer_sd, *sd2, *sd3;
     char buffer_acl[256], buffer[MAX_PATH];
-    ACL *acl = (ACL *)&buffer_acl, *acl2, *acl_child;
+    ACL *acl = (ACL *)&buffer_acl, *acl2, *acl_child, *sacl;
     BOOL defaulted, present, ret, found;
-    HANDLE token, token2, token3;
+    HANDLE token, token2, token3, token4, token5, token6;
     EXPLICIT_ACCESSW exp_access;
+    TOKEN_MANDATORY_LABEL *tml;
+    BYTE buffer_integrity[64];
     PROCESS_INFORMATION info;
     DWORD size, index, retd;
     ACCESS_ALLOWED_ACE *ace;
@@ -7097,7 +7227,6 @@ static void test_token_security_descriptor(void)
     defaulted = TRUE;
     ret = GetSecurityDescriptorDacl(sd2, &present, &acl2, &defaulted);
     ok(ret, "GetSecurityDescriptorDacl failed with error %u\n", GetLastError());
-    todo_wine
     ok(present, "DACL not present\n");
 
     if (present)
@@ -7161,6 +7290,185 @@ static void test_token_security_descriptor(void)
     /* The security label is also not inherited */
     if (pAddMandatoryAce)
     {
+        memset(buffer_integrity, 0, sizeof(buffer_integrity));
+        ret = GetTokenInformation(token, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
+        ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
+        tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
+        ok(EqualSid(tml->Label.Sid, &medium_level) || EqualSid(tml->Label.Sid, &high_level),
+           "Expected medium or high integrity level\n");
+
+        if (EqualSid(tml->Label.Sid, &high_level))
+        {
+            DWORD process_id;
+            HANDLE process;
+            HWND shell;
+
+            /* This test tries to get a medium token and then impersonates this token. The
+             * idea is to check whether the sd label of a newly created token depends on the
+             * current active token or the integrity level of the newly created token. */
+
+             /* Steal process token of the explorer.exe process */
+            shell = GetShellWindow();
+            todo_wine ok(shell != NULL, "Failed to get shell window\n");
+            if (!shell) shell = GetDesktopWindow();  /* FIXME: Workaround for Wine */
+            ok(GetWindowThreadProcessId(shell, &process_id),
+               "Failed to get process id of shell window: %u\n", GetLastError());
+            process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, process_id);
+            ok(process != NULL, "Failed to open process: %u\n", GetLastError());
+            ok(OpenProcessToken(process, TOKEN_ALL_ACCESS, &token4),
+               "Failed to open process token: %u\n", GetLastError());
+            CloseHandle(process);
+
+            /* Check TokenIntegrityLevel and LABEL_SECURITY_INFORMATION of explorer.exe token */
+            memset(buffer_integrity, 0, sizeof(buffer_integrity));
+            ret = GetTokenInformation(token4, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
+            ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
+            tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
+            ok(EqualSid(tml->Label.Sid, &medium_level), "Expected medium integrity level\n");
+
+            size = 0;
+            ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
+            ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+               "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
+
+            sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+            ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, sd3, size, &size);
+            ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
+
+            sacl = NULL;
+            ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
+            ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
+            ok(present, "No SACL in the security descriptor\n");
+            ok(sacl != NULL, "NULL SACL in the security descriptor\n");
+
+            if (sacl)
+            {
+                ret = GetAce(sacl, 0, (void **)&ace);
+                ok(ret, "GetAce failed with error %u\n", GetLastError());
+                ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
+                   "Unexpected ACE type %#x\n", ace->Header.AceType);
+                ok(EqualSid(&ace->SidStart, &medium_level),
+                   "Expected medium integrity level\n");
+            }
+
+            HeapFree(GetProcessHeap(), 0, sd3);
+
+            /* Start child process with the explorer.exe token */
+            memset(&startup, 0, sizeof(startup));
+            startup.cb = sizeof(startup);
+            startup.dwFlags = STARTF_USESHOWWINDOW;
+            startup.wShowWindow = SW_SHOWNORMAL;
+
+            sprintf(buffer, "%s tests/security.c test_token_sd_medium", myARGV[0]);
+            ret = CreateProcessAsUserA(token4, NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info);
+            ok(ret || GetLastError() == ERROR_PRIVILEGE_NOT_HELD,
+                "CreateProcess failed with error %u\n", GetLastError());
+            if (ret)
+            {
+                winetest_wait_child_process(info.hProcess);
+                CloseHandle(info.hProcess);
+                CloseHandle(info.hThread);
+            }
+            else
+                win_skip("Skipping test for creating process with medium level token\n");
+
+            ret = DuplicateTokenEx(token4, 0, NULL, SecurityImpersonation, TokenImpersonation, &token5);
+            ok(ret, "DuplicateTokenEx failed with error %u\n", GetLastError());
+            ret = SetThreadToken(NULL, token5);
+            ok(ret, "SetThreadToken failed with error %u\n", GetLastError());
+            CloseHandle(token4);
+
+            /* Restrict current process token while impersonating a medium integrity token */
+            ret = CreateRestrictedToken(token, 0, 0, NULL, 0, NULL, 0, NULL, &token6);
+            ok(ret, "CreateRestrictedToken failed with error %u\n", GetLastError());
+
+            memset(buffer_integrity, 0, sizeof(buffer_integrity));
+            ret = GetTokenInformation(token6, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
+            ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
+            tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
+            ok(EqualSid(tml->Label.Sid, &high_level), "Expected high integrity level\n");
+
+            size = 0;
+            ret = GetKernelObjectSecurity(token6, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
+            ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+               "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
+
+            sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+            ret = GetKernelObjectSecurity(token6, LABEL_SECURITY_INFORMATION, sd3, size, &size);
+            ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
+
+            sacl = NULL;
+            ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
+            ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
+            ok(present, "No SACL in the security descriptor\n");
+            ok(sacl != NULL, "NULL SACL in the security descriptor\n");
+
+            if (sacl)
+            {
+                ret = GetAce(sacl, 0, (void **)&ace);
+                ok(ret, "GetAce failed with error %u\n", GetLastError());
+                ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
+                   "Unexpected ACE type %#x\n", ace->Header.AceType);
+                ok(EqualSid(&ace->SidStart, &medium_level),
+                   "Expected medium integrity level\n");
+            }
+
+            HeapFree(GetProcessHeap(), 0, sd3);
+            RevertToSelf();
+            CloseHandle(token5);
+
+            /* Start child process with the restricted token */
+            sprintf(buffer, "%s tests/security.c test_token_sd_restricted", myARGV[0]);
+            ret = CreateProcessAsUserA(token6, NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info);
+            ok(ret, "CreateProcess failed with error %u\n", GetLastError());
+            winetest_wait_child_process(info.hProcess);
+            CloseHandle(info.hProcess);
+            CloseHandle(info.hThread);
+            CloseHandle(token6);
+
+            /* DuplicateTokenEx should assign security label even when SA points to empty SD */
+            memset(sd, 0, sizeof(buffer_sd));
+            ret = InitializeSecurityDescriptor(sd, SECURITY_DESCRIPTOR_REVISION);
+            ok(ret, "InitializeSecurityDescriptor failed with error %u\n", GetLastError());
+
+            sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+            sa.lpSecurityDescriptor = sd;
+            sa.bInheritHandle = FALSE;
+
+            ret = DuplicateTokenEx(token, 0, &sa, 0, TokenPrimary, &token6);
+            ok(ret, "DuplicateTokenEx failed with error %u\n", GetLastError());
+
+            size = 0;
+            ret = GetKernelObjectSecurity(token6, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
+            ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+               "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
+
+            sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+            ret = GetKernelObjectSecurity(token6, LABEL_SECURITY_INFORMATION, sd3, size, &size);
+            ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
+
+            sacl = NULL;
+            ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
+            ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
+            ok(present, "No SACL in the security descriptor\n");
+            ok(sacl != NULL, "NULL SACL in the security descriptor\n");
+
+            if (sacl)
+            {
+                ret = GetAce(sacl, 0, (void **)&ace);
+                ok(ret, "GetAce failed with error %u\n", GetLastError());
+                ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
+                   "Unexpected ACE type %#x\n", ace->Header.AceType);
+                ok(EqualSid(&ace->SidStart, &high_level),
+                   "Expected high integrity level\n");
+            }
+
+            HeapFree(GetProcessHeap(), 0, sd3);
+            CloseHandle(token6);
+        }
+        else
+            skip("Skipping test, running without admin rights\n");
+
         ret = InitializeAcl(acl, 256, ACL_REVISION);
         ok(ret, "InitializeAcl failed with error %u\n", GetLastError());
 
@@ -7176,6 +7484,90 @@ static void test_token_security_descriptor(void)
 
         ret = SetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, sd);
         ok(ret, "SetKernelObjectSecurity failed with error %u\n", GetLastError());
+
+        /* changing the label of the security descriptor does not change the integrity level of the token itself */
+        memset(buffer_integrity, 0, sizeof(buffer_integrity));
+        ret = GetTokenInformation(token, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
+        ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
+        tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
+        ok(EqualSid(tml->Label.Sid, &medium_level) || EqualSid(tml->Label.Sid, &high_level),
+            "Expected medium or high integrity level\n");
+
+        /* restricting / duplicating a token resets the mandatory sd label */
+        ret = CreateRestrictedToken(token, 0, 0, NULL, 0, NULL, 0, NULL, &token4);
+        ok(ret, "CreateRestrictedToken failed with error %u\n", GetLastError());
+
+        memset(buffer_integrity, 0, sizeof(buffer_integrity));
+        ret = GetTokenInformation(token4, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
+        ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
+        tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
+        ok(EqualSid(tml->Label.Sid, &medium_level) || EqualSid(tml->Label.Sid, &high_level),
+            "Expected medium or high integrity level\n");
+
+        size = 0;
+        ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
+        ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+           "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
+
+        sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+        ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, sd3, size, &size);
+        ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
+
+        ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
+        ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
+        ok(present, "No SACL in the security descriptor\n");
+        ok(sacl != NULL, "NULL SACL in the security descriptor\n");
+
+        if (sacl)
+        {
+            ret = GetAce(sacl, 0, (void **)&ace);
+            ok(ret, "GetAce failed with error %u\n", GetLastError());
+            ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
+               "Unexpected ACE type %#x\n", ace->Header.AceType);
+            ok(EqualSid(&ace->SidStart, &medium_level) || EqualSid(&ace->SidStart, &high_level),
+               "Low integrity level should not have been inherited\n");
+        }
+
+        HeapFree(GetProcessHeap(), 0, sd3);
+        CloseHandle(token4);
+
+        ret = DuplicateTokenEx(token, 0, NULL, 0, TokenPrimary, &token4);
+        ok(ret, "DuplicateTokenEx failed with error %u\n", GetLastError());
+
+        memset(buffer_integrity, 0, sizeof(buffer_integrity));
+        ret = GetTokenInformation(token4, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
+        ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
+        tml = (TOKEN_MANDATORY_LABEL*) buffer_integrity;
+        ok(EqualSid(tml->Label.Sid, &medium_level) || EqualSid(tml->Label.Sid, &high_level),
+            "Expected medium or high integrity level\n");
+
+        size = 0;
+        ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
+        ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+           "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
+
+        sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+        ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, sd3, size, &size);
+        ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
+
+        sacl = NULL;
+        ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
+        ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
+        ok(present, "No SACL in the security descriptor\n");
+        ok(sacl != NULL, "NULL SACL in the security descriptor\n");
+
+        if (sacl)
+        {
+            ret = GetAce(sacl, 0, (void **)&ace);
+            ok(ret, "GetAce failed with error %u\n", GetLastError());
+            ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
+               "Unexpected ACE type %#x\n", ace->Header.AceType);
+            ok(EqualSid(&ace->SidStart, &medium_level) || EqualSid(&ace->SidStart, &high_level),
+               "Low integrity level should not have been inherited\n");
+        }
+
+        HeapFree(GetProcessHeap(), 0, sd3);
+        CloseHandle(token4);
     }
     else
         win_skip("SYSTEM_MANDATORY_LABEL not supported\n");
@@ -7279,6 +7671,116 @@ static void test_child_token_sd(void)
        "Unexpected ACE type %#x\n", ace_label->Header.AceType);
     ok(!EqualSid(&ace_label->SidStart, &low_level),
        "Low integrity level should not have been inherited\n");
+
+    HeapFree(GetProcessHeap(), 0, sd);
+}
+
+static void test_child_token_sd_restricted(void)
+{
+    static SID high_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
+                             {SECURITY_MANDATORY_HIGH_RID}};
+    SYSTEM_MANDATORY_LABEL_ACE *ace_label;
+    BOOL ret, present, defaulted;
+    TOKEN_MANDATORY_LABEL *tml;
+    BYTE buffer_integrity[64];
+    SECURITY_DESCRIPTOR *sd;
+    HANDLE token;
+    DWORD size;
+    ACL *acl;
+
+    if (!pAddMandatoryAce)
+    {
+        win_skip("SYSTEM_MANDATORY_LABEL not supported\n");
+        return;
+    }
+
+    ret = OpenProcessToken(GetCurrentProcess(), MAXIMUM_ALLOWED, &token);
+    ok(ret, "OpenProcessToken failed with error %u\n", GetLastError());
+
+    ret = GetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Unexpected GetKernelObjectSecurity return value %d, error %u\n", ret, GetLastError());
+
+    sd = HeapAlloc(GetProcessHeap(), 0, size);
+    ret = GetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, sd, size, &size);
+    ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
+
+    acl = NULL;
+    present = FALSE;
+    defaulted = TRUE;
+    ret = GetSecurityDescriptorSacl(sd, &present, &acl, &defaulted);
+    ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
+    ok(present, "SACL not present\n");
+    ok(acl && acl != (void *)0xdeadbeef, "Got invalid SACL\n");
+    ok(!defaulted, "SACL defaulted\n");
+    ok(acl->AceCount == 1, "Expected exactly one ACE\n");
+    ret = GetAce(acl, 0, (void **)&ace_label);
+    ok(ret, "GetAce failed with error %u\n", GetLastError());
+    ok(ace_label->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
+       "Unexpected ACE type %#x\n", ace_label->Header.AceType);
+    ok(EqualSid(&ace_label->SidStart, &high_level),
+       "Expected high integrity level\n");
+
+    memset(buffer_integrity, 0, sizeof(buffer_integrity));
+    ret = GetTokenInformation(token, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
+    ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
+    tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
+    ok(EqualSid(tml->Label.Sid, &high_level), "Expected high integrity level\n");
+
+    HeapFree(GetProcessHeap(), 0, sd);
+}
+
+static void test_child_token_sd_medium(void)
+{
+    static SID medium_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
+                               {SECURITY_MANDATORY_MEDIUM_RID}};
+    SYSTEM_MANDATORY_LABEL_ACE *ace_label;
+    BOOL ret, present, defaulted;
+    TOKEN_MANDATORY_LABEL *tml;
+    BYTE buffer_integrity[64];
+    SECURITY_DESCRIPTOR *sd;
+    HANDLE token;
+    DWORD size;
+    ACL *acl;
+
+    if (!pAddMandatoryAce)
+    {
+        win_skip("SYSTEM_MANDATORY_LABEL not supported\n");
+        return;
+    }
+
+    ret = OpenProcessToken(GetCurrentProcess(), MAXIMUM_ALLOWED, &token);
+    ok(ret, "OpenProcessToken failed with error %u\n", GetLastError());
+
+    ret = GetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Unexpected GetKernelObjectSecurity return value %d, error %u\n", ret, GetLastError());
+
+    sd = HeapAlloc(GetProcessHeap(), 0, size);
+    ret = GetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, sd, size, &size);
+    ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
+
+    acl = NULL;
+    present = FALSE;
+    defaulted = TRUE;
+    ret = GetSecurityDescriptorSacl(sd, &present, &acl, &defaulted);
+    ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
+    ok(present, "SACL not present\n");
+    ok(acl && acl != (void *)0xdeadbeef, "Got invalid SACL\n");
+    ok(!defaulted, "SACL defaulted\n");
+    ok(acl->AceCount == 1, "Expected exactly one ACE\n");
+    ret = GetAce(acl, 0, (void **)&ace_label);
+    ok(ret, "GetAce failed with error %u\n", GetLastError());
+    ok(ace_label->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
+       "Unexpected ACE type %#x\n", ace_label->Header.AceType);
+    ok(EqualSid(&ace_label->SidStart, &medium_level),
+       "Expected medium integrity level\n");
+
+    memset(buffer_integrity, 0, sizeof(buffer_integrity));
+    ret = GetTokenInformation(token, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
+    ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
+    tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
+    ok(EqualSid(tml->Label.Sid, &medium_level), "Expected medium integrity level\n");
 
     HeapFree(GetProcessHeap(), 0, sd);
 }
@@ -7536,6 +8038,10 @@ START_TEST(security)
     {
         if (!strcmp(myARGV[2], "test_token_sd"))
             test_child_token_sd();
+        else if (!strcmp(myARGV[2], "test_token_sd_restricted"))
+            test_child_token_sd_restricted();
+        else if (!strcmp(myARGV[2], "test_token_sd_medium"))
+            test_child_token_sd_medium();
         else
             test_process_security_child();
         return;

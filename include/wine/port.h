@@ -334,6 +334,15 @@ double rint(double x);
 float rintf(float x);
 #endif
 
+#ifndef RENAME_EXCHANGE
+#define RENAME_EXCHANGE (1 << 1)
+#endif /* RENAME_EXCHANGE */
+
+#ifndef HAVE_RENAMEAT2
+int renameat2( int olddirfd, const char *oldpath, int newdirfd, const char *newpath,
+               unsigned int flags );
+#endif /* HAVE_RENAMEAT2 */
+
 #ifndef HAVE_STATVFS
 int statvfs( const char *path, struct statvfs *buf );
 #endif
@@ -351,6 +360,22 @@ int usleep (unsigned int useconds);
 #endif /* !defined(HAVE_USLEEP) */
 
 extern int mkstemps(char *template, int suffix_len);
+
+/* Extended attribute functions */
+
+#ifndef XATTR_USER_PREFIX
+# define XATTR_USER_PREFIX "user."
+#endif
+#ifndef XATTR_SIZE_MAX
+# define XATTR_SIZE_MAX    65536
+#endif
+
+extern int xattr_fget( int filedes, const char *name, void *value, size_t size );
+extern int xattr_fremove( int filedes, const char *name );
+extern int xattr_fset( int filedes, const char *name, void *value, size_t size );
+extern int xattr_get( const char *path, const char *name, void *value, size_t size );
+extern int xattr_remove( const char *path, const char *name );
+extern int xattr_set( const char *path, const char *name, void *value, size_t size );
 
 /* Interlocked functions */
 
@@ -479,6 +504,16 @@ static inline __int64 interlocked_cmpxchg64( __int64 *dest, __int64 xchg, __int6
 extern __int64 interlocked_cmpxchg64( __int64 *dest, __int64 xchg, __int64 compare );
 #endif
 
+static inline int interlocked_inc( int *dest )
+{
+    return interlocked_xchg_add( dest, 1 ) + 1;
+}
+
+static inline int interlocked_dec( int *dest )
+{
+    return interlocked_xchg_add( dest, -1 ) - 1;
+}
+
 #else /* NO_LIBWINE_PORT */
 
 #define __WINE_NOT_PORTABLE(func) func##_is_not_portable func##_is_not_portable
@@ -489,9 +524,11 @@ extern __int64 interlocked_cmpxchg64( __int64 *dest, __int64 xchg, __int64 compa
 #define getopt_long_only        __WINE_NOT_PORTABLE(getopt_long_only)
 #define interlocked_cmpxchg     __WINE_NOT_PORTABLE(interlocked_cmpxchg)
 #define interlocked_cmpxchg_ptr __WINE_NOT_PORTABLE(interlocked_cmpxchg_ptr)
+#define interlocked_dec         __WINE_NOT_PORTABLE(interlocked_dec)
+#define interlocked_inc         __WINE_NOT_PORTABLE(interlocked_inc)
 #define interlocked_xchg        __WINE_NOT_PORTABLE(interlocked_xchg)
-#define interlocked_xchg_ptr    __WINE_NOT_PORTABLE(interlocked_xchg_ptr)
 #define interlocked_xchg_add    __WINE_NOT_PORTABLE(interlocked_xchg_add)
+#define interlocked_xchg_ptr    __WINE_NOT_PORTABLE(interlocked_xchg_ptr)
 #define lstat                   __WINE_NOT_PORTABLE(lstat)
 #define pread                   __WINE_NOT_PORTABLE(pread)
 #define pwrite                  __WINE_NOT_PORTABLE(pwrite)

@@ -29,12 +29,15 @@
 #include "mediaobj.h"
 #include "mmsystem.h"
 #include "uuids.h"
+#include "dsound_eax.h"
 
 #include "wine/list.h"
 
 #define DS_MAX_CHANNELS 6
 
 extern int ds_hel_buflen DECLSPEC_HIDDEN;
+extern int ds_hq_buffers_max DECLSPEC_HIDDEN;
+extern BOOL ds_eax_enabled DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * Predeclare the interface implementation structures
@@ -88,12 +91,14 @@ struct DirectSoundDevice
     int                         speaker_num[DS_MAX_CHANNELS];
     int                         num_speakers;
     int                         lfe_channel;
-    float *tmp_buffer, *cp_buffer;
-    DWORD                       tmp_buffer_len, cp_buffer_len;
+    float *tmp_buffer, *cp_buffer, *dsp_buffer;
+    DWORD                       tmp_buffer_len, cp_buffer_len, dsp_buffer_len;
 
     DSVOLUMEPAN                 volpan;
 
     normfunc normfunction;
+
+    eax_info                    eax;
 
     /* DirectSound3DListener fields */
     DS3DLISTENER                ds3dl;
@@ -168,6 +173,8 @@ struct IDirectSoundBufferImpl
     int                         num_filters;
     DSFilter*                   filters;
 
+    eax_buffer_info             eax;
+
     struct list entry;
 };
 
@@ -220,6 +227,19 @@ LONG capped_refcount_dec(LONG *ref) DECLSPEC_HIDDEN;
 /* duplex.c */
 
 HRESULT DSOUND_FullDuplexCreate(REFIID riid, void **ppv) DECLSPEC_HIDDEN;
+
+/* eax.c */
+BOOL WINAPI EAX_QuerySupport(REFGUID guidPropSet, ULONG dwPropID, ULONG *pTypeSupport) DECLSPEC_HIDDEN;
+HRESULT WINAPI EAX_Get(IDirectSoundBufferImpl *buf, REFGUID guidPropSet,
+        ULONG dwPropID, void *pInstanceData, ULONG cbInstanceData, void *pPropData,
+        ULONG cbPropData, ULONG *pcbReturned) DECLSPEC_HIDDEN;
+HRESULT WINAPI EAX_Set(IDirectSoundBufferImpl *buf, REFGUID guidPropSet,
+        ULONG dwPropID, void *pInstanceData, ULONG cbInstanceData, void *pPropData,
+        ULONG cbPropData) DECLSPEC_HIDDEN;
+void init_eax_device(DirectSoundDevice *dev) DECLSPEC_HIDDEN;
+void free_eax_buffer(IDirectSoundBufferImpl *dsb) DECLSPEC_HIDDEN;
+void init_eax_buffer(IDirectSoundBufferImpl *dsb) DECLSPEC_HIDDEN;
+void process_eax_buffer(IDirectSoundBufferImpl *dsb, float *buf, DWORD count) DECLSPEC_HIDDEN;
 
 /* mixer.c */
 void DSOUND_CheckEvent(const IDirectSoundBufferImpl *dsb, DWORD playpos, int len) DECLSPEC_HIDDEN;

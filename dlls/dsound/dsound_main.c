@@ -92,7 +92,12 @@ const WCHAR wine_vxd_drv[] = { 'w','i','n','e','m','m','.','v','x','d', 0 };
 
 /* All default settings, you most likely don't want to touch these, see wiki on UsefulRegistryKeys */
 int ds_hel_buflen = 32768 * 2;
+int ds_hq_buffers_max = 4;
+BOOL ds_eax_enabled = FALSE;
 static HINSTANCE instance;
+
+#define IS_OPTION_TRUE(ch) \
+    ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
 
 /*
  * Get a config key from either the app-specific or the default config
@@ -105,7 +110,6 @@ static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
     if (defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE)buffer, &size )) return 0;
     return ERROR_FILE_NOT_FOUND;
 }
-
 
 /*
  * Setup the dsound options.
@@ -144,10 +148,18 @@ void setup_dsound_options(void)
     if (!get_config_key( hkey, appkey, "HelBuflen", buffer, MAX_PATH ))
         ds_hel_buflen = atoi(buffer);
 
+    if (!get_config_key( hkey, appkey, "HQBuffersMax", buffer, MAX_PATH ))
+        ds_hq_buffers_max = atoi(buffer);
+
+    if (!get_config_key( hkey, appkey, "EAXEnabled", buffer, MAX_PATH ))
+        ds_eax_enabled = IS_OPTION_TRUE( buffer[0] );
+
     if (appkey) RegCloseKey( appkey );
     if (hkey) RegCloseKey( hkey );
 
     TRACE("ds_hel_buflen = %d\n", ds_hel_buflen);
+    TRACE("ds_hq_buffers_max = %d\n", ds_hq_buffers_max);
+    TRACE("ds_eax_enabled = %u\n", ds_eax_enabled);
 }
 
 static const char * get_device_id(LPCGUID pGuid)

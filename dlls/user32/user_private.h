@@ -97,6 +97,7 @@ typedef struct tagUSER_DRIVER {
     DWORD  (CDECL *pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
     void   (CDECL *pReleaseDC)(HWND,HDC);
     BOOL   (CDECL *pScrollDC)(HDC,INT,INT,HRGN);
+    void   (CDECL *pSetActiveWindow)(HWND);
     void   (CDECL *pSetCapture)(HWND,UINT);
     void   (CDECL *pSetFocus)(HWND);
     void   (CDECL *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
@@ -113,6 +114,8 @@ typedef struct tagUSER_DRIVER {
     void   (CDECL *pWindowPosChanged)(HWND,HWND,UINT,const RECT *,const RECT *,const RECT *,const RECT *,struct window_surface*);
     /* system parameters */
     BOOL   (CDECL *pSystemParametersInfo)(UINT,UINT,void*,UINT);
+    /* candidate pos functions */
+    void   (CDECL *pUpdateCandidatePos)(HWND,const RECT *);
     /* thread management */
     void   (CDECL *pThreadDetach)(void);
 } USER_DRIVER;
@@ -168,6 +171,8 @@ struct wm_char_mapping_data
     MSG  get_msg;
 };
 
+#include <pshpack1.h>
+
 /* this is the structure stored in TEB->Win32ClientInfo */
 /* no attempt is made to keep the layout compatible with the Windows one */
 struct user_thread_info
@@ -188,6 +193,7 @@ struct user_thread_info
     DWORD                         GetMessageTimeVal;      /* Value for GetMessageTime */
     DWORD                         GetMessagePosVal;       /* Value for GetMessagePos */
     ULONG_PTR                     GetMessageExtraInfoVal; /* Value for GetMessageExtraInfo */
+    DWORD                         last_get_msg;           /* Last time of Get/PeekMessage call */
     struct user_key_state_info   *key_state;              /* Cache of global key state */
     HWND                          top_window;             /* Desktop window */
     HWND                          msg_window;             /* HWND_MESSAGE parent window */
@@ -195,6 +201,8 @@ struct user_thread_info
 };
 
 C_ASSERT( sizeof(struct user_thread_info) <= sizeof(((TEB *)0)->Win32ClientInfo) );
+
+#include <poppack.h>
 
 extern INT global_key_state_counter DECLSPEC_HIDDEN;
 extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
@@ -369,5 +377,7 @@ static inline WCHAR *heap_strdupW(const WCHAR *src)
     if ((dst = heap_alloc(len))) memcpy(dst, src, len);
     return dst;
 }
+
+extern HANDLE rawinput_handle_from_device_handle(HANDLE device);
 
 #endif /* __WINE_USER_PRIVATE_H */

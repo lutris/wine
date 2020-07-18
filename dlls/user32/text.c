@@ -913,6 +913,15 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
     if (dtp && dtp->cbSize != sizeof(DRAWTEXTPARAMS))
         return 0;
 
+    if (GetGraphicsMode(hdc) == GM_COMPATIBLE)
+    {
+        SIZE window_ext, viewport_ext;
+        GetWindowExtEx(hdc, &window_ext);
+        GetViewportExtEx(hdc, &viewport_ext);
+        if ((window_ext.cy > 0) != (viewport_ext.cy > 0))
+            invert_y = TRUE;
+    }
+
     if (count == -1)
     {
         count = strlenW(str);
@@ -922,21 +931,12 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
             {
                 rect->right = rect->left;
                 if( flags & DT_SINGLELINE)
-                    rect->bottom = rect->top + lh;
+                    rect->bottom = rect->top + (invert_y ? -lh : lh);
                 else
                     rect->bottom = rect->top;
             }
             return lh;
         }
-    }
-
-    if (GetGraphicsMode(hdc) == GM_COMPATIBLE)
-    {
-        SIZE window_ext, viewport_ext;
-        GetWindowExtEx(hdc, &window_ext);
-        GetViewportExtEx(hdc, &viewport_ext);
-        if ((window_ext.cy > 0) != (viewport_ext.cy > 0))
-            invert_y = TRUE;
     }
 
     if (dtp)
@@ -986,9 +986,10 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
 
 	if (flags & DT_SINGLELINE)
 	{
-	    if (flags & DT_VCENTER) y = rect->top +
-	    	(rect->bottom - rect->top) / 2 - size.cy / 2;
-	    else if (flags & DT_BOTTOM) y = rect->bottom - size.cy;
+            if (flags & DT_VCENTER)
+                y = rect->top + (rect->bottom - rect->top) / 2 + (invert_y ? (size.cy / 2) : (-size.cy / 2));
+            else if (flags & DT_BOTTOM)
+                y = rect->bottom + (invert_y ? 0 : -size.cy);
         }
 
 	if (!(flags & DT_CALCRECT))
@@ -1046,10 +1047,7 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
 	else if (size.cx > max_width)
 	    max_width = size.cx;
 
-        if (invert_y)
-	    y -= lh;
-        else
-	    y += lh;
+        y += invert_y ? -lh : lh;
         if (dtp)
             dtp->uiLengthDrawn += len;
     }

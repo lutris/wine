@@ -26,6 +26,9 @@
 #include "ntdll_test.h"
 #include "in6addr.h"
 #include "inaddr.h"
+#include "initguid.h"
+#define COBJMACROS
+#include "shobjidl.h"
 
 #ifndef __WINE_WINTERNL_H
 
@@ -108,6 +111,7 @@ static BOOL      (WINAPI *pRtlIsCriticalSectionLocked)(CRITICAL_SECTION *);
 static BOOL      (WINAPI *pRtlIsCriticalSectionLockedByThread)(CRITICAL_SECTION *);
 static NTSTATUS  (WINAPI *pRtlInitializeCriticalSectionEx)(CRITICAL_SECTION *, ULONG, ULONG);
 static NTSTATUS  (WINAPI *pLdrEnumerateLoadedModules)(void *, void *, void *);
+static NTSTATUS  (WINAPI *pRtlQueryPackageIdentity)(HANDLE, WCHAR*, SIZE_T*, WCHAR*, SIZE_T*, BOOLEAN*);
 static NTSTATUS  (WINAPI *pRtlMakeSelfRelativeSD)(PSECURITY_DESCRIPTOR,PSECURITY_DESCRIPTOR,LPDWORD);
 static NTSTATUS  (WINAPI *pRtlAbsoluteToSelfRelativeSD)(PSECURITY_DESCRIPTOR,PSECURITY_DESCRIPTOR,PULONG);
 static NTSTATUS  (WINAPI *pLdrRegisterDllNotification)(ULONG, PLDR_DLL_NOTIFICATION_FUNCTION, void *, void **);
@@ -179,6 +183,7 @@ static void InitFunctionPtrs(void)
         pRtlIsCriticalSectionLockedByThread = (void *)GetProcAddress(hntdll, "RtlIsCriticalSectionLockedByThread");
         pRtlInitializeCriticalSectionEx = (void *)GetProcAddress(hntdll, "RtlInitializeCriticalSectionEx");
         pLdrEnumerateLoadedModules = (void *)GetProcAddress(hntdll, "LdrEnumerateLoadedModules");
+        pRtlQueryPackageIdentity = (void *)GetProcAddress(hntdll, "RtlQueryPackageIdentity");
         pRtlMakeSelfRelativeSD = (void *)GetProcAddress(hntdll, "RtlMakeSelfRelativeSD");
         pRtlAbsoluteToSelfRelativeSD = (void *)GetProcAddress(hntdll, "RtlAbsoluteToSelfRelativeSD");
         pLdrRegisterDllNotification = (void *)GetProcAddress(hntdll, "LdrRegisterDllNotification");
@@ -1855,80 +1860,81 @@ static void test_RtlIpv6AddressToString(void)
     LPCSTR result;
     IN6_ADDR ip;
     DWORD_PTR len;
-    struct
+    static const struct
     {
         PCSTR address;
         int ip[8];
+        BOOL todo;
     } tests[] =
     {
         /* ipv4 addresses & ISATAP addresses */
-        { "::13.1.68.3",                                { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
-        { "::ffff:13.1.68.3",                           { 0, 0, 0, 0, 0, 0xffff, 0x10d, 0x344 } },
-        { "::feff:d01:4403",                            { 0, 0, 0, 0, 0, 0xfffe, 0x10d, 0x344 } },
-        { "::fffe:d01:4403",                            { 0, 0, 0, 0, 0, 0xfeff, 0x10d, 0x344 } },
-        { "::100:d01:4403",                             { 0, 0, 0, 0, 0, 1, 0x10d, 0x344 } },
-        { "::1:d01:4403",                               { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
-        { "::ffff:0:4403",                              { 0, 0, 0, 0, 0, 0xffff, 0, 0x344 } },
-        { "::ffff:13.1.0.0",                            { 0, 0, 0, 0, 0, 0xffff, 0x10d, 0 } },
-        { "::ffff:0:0",                                 { 0, 0, 0, 0, 0, 0xffff, 0, 0 } },
-        { "::ffff:0:13.1.68.3",                         { 0, 0, 0, 0, 0xffff, 0, 0x10d, 0x344 } },
-        { "::ffff:ffff:d01:4403",                       { 0, 0, 0, 0, 0xffff, 0xffff, 0x10d, 0x344 } },
-        { "::ffff:0:0:d01:4403",                        { 0, 0, 0, 0xffff, 0, 0, 0x10d, 0x344 } },
-        { "::ffff:255.255.255.255",                     { 0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff } },
-        { "::ffff:129.144.52.38",                       { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 } },
-        { "::5efe:129.144.52.38",                       { 0, 0, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "1111:2222:3333:4444:0:5efe:129.144.52.38",   { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "1111:2222:3333::5efe:129.144.52.38",         { 0x1111, 0x2222, 0x3333, 0, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "1111:2222::5efe:129.144.52.38",              { 0x1111, 0x2222, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "1111::5efe:129.144.52.38",                   { 0x1111, 0, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "::200:5efe:129.144.52.38",                   { 0, 0, 0, 0, 2, 0xfe5e, 0x9081, 0x2634 } },
-        { "::100:5efe:8190:3426",                       { 0, 0, 0, 0, 1, 0xfe5e, 0x9081, 0x2634 } },
+        { "::13.1.68.3",                                { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 }, TRUE },
+        { "::ffff:13.1.68.3",                           { 0, 0, 0, 0, 0, 0xffff, 0x10d, 0x344 }, TRUE },
+        { "::feff:d01:4403",                            { 0, 0, 0, 0, 0, 0xfffe, 0x10d, 0x344 }, TRUE },
+        { "::fffe:d01:4403",                            { 0, 0, 0, 0, 0, 0xfeff, 0x10d, 0x344 }, TRUE },
+        { "::100:d01:4403",                             { 0, 0, 0, 0, 0, 1, 0x10d, 0x344 }, TRUE },
+        { "::1:d01:4403",                               { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 }, TRUE },
+        { "::ffff:0:4403",                              { 0, 0, 0, 0, 0, 0xffff, 0, 0x344 }, TRUE },
+        { "::ffff:13.1.0.0",                            { 0, 0, 0, 0, 0, 0xffff, 0x10d, 0 }, TRUE },
+        { "::ffff:0:0",                                 { 0, 0, 0, 0, 0, 0xffff, 0, 0 }, TRUE },
+        { "::ffff:0:13.1.68.3",                         { 0, 0, 0, 0, 0xffff, 0, 0x10d, 0x344 }, TRUE },
+        { "::ffff:ffff:d01:4403",                       { 0, 0, 0, 0, 0xffff, 0xffff, 0x10d, 0x344 }, TRUE },
+        { "::ffff:0:0:d01:4403",                        { 0, 0, 0, 0xffff, 0, 0, 0x10d, 0x344 }, TRUE },
+        { "::ffff:255.255.255.255",                     { 0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff }, TRUE },
+        { "::ffff:129.144.52.38",                       { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 }, TRUE },
+        { "::5efe:129.144.52.38",                       { 0, 0, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "1111:2222:3333:4444:0:5efe:129.144.52.38",   { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "1111:2222:3333::5efe:129.144.52.38",         { 0x1111, 0x2222, 0x3333, 0, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "1111:2222::5efe:129.144.52.38",              { 0x1111, 0x2222, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "1111::5efe:129.144.52.38",                   { 0x1111, 0, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "::200:5efe:129.144.52.38",                   { 0, 0, 0, 0, 2, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "::100:5efe:8190:3426",                       { 0, 0, 0, 0, 1, 0xfe5e, 0x9081, 0x2634 }, TRUE },
         /* 'normal' addresses */
-        { "::1",                                        { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "::1",                                        { 0, 0, 0, 0, 0, 0, 0, 0x100 }, TRUE },
         { "0:1:2:3:4:5:6:7",                            { 0, 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700 } },
-        { "1080::8:800:200c:417a",                      { 0x8010, 0, 0, 0, 0x800, 0x8, 0x0c20, 0x7a41 } },
+        { "1080::8:800:200c:417a",                      { 0x8010, 0, 0, 0, 0x800, 0x8, 0x0c20, 0x7a41 }, TRUE },
         { "1111:2222:3333:4444:5555:6666:7b7b:7b7b",    { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
         { "1111:2222:3333:4444:5555:6666:7777:8888",    { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
-        { "1111:2222:3333:4444:5555:6666::",            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0, 0 } },
+        { "1111:2222:3333:4444:5555:6666::",            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0, 0 }, TRUE },
         { "1111:2222:3333:4444:5555:6666:0:8888",       { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0, 0x8888 } },
-        { "1111:2222:3333:4444:5555::",                 { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0 } },
+        { "1111:2222:3333:4444:5555::",                 { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0 }, TRUE },
         { "1111:2222:3333:4444:5555:0:7b7b:7b7b",       { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0x7b7b, 0x7b7b } },
         { "1111:2222:3333:4444:5555:0:7777:8888",       { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0x7777, 0x8888 } },
-        { "1111:2222:3333:4444:5555::8888",             { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x8888 } },
-        { "1111::",                                     { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
-        { "1111::7b7b:7b7b",                            { 0x1111, 0, 0, 0, 0, 0, 0x7b7b, 0x7b7b } },
+        { "1111:2222:3333:4444:5555::8888",             { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x8888 }, TRUE },
+        { "1111::",                                     { 0x1111, 0, 0, 0, 0, 0, 0, 0 }, TRUE },
+        { "1111::7b7b:7b7b",                            { 0x1111, 0, 0, 0, 0, 0, 0x7b7b, 0x7b7b }, TRUE },
         { "1111:0:3333:4444:5555:6666:7b7b:7b7b",       { 0x1111, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
         { "1111:0:3333:4444:5555:6666:7777:8888",       { 0x1111, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
-        { "1111::4444:5555:6666:7b7b:7b7b",             { 0x1111, 0, 0, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
-        { "1111::4444:5555:6666:7777:8888",             { 0x1111, 0, 0, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
-        { "1111::5555:6666:7b7b:7b7b",                  { 0x1111, 0, 0, 0, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
-        { "1111::5555:6666:7777:8888",                  { 0x1111, 0, 0, 0, 0x5555, 0x6666, 0x7777, 0x8888 } },
-        { "1111::6666:7b7b:7b7b",                       { 0x1111, 0, 0, 0, 0, 0x6666, 0x7b7b, 0x7b7b } },
-        { "1111::6666:7777:8888",                       { 0x1111, 0, 0, 0, 0, 0x6666, 0x7777, 0x8888 } },
-        { "1111::7777:8888",                            { 0x1111, 0, 0, 0, 0, 0, 0x7777, 0x8888 } },
-        { "1111::8888",                                 { 0x1111, 0, 0, 0, 0, 0, 0, 0x8888 } },
+        { "1111::4444:5555:6666:7b7b:7b7b",             { 0x1111, 0, 0, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b }, TRUE },
+        { "1111::4444:5555:6666:7777:8888",             { 0x1111, 0, 0, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 }, TRUE },
+        { "1111::5555:6666:7b7b:7b7b",                  { 0x1111, 0, 0, 0, 0x5555, 0x6666, 0x7b7b, 0x7b7b }, TRUE },
+        { "1111::5555:6666:7777:8888",                  { 0x1111, 0, 0, 0, 0x5555, 0x6666, 0x7777, 0x8888 }, TRUE },
+        { "1111::6666:7b7b:7b7b",                       { 0x1111, 0, 0, 0, 0, 0x6666, 0x7b7b, 0x7b7b }, TRUE },
+        { "1111::6666:7777:8888",                       { 0x1111, 0, 0, 0, 0, 0x6666, 0x7777, 0x8888 }, TRUE },
+        { "1111::7777:8888",                            { 0x1111, 0, 0, 0, 0, 0, 0x7777, 0x8888 }, TRUE },
+        { "1111::8888",                                 { 0x1111, 0, 0, 0, 0, 0, 0, 0x8888 }, TRUE },
         { "1:2:3:4:5:6:102:304",                        { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x201, 0x403 } },
         { "1:2:3:4:5:6:7:8",                            { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700, 0x800 } },
-        { "1:2:3:4:5:6::",                              { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0, 0 } },
+        { "1:2:3:4:5:6::",                              { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0, 0 }, TRUE },
         { "1:2:3:4:5:6:0:8",                            { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0, 0x800 } },
-        { "2001:0:1234::c1c0:abcd:876",                 { 0x120, 0, 0x3412, 0, 0, 0xc0c1, 0xcdab, 0x7608 } },
+        { "2001:0:1234::c1c0:abcd:876",                 { 0x120, 0, 0x3412, 0, 0, 0xc0c1, 0xcdab, 0x7608 }, TRUE },
         { "2001:0:4136:e378:8000:63bf:3fff:fdd2",       { 0x120, 0, 0x3641, 0x78e3, 0x80, 0xbf63, 0xff3f, 0xd2fd } },
-        { "2001:db8::1428:57ab",                        { 0x120, 0xb80d, 0, 0, 0, 0, 0x2814, 0xab57 } },
+        { "2001:db8::1428:57ab",                        { 0x120, 0xb80d, 0, 0, 0, 0, 0x2814, 0xab57 }, TRUE },
         { "2001:db8:1234:ffff:ffff:ffff:ffff:ffff",     { 0x120, 0xb80d, 0x3412, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff } },
         { "2001:0:ce49:7601:2cad:dfff:7c94:fffe",       { 0x120, 0, 0x49ce, 0x176, 0xad2c, 0xffdf, 0x947c, 0xfeff } },
-        { "2001:db8:85a3::8a2e:370:7334",               { 0x120, 0xb80d, 0xa385, 0, 0, 0x2e8a, 0x7003, 0x3473 } },
-        { "3ffe:b00::1:0:0:a",                          { 0xfe3f, 0xb, 0, 0, 0x100, 0, 0, 0xa00 } },
-        { "::a:b:c:d:e",                                { 0, 0, 0, 0xa00, 0xb00, 0xc00, 0xd00, 0xe00 } },
-        { "::123.123.123.123",                          { 0, 0, 0, 0, 0, 0, 0x7b7b, 0x7b7b } },
+        { "2001:db8:85a3::8a2e:370:7334",               { 0x120, 0xb80d, 0xa385, 0, 0, 0x2e8a, 0x7003, 0x3473 }, TRUE },
+        { "3ffe:b00::1:0:0:a",                          { 0xfe3f, 0xb, 0, 0, 0x100, 0, 0, 0xa00 }, TRUE },
+        { "::a:b:c:d:e",                                { 0, 0, 0, 0xa00, 0xb00, 0xc00, 0xd00, 0xe00 }, TRUE },
+        { "::123.123.123.123",                          { 0, 0, 0, 0, 0, 0, 0x7b7b, 0x7b7b }, TRUE },
         { "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",    { 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff } },
         { "1111:2222:3333:4444:5555:6666:7777:1",       { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x100 } },
         { "1111:2222:3333:4444:5555:6666:7777:8888",    { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
-        { "1111:2222::",                                { 0x1111, 0x2222, 0, 0, 0, 0, 0, 0 } },
-        { "1111::3333:4444:5555:6666:7777",             { 0x1111, 0, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777 } },
-        { "1111:2222::",                                { 0x1111, 0x2222, 0, 0, 0, 0, 0, 0 } },
-        { "1111::3333",                                 { 0x1111, 0, 0, 0, 0, 0, 0, 0x3333 } },
-        { "2001:0:1234::c1c0:abcd:876",                 { 0x120, 0, 0x3412, 0, 0, 0xc0c1, 0xcdab, 0x7608 } },
-        { "2001::ffd3",                                 { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+        { "1111:2222::",                                { 0x1111, 0x2222, 0, 0, 0, 0, 0, 0 }, TRUE },
+        { "1111::3333:4444:5555:6666:7777",             { 0x1111, 0, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777 }, TRUE },
+        { "1111:2222::",                                { 0x1111, 0x2222, 0, 0, 0, 0, 0, 0 }, TRUE },
+        { "1111::3333",                                 { 0x1111, 0, 0, 0, 0, 0, 0, 0x3333 }, TRUE },
+        { "2001:0:1234::c1c0:abcd:876",                 { 0x120, 0, 0x3412, 0, 0, 0xc0c1, 0xcdab, 0x7608 }, TRUE },
+        { "2001::ffd3",                                 { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff }, TRUE },
     };
     unsigned int i;
 
@@ -1944,10 +1950,12 @@ static void test_RtlIpv6AddressToString(void)
     result = pRtlIpv6AddressToStringA(&ip, buffer);
 
     len = strlen(buffer);
+todo_wine
     ok(result == (buffer + len) && !strcmp(buffer, "::"),
        "got %p with '%s' (expected %p with '::')\n", result, buffer, buffer + len);
 
     result = pRtlIpv6AddressToStringA(&ip, NULL);
+todo_wine
     ok(result == (LPCSTR)~0 || broken(result == (LPCSTR)len) /* WinXP / Win2k3 */,
        "got %p, expected %p\n", result, (LPCSTR)~0);
 
@@ -1959,6 +1967,7 @@ static void test_RtlIpv6AddressToString(void)
 
         result = pRtlIpv6AddressToStringA(&ip, buffer);
         len = strlen(buffer);
+todo_wine_if(tests[i].todo)
         ok(result == (buffer + len) && !strcmp(buffer, tests[i].address),
            "got %p with '%s' (expected %p with '%s')\n", result, buffer, buffer + len, tests[i].address);
 
@@ -1974,42 +1983,43 @@ static void test_RtlIpv6AddressToStringEx(void)
     NTSTATUS res;
     IN6_ADDR ip;
     ULONG len;
-    struct
+    static const struct
     {
         PCSTR address;
         ULONG scopeid;
         USHORT port;
         int ip[8];
+        BOOL todo;
     } tests[] =
     {
         /* ipv4 addresses & ISATAP addresses */
-        { "::13.1.68.3",                                                0,          0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
-        { "::13.1.68.3%1",                                              1,          0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
-        { "::13.1.68.3%4294949819",                                     0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
-        { "[::13.1.68.3%4294949819]:65518",                             0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
-        { "[::13.1.68.3%4294949819]:256",                               0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
-        { "[::13.1.68.3]:256",                                          0,          1, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+        { "::13.1.68.3",                                                0,          0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 }, TRUE },
+        { "::13.1.68.3%1",                                              1,          0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 }, TRUE },
+        { "::13.1.68.3%4294949819",                                     0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 }, TRUE },
+        { "[::13.1.68.3%4294949819]:65518",                             0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 }, TRUE },
+        { "[::13.1.68.3%4294949819]:256",                               0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 }, TRUE },
+        { "[::13.1.68.3]:256",                                          0,          1, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 }, TRUE },
 
-        { "::1:d01:4403",                                               0,          0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
-        { "::1:d01:4403%1",                                             1,          0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
-        { "::1:d01:4403%4294949819",                                    0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
-        { "[::1:d01:4403%4294949819]:65518",                            0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
-        { "[::1:d01:4403%4294949819]:256",                              0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
-        { "[::1:d01:4403]:256",                                         0,          1, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
+        { "::1:d01:4403",                                               0,          0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 }, TRUE },
+        { "::1:d01:4403%1",                                             1,          0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 }, TRUE },
+        { "::1:d01:4403%4294949819",                                    0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 }, TRUE },
+        { "[::1:d01:4403%4294949819]:65518",                            0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 }, TRUE },
+        { "[::1:d01:4403%4294949819]:256",                              0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 }, TRUE },
+        { "[::1:d01:4403]:256",                                         0,          1, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 }, TRUE },
 
-        { "1111:2222:3333:4444:0:5efe:129.144.52.38",                   0,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "1111:2222:3333:4444:0:5efe:129.144.52.38%1",                 1,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819",        0xffffbbbb, 0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "[1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819]:65518",0xffffbbbb, 0xeeff, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "[1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819]:256",  0xffffbbbb, 1, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
-        { "[1111:2222:3333:4444:0:5efe:129.144.52.38]:256",             0,          1, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "1111:2222:3333:4444:0:5efe:129.144.52.38",                   0,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "1111:2222:3333:4444:0:5efe:129.144.52.38%1",                 1,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819",        0xffffbbbb, 0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "[1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819]:65518",0xffffbbbb, 0xeeff, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "[1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819]:256",  0xffffbbbb, 1, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
+        { "[1111:2222:3333:4444:0:5efe:129.144.52.38]:256",             0,          1, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 }, TRUE },
 
-        { "::1",                                                        0,          0, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
-        { "::1%1",                                                      1,          0, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
-        { "::1%4294949819",                                             0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
-        { "[::1%4294949819]:65518",                                     0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
-        { "[::1%4294949819]:256",                                       0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
-        { "[::1]:256",                                                  0,          1, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "::1",                                                        0,          0, { 0, 0, 0, 0, 0, 0, 0, 0x100 }, TRUE },
+        { "::1%1",                                                      1,          0, { 0, 0, 0, 0, 0, 0, 0, 0x100 }, TRUE },
+        { "::1%4294949819",                                             0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0, 0, 0x100 }, TRUE },
+        { "[::1%4294949819]:65518",                                     0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0, 0, 0x100 }, TRUE },
+        { "[::1%4294949819]:256",                                       0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0, 0, 0x100 }, TRUE },
+        { "[::1]:256",                                                  0,          1, { 0, 0, 0, 0, 0, 0, 0, 0x100 }, TRUE },
 
         { "1111:2222:3333:4444:5555:6666:7b7b:7b7b",                    0,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
         { "1111:2222:3333:4444:5555:6666:7b7b:7b7b%1",                  1,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
@@ -2018,19 +2028,19 @@ static void test_RtlIpv6AddressToStringEx(void)
         { "[1111:2222:3333:4444:5555:6666:7b7b:7b7b%4294949819]:256",   0xffffbbbb, 1, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
         { "[1111:2222:3333:4444:5555:6666:7b7b:7b7b]:256",              0,          1, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
 
-        { "1111::",                                                     0,          0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
-        { "1111::%1",                                                   1,          0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
-        { "1111::%4294949819",                                          0xffffbbbb, 0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
-        { "[1111::%4294949819]:65518",                                  0xffffbbbb, 0xeeff, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
-        { "[1111::%4294949819]:256",                                    0xffffbbbb, 1, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
-        { "[1111::]:256",                                               0,          1, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+        { "1111::",                                                     0,          0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 }, TRUE },
+        { "1111::%1",                                                   1,          0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 }, TRUE },
+        { "1111::%4294949819",                                          0xffffbbbb, 0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 }, TRUE },
+        { "[1111::%4294949819]:65518",                                  0xffffbbbb, 0xeeff, { 0x1111, 0, 0, 0, 0, 0, 0, 0 }, TRUE },
+        { "[1111::%4294949819]:256",                                    0xffffbbbb, 1, { 0x1111, 0, 0, 0, 0, 0, 0, 0 }, TRUE },
+        { "[1111::]:256",                                               0,          1, { 0x1111, 0, 0, 0, 0, 0, 0, 0 }, TRUE },
 
-        { "2001::ffd3",                                                 0,          0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
-        { "2001::ffd3%1",                                               1,          0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
-        { "2001::ffd3%4294949819",                                      0xffffbbbb, 0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
-        { "[2001::ffd3%4294949819]:65518",                              0xffffbbbb, 0xeeff, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
-        { "[2001::ffd3%4294949819]:256",                                0xffffbbbb, 1, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
-        { "[2001::ffd3]:256",                                           0,          1, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+        { "2001::ffd3",                                                 0,          0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff }, TRUE },
+        { "2001::ffd3%1",                                               1,          0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff }, TRUE },
+        { "2001::ffd3%4294949819",                                      0xffffbbbb, 0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff }, TRUE },
+        { "[2001::ffd3%4294949819]:65518",                              0xffffbbbb, 0xeeff, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff }, TRUE },
+        { "[2001::ffd3%4294949819]:256",                                0xffffbbbb, 1, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff }, TRUE },
+        { "[2001::ffd3]:256",                                           0,          1, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff }, TRUE },
     };
     unsigned int i;
 
@@ -2047,6 +2057,7 @@ static void test_RtlIpv6AddressToStringEx(void)
     res = pRtlIpv6AddressToStringExA(&ip, 0, 0, buffer, &len);
 
     ok(res == STATUS_SUCCESS, "[validate] res = 0x%08x, expected STATUS_SUCCESS\n", res);
+todo_wine
     ok(len == 3 && !strcmp(buffer, "::"),
         "got len %d with '%s' (expected 3 with '::')\n", len, buffer);
 
@@ -2070,6 +2081,7 @@ static void test_RtlIpv6AddressToStringEx(void)
     res = pRtlIpv6AddressToStringExA(&ip, 0, 0, buffer, &len);
     ok(res == STATUS_INVALID_PARAMETER, "[null length] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
     ok(buffer[0] == '#', "got first char %c (expected '#')\n", buffer[0]);
+todo_wine
     ok(len == 3, "got len %d (expected len 3)\n", len);
 
     for (i = 0; i < ARRAY_SIZE(tests); i++)
@@ -2082,6 +2094,7 @@ static void test_RtlIpv6AddressToStringEx(void)
         res = pRtlIpv6AddressToStringExA(&ip, tests[i].scopeid, tests[i].port, buffer, &len);
 
         ok(res == STATUS_SUCCESS, "[validate] res = 0x%08x, expected STATUS_SUCCESS\n", res);
+todo_wine_if(tests[i].todo)
         ok(len == (strlen(tests[i].address) + 1) && !strcmp(buffer, tests[i].address),
            "got len %d with '%s' (expected %d with '%s')\n", len, buffer, (int)strlen(tests[i].address), tests[i].address);
     }
@@ -3673,6 +3686,76 @@ static void test_LdrRegisterDllNotification(void)
     pLdrUnregisterDllNotification(cookie);
 }
 
+static void test_RtlQueryPackageIdentity(void)
+{
+    const WCHAR programW[] = {'M','i','c','r','o','s','o','f','t','.','W','i','n','d','o','w','s','.',
+                              'P','h','o','t','o','s','_','8','w','e','k','y','b','3','d','8','b','b','w','e','!','A','p','p',0};
+    const WCHAR fullnameW[] = {'M','i','c','r','o','s','o','f','t','.','W','i','n','d','o','w','s','.',
+                               'P','h','o','t','o','s', 0};
+    const WCHAR appidW[] = {'A','p','p',0};
+    IApplicationActivationManager *manager;
+    WCHAR buf1[MAX_PATH], buf2[MAX_PATH];
+    HANDLE process, token;
+    SIZE_T size1, size2;
+    NTSTATUS status;
+    DWORD processid;
+    HRESULT hr;
+    BOOL ret;
+
+    if (!pRtlQueryPackageIdentity)
+    {
+        win_skip("RtlQueryPackageIdentity not available\n");
+        return;
+    }
+
+    size1 = size2 = MAX_PATH * sizeof(WCHAR);
+    status = pRtlQueryPackageIdentity((HANDLE)~(ULONG_PTR)3, buf1, &size1, buf2, &size2, NULL);
+    ok(status == STATUS_NOT_FOUND, "expected STATUS_NOT_FOUND, got %08x\n", status);
+
+    CoInitializeEx(0, COINIT_APARTMENTTHREADED);
+    hr = CoCreateInstance(&CLSID_ApplicationActivationManager, NULL, CLSCTX_LOCAL_SERVER,
+                          &IID_IApplicationActivationManager, (void **)&manager);
+    if (FAILED(hr))
+    {
+        todo_wine win_skip("Failed to create ApplicationActivationManager (%x)\n", hr);
+        goto done;
+    }
+
+    hr = IApplicationActivationManager_ActivateApplication(manager, programW, NULL,
+                                                           AO_NOERRORUI, &processid);
+    if (FAILED(hr))
+    {
+        todo_wine win_skip("Failed to start program (%x)\n", hr);
+        IApplicationActivationManager_Release(manager);
+        goto done;
+    }
+
+    process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, FALSE, processid);
+    ok(process != NULL, "OpenProcess failed with %u\n", GetLastError());
+    ret = OpenProcessToken(process, TOKEN_QUERY, &token);
+    ok(ret, "OpenProcessToken failed with error %u\n", GetLastError());
+
+    size1 = size2 = MAX_PATH * sizeof(WCHAR);
+    status = pRtlQueryPackageIdentity(token, buf1, &size1, buf2, &size2, NULL);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status);
+
+    ok(!memcmp(buf1, fullnameW, sizeof(fullnameW) - sizeof(WCHAR)),
+       "Expected buf1 to begin with %s, got %s\n", wine_dbgstr_w(fullnameW), wine_dbgstr_w(buf1));
+    ok(size1 >= sizeof(WCHAR) && !(size1 % sizeof(WCHAR)), "Unexpected size1 = %lu\n", size1);
+    ok(buf1[size1 / sizeof(WCHAR) - 1] == 0, "Expected buf1[%lu] == 0\n", size1 / sizeof(WCHAR) - 1);
+
+    ok(!lstrcmpW(buf2, appidW), "Expected buf2 to be %s, got %s\n", wine_dbgstr_w(appidW), wine_dbgstr_w(buf2));
+    ok(size2 >= sizeof(WCHAR) && !(size2 % sizeof(WCHAR)), "Unexpected size2 = %lu\n", size2);
+    ok(buf2[size2 / sizeof(WCHAR) - 1] == 0, "Expected buf2[%lu] == 0\n", size2 / sizeof(WCHAR) - 1);
+
+    CloseHandle(token);
+    TerminateProcess(process, 0);
+    CloseHandle(process);
+
+done:
+    CoUninitialize();
+}
+
 START_TEST(rtl)
 {
     InitFunctionPtrs();
@@ -3711,6 +3794,7 @@ START_TEST(rtl)
     test_RtlInitializeCriticalSectionEx();
     test_RtlLeaveCriticalSection();
     test_LdrEnumerateLoadedModules();
+    test_RtlQueryPackageIdentity();
     test_RtlMakeSelfRelativeSD();
     test_LdrRegisterDllNotification();
 }
