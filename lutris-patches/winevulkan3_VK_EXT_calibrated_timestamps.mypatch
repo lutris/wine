@@ -1,0 +1,178 @@
+From: Joshua Ashton <joshua@froggi.es>
+Subject: [PATCH] winevulkan: Implement VK_EXT_calibrated_timestamps
+Message-Id: <20200717070412.148026-1-joshua@froggi.es>
+Date: Fri, 17 Jul 2020 08:04:12 +0100
+
+Map performance counter to the appropriate monotonic clock
+used by ntdll/unix/sync.c
+
+The performance counter timestamp clock won't be available
+under Mac and platforms without clock_gettime.
+
+Signed-off-by: Joshua Ashton <joshua@froggi.es>
+---
+ dlls/winevulkan/make_vulkan |   5 +-
+ dlls/winevulkan/vulkan.c    | 116 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 120 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
+index 04b263e3e4..b5629b95a5 100755
+--- a/dlls/winevulkan/make_vulkan
++++ b/dlls/winevulkan/make_vulkan
+@@ -100,7 +100,6 @@ UNSUPPORTED_EXTENSIONS = [
+ 
+     # Device extensions
+     "VK_AMD_display_native_hdr",
+-    "VK_EXT_calibrated_timestamps",
+     "VK_EXT_display_control", # Requires VK_EXT_display_surface_counter
+     "VK_EXT_full_screen_exclusive",
+     "VK_EXT_hdr_metadata", # Needs WSI work.
+@@ -222,6 +221,10 @@ FUNCTION_OVERRIDES = {
+     # VK_EXT_private_data
+     "vkGetPrivateDataEXT" : {"dispatch": True, "driver" : False, "thunk" : False},
+     "vkSetPrivateDataEXT" : {"dispatch": True, "driver" : False, "thunk" : False},
++
++    # VK_EXT_calibrated_timestamps
++    "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT" : {"dispatch" : True, "driver" : False, "thunk" : False},
++    "vkGetCalibratedTimestampsEXT" : {"dispatch" : True, "driver" : False, "thunk" : False},
+ }
+ 
+ STRUCT_CHAIN_CONVERSIONS = [
+diff --git a/dlls/winevulkan/vulkan.c b/dlls/winevulkan/vulkan.c
+index 4642975ad0..d01e48103c 100644
+--- a/dlls/winevulkan/vulkan.c
++++ b/dlls/winevulkan/vulkan.c
+@@ -17,6 +17,8 @@
+  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+  */
+ 
++#include "config.h"
++#include <time.h>
+ #include <stdarg.h>
+ 
+ #include "windef.h"
+@@ -1265,6 +1267,120 @@ VkResult WINAPI wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevi
+     return res;
+ }
+ 
++static VkTimeDomainEXT map_to_host_time_domain(VkTimeDomainEXT domain)
++{
++    /* Matches dlls/ntdll/unix/sync.c's performance counter implementation. */
++#if !defined(__APPLE__) && defined(HAVE_CLOCK_GETTIME)
++    if (domain == VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT)
++# ifdef CLOCK_MONOTONIC_RAW
++        return VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT;
++# else
++        return VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT;
++# endif
++#endif
++
++    return domain;
++}
++
++VkResult WINAPI wine_vkGetCalibratedTimestampsEXT(VkDevice device,
++    uint32_t timestamp_count, const VkCalibratedTimestampInfoEXT *timestamp_infos,
++    uint64_t *timestamps, uint64_t *max_deviation)
++{
++    VkCalibratedTimestampInfoEXT* host_timestamp_infos;
++    unsigned int i;
++    VkResult res;
++    TRACE("%p, %u, %p, %p, %p\n", device, timestamp_count, timestamp_infos, timestamps, max_deviation);
++
++    host_timestamp_infos = heap_alloc(sizeof(VkCalibratedTimestampInfoEXT) * timestamp_count);
++
++    for (i = 0; i < timestamp_count; i++)
++    {
++        host_timestamp_infos[i].sType = timestamp_infos[i].sType;
++        host_timestamp_infos[i].pNext = timestamp_infos[i].pNext;
++        host_timestamp_infos[i].timeDomain = map_to_host_time_domain(timestamp_infos[i].timeDomain);
++    }
++
++    res = device->funcs.p_vkGetCalibratedTimestampsEXT(device->device, timestamp_count, host_timestamp_infos, timestamps, max_deviation);
++
++    heap_free(host_timestamp_infos);
++
++    return res;
++}
++
++VkResult WINAPI wine_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(VkPhysicalDevice phys_dev,
++    uint32_t *time_domain_count, VkTimeDomainEXT *time_domains)
++{
++    BOOL supports_device = FALSE, supports_monotonic = FALSE, supports_monotonic_raw = FALSE;
++    VkTimeDomainEXT *host_time_domains;
++    uint32_t host_time_domain_count;
++    VkTimeDomainEXT out_time_domains[2];
++    uint32_t out_time_domain_count;
++    unsigned int i;
++    VkResult res;
++
++    TRACE("%p, %p, %p\n", phys_dev, time_domain_count, time_domains);
++
++    /* Find out the time domains supported on the host */
++    res = phys_dev->instance->funcs.p_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(phys_dev->phys_dev, &host_time_domain_count, NULL);
++    if (res != VK_SUCCESS)
++        return res;
++
++    host_time_domains = heap_alloc(sizeof(VkTimeDomainEXT) * host_time_domain_count);
++
++    res = phys_dev->instance->funcs.p_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(phys_dev->phys_dev, &host_time_domain_count, host_time_domains);
++    if (res != VK_SUCCESS)
++        return res;
++
++    for (i = 0; i < host_time_domain_count; i++)
++    {
++        if (host_time_domains[i] == VK_TIME_DOMAIN_DEVICE_EXT)
++            supports_device = TRUE;
++
++        if (host_time_domains[i] == VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT)
++            supports_monotonic = TRUE;
++
++        if (host_time_domains[i] == VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT)
++            supports_monotonic_raw = TRUE;
++    }
++
++    heap_free(host_time_domains);
++
++    out_time_domain_count = 0;
++
++    /* Map our monotonic times -> QPC */
++    (void)(supports_monotonic);
++    (void)(supports_monotonic_raw);
++#if !defined(__APPLE__) && defined(HAVE_CLOCK_GETTIME)
++# ifdef CLOCK_MONOTONIC_RAW
++    if (supports_monotonic_raw)
++        out_time_domains[out_time_domain_count++] = VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT;
++# else
++    if (supports_monotonic)
++        out_time_domains[out_time_domain_count++] = VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT;
++# endif
++#else
++    FIXME("VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT not supported on this platform.");
++#endif
++
++    /* Forward the device domain time */
++    if (supports_device)
++        out_time_domains[out_time_domain_count++] = VK_TIME_DOMAIN_DEVICE_EXT;
++
++    /* Send back to the app */
++    if (!time_domains)
++    {
++        *time_domain_count = out_time_domain_count;
++        return VK_SUCCESS;
++    }
++
++    for (i = 0; i < min(*time_domain_count, out_time_domain_count); i++)
++        time_domains[i] = out_time_domains[i];
++
++    res = *time_domain_count != out_time_domain_count ? VK_INCOMPLETE : VK_SUCCESS;
++    *time_domain_count = out_time_domain_count;
++    return res;
++}
++
+ static HANDLE get_display_device_init_mutex(void)
+ {
+     static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
+
+-- 
+2.27.0
+

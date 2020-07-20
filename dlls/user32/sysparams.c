@@ -1448,37 +1448,37 @@ static USERPREF_ENTRY( SPEECHRECOGNITION,        4, 0x20 );
 static struct sysparam_rgb_entry system_colors[] =
 {
 #define RGB_ENTRY(name,val) { { get_rgb_entry, set_rgb_entry, init_rgb_entry, name ##_VALNAME }, (val) }
-    RGB_ENTRY( COLOR_SCROLLBAR, RGB(212, 208, 200) ),
-    RGB_ENTRY( COLOR_BACKGROUND, RGB(58, 110, 165) ),
-    RGB_ENTRY( COLOR_ACTIVECAPTION, RGB(10, 36, 106) ),
-    RGB_ENTRY( COLOR_INACTIVECAPTION, RGB(128, 128, 128) ),
-    RGB_ENTRY( COLOR_MENU, RGB(212, 208, 200) ),
+    RGB_ENTRY( COLOR_SCROLLBAR, RGB(200, 200, 200) ),
+    RGB_ENTRY( COLOR_BACKGROUND, RGB(0, 0, 0) ),
+    RGB_ENTRY( COLOR_ACTIVECAPTION, RGB(153, 180, 209) ),
+    RGB_ENTRY( COLOR_INACTIVECAPTION, RGB(191, 205, 219) ),
+    RGB_ENTRY( COLOR_MENU, RGB(240, 240, 240) ),
     RGB_ENTRY( COLOR_WINDOW, RGB(255, 255, 255) ),
-    RGB_ENTRY( COLOR_WINDOWFRAME, RGB(0, 0, 0) ),
+    RGB_ENTRY( COLOR_WINDOWFRAME, RGB(100, 100, 100) ),
     RGB_ENTRY( COLOR_MENUTEXT, RGB(0, 0, 0) ),
     RGB_ENTRY( COLOR_WINDOWTEXT, RGB(0, 0, 0) ),
-    RGB_ENTRY( COLOR_CAPTIONTEXT, RGB(255, 255, 255) ),
-    RGB_ENTRY( COLOR_ACTIVEBORDER, RGB(212, 208, 200) ),
-    RGB_ENTRY( COLOR_INACTIVEBORDER, RGB(212, 208, 200) ),
-    RGB_ENTRY( COLOR_APPWORKSPACE, RGB(128, 128, 128) ),
-    RGB_ENTRY( COLOR_HIGHLIGHT, RGB(10, 36, 106) ),
+    RGB_ENTRY( COLOR_CAPTIONTEXT, RGB(0, 0, 0) ),
+    RGB_ENTRY( COLOR_ACTIVEBORDER, RGB(180, 180, 180) ),
+    RGB_ENTRY( COLOR_INACTIVEBORDER, RGB(244, 247, 252) ),
+    RGB_ENTRY( COLOR_APPWORKSPACE, RGB(171, 171, 171) ),
+    RGB_ENTRY( COLOR_HIGHLIGHT, RGB(0, 120, 215) ),
     RGB_ENTRY( COLOR_HIGHLIGHTTEXT, RGB(255, 255, 255) ),
-    RGB_ENTRY( COLOR_BTNFACE, RGB(212, 208, 200) ),
-    RGB_ENTRY( COLOR_BTNSHADOW, RGB(128, 128, 128) ),
-    RGB_ENTRY( COLOR_GRAYTEXT, RGB(128, 128, 128) ),
+    RGB_ENTRY( COLOR_BTNFACE, RGB(240, 240, 240) ),
+    RGB_ENTRY( COLOR_BTNSHADOW, RGB(160, 160, 160) ),
+    RGB_ENTRY( COLOR_GRAYTEXT, RGB(109, 109, 109) ),
     RGB_ENTRY( COLOR_BTNTEXT, RGB(0, 0, 0) ),
-    RGB_ENTRY( COLOR_INACTIVECAPTIONTEXT, RGB(212, 208, 200) ),
+    RGB_ENTRY( COLOR_INACTIVECAPTIONTEXT, RGB(0, 0, 0) ),
     RGB_ENTRY( COLOR_BTNHIGHLIGHT, RGB(255, 255, 255) ),
-    RGB_ENTRY( COLOR_3DDKSHADOW, RGB(64, 64, 64) ),
-    RGB_ENTRY( COLOR_3DLIGHT, RGB(212, 208, 200) ),
+    RGB_ENTRY( COLOR_3DDKSHADOW, RGB(105, 105, 105) ),
+    RGB_ENTRY( COLOR_3DLIGHT, RGB(227, 227, 227) ),
     RGB_ENTRY( COLOR_INFOTEXT, RGB(0, 0, 0) ),
     RGB_ENTRY( COLOR_INFOBK, RGB(255, 255, 225) ),
-    RGB_ENTRY( COLOR_ALTERNATEBTNFACE, RGB(181, 181, 181) ),
-    RGB_ENTRY( COLOR_HOTLIGHT, RGB(0, 0, 200) ),
-    RGB_ENTRY( COLOR_GRADIENTACTIVECAPTION, RGB(166, 202, 240) ),
-    RGB_ENTRY( COLOR_GRADIENTINACTIVECAPTION, RGB(192, 192, 192) ),
-    RGB_ENTRY( COLOR_MENUHILIGHT, RGB(10, 36, 106) ),
-    RGB_ENTRY( COLOR_MENUBAR, RGB(212, 208, 200) )
+    RGB_ENTRY( COLOR_ALTERNATEBTNFACE, RGB(240, 240, 240) ),
+    RGB_ENTRY( COLOR_HOTLIGHT, RGB(0, 102, 204) ),
+    RGB_ENTRY( COLOR_GRADIENTACTIVECAPTION, RGB(185, 209, 234) ),
+    RGB_ENTRY( COLOR_GRADIENTINACTIVECAPTION, RGB(215, 228, 242) ),
+    RGB_ENTRY( COLOR_MENUHILIGHT, RGB(51, 153, 255) ),
+    RGB_ENTRY( COLOR_MENUBAR, RGB(240, 240, 240) )
 #undef RGB_ENTRY
 };
 
@@ -3402,13 +3402,78 @@ LONG WINAPI ChangeDisplaySettingsExW( LPCWSTR devname, LPDEVMODEW devmode, HWND 
 }
 
 
+typedef struct DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+  DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+  WCHAR                            viewGdiDeviceName[CCHDEVICENAME];
+} DISPLAYCONFIG_SOURCE_DEVICE_NAME;
+
+typedef struct DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS {
+  union {
+    struct {
+      UINT32 friendlyNameFromEdid : 1;
+      UINT32 friendlyNameForced : 1;
+      UINT32 edidIdsValid : 1;
+      UINT32 reserved : 29;
+    } DUMMYSTRUCTNAME;
+    UINT32 value;
+  } DUMMYUNIONNAME;
+} DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS;
+
+typedef struct DISPLAYCONFIG_TARGET_DEVICE_NAME {
+  DISPLAYCONFIG_DEVICE_INFO_HEADER       header;
+  DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS flags;
+  DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY  outputTechnology;
+  UINT16                                 edidManufactureId;
+  UINT16                                 edidProductCodeId;
+  UINT32                                 connectorInstance;
+  WCHAR                                  monitorFriendlyDeviceName[64];
+  WCHAR                                  monitorDevicePath[128];
+} DISPLAYCONFIG_TARGET_DEVICE_NAME;
+
 /***********************************************************************
  *              DisplayConfigGetDeviceInfo (USER32.@)
  */
 LONG WINAPI DisplayConfigGetDeviceInfo(DISPLAYCONFIG_DEVICE_INFO_HEADER *packet)
 {
-    FIXME("stub: %p\n", packet);
-    return ERROR_NOT_SUPPORTED;
+    static const WCHAR testW[] = {'t','e','s','t',0};
+
+    TRACE("packet type: %u\n", packet->type);
+
+    switch(packet->type)
+    {
+        case DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME:
+        {
+            DISPLAYCONFIG_SOURCE_DEVICE_NAME *src_device_name = (DISPLAYCONFIG_SOURCE_DEVICE_NAME*) packet;
+            if (packet->size < sizeof(*src_device_name))
+            {
+                return ERROR_INSUFFICIENT_BUFFER;
+            }
+
+            memcpy(src_device_name->viewGdiDeviceName, testW, sizeof(testW));
+
+            return ERROR_SUCCESS;
+        }
+        case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME:
+        {
+            DISPLAYCONFIG_TARGET_DEVICE_NAME *dst_device_name = (DISPLAYCONFIG_TARGET_DEVICE_NAME*) packet;
+            if (packet->size < sizeof(*dst_device_name))
+            {
+                TRACE("%u, %lu\n", packet->size, sizeof(*dst_device_name));
+                return ERROR_INSUFFICIENT_BUFFER;
+            }
+
+            dst_device_name->flags.DUMMYUNIONNAME.value = 0;
+            dst_device_name->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI;
+            dst_device_name->connectorInstance = 0;
+
+            memcpy(dst_device_name->monitorFriendlyDeviceName, testW, sizeof(testW));
+            memcpy(dst_device_name->monitorDevicePath, testW, sizeof(testW));
+
+            return ERROR_SUCCESS;
+        }
+        default:
+            return ERROR_NOT_SUPPORTED;
+    }
 }
 
 /***********************************************************************
@@ -4544,4 +4609,116 @@ BOOL WINAPI LogicalToPhysicalPoint( HWND hwnd, POINT *point )
 BOOL WINAPI PhysicalToLogicalPoint( HWND hwnd, POINT *point )
 {
     return TRUE;
+}
+
+/**********************************************************************
+ * GetDisplayConfigBufferSizes [USER32.@]
+ */
+LONG WINAPI GetDisplayConfigBufferSizes(UINT32 flags, UINT32 *num_path_info, UINT32 *num_mode_info)
+{
+    TRACE("0x%x %p %p\n", flags, num_path_info, num_mode_info);
+
+    if (!num_path_info || !num_mode_info)
+        return ERROR_INVALID_PARAMETER;
+
+    *num_path_info = 1;
+    *num_mode_info = 2;
+    return ERROR_SUCCESS;
+}
+
+#define D3DKMDT_VSS_NTSC_M          0x6
+#define DISPLAYCONFIG_SOURCE_IN_USE 0x1
+#define DISPLAYCONFIG_TARGET_IN_USE 0x1
+#define DISPLAYCONFIG_PATH_ACTIVE   0x1
+
+/***********************************************************************
+ *              QueryDisplayConfig (USER32.@)
+ * TODO: support multiple monitors
+ */
+LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCONFIG_PATH_INFO *pathinfo,
+                               UINT32 *numinfoelements, DISPLAYCONFIG_MODE_INFO *modeinfo,
+                               DISPLAYCONFIG_TOPOLOGY_ID *topologyid)
+{
+    LUID adapter_id;
+    POINT origin;
+    HMONITOR monitor;
+    MONITORINFOEXW monitor_info;
+    DEVMODEW mode;
+    DISPLAYCONFIG_SOURCE_MODE *source_mode = &modeinfo[0].DUMMYUNIONNAME.sourceMode;
+    DISPLAYCONFIG_TARGET_MODE *target_mode = &modeinfo[1].DUMMYUNIONNAME.targetMode;
+    DISPLAYCONFIG_PATH_SOURCE_INFO *source_info = &pathinfo[0].sourceInfo;
+    DISPLAYCONFIG_PATH_TARGET_INFO *target_info = &pathinfo[0].targetInfo;
+
+    TRACE("(%08x %p %p %p %p %p)\n", flags, numpathelements, pathinfo, numinfoelements, modeinfo, topologyid);
+
+    if (*numpathelements < 1 || *numinfoelements < 2)
+        return ERROR_INSUFFICIENT_BUFFER;
+
+    origin.x = 0;
+    origin.y = 0;
+    monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+    monitor_info.cbSize = sizeof(monitor_info);
+    if (!(GetMonitorInfoW(monitor, (MONITORINFO*) &monitor_info)))
+    {
+        return ERROR_GEN_FAILURE;
+    }
+    if (!(EnumDisplaySettingsW(monitor_info.szDevice, 0, &mode)))
+    {
+        return ERROR_GEN_FAILURE;
+    }
+
+    AllocateLocallyUniqueId(&adapter_id);
+
+    source_mode->width = mode.dmPelsWidth;
+    source_mode->height = mode.dmPelsHeight;
+    source_mode->pixelFormat = DISPLAYCONFIG_PIXELFORMAT_32BPP;
+    source_mode->position.x = 0;
+    source_mode->position.y = 0;
+
+    /* no idea what pixel rate is */
+    target_mode->targetVideoSignalInfo.pixelRate = 0xdeadbeef;
+    target_mode->targetVideoSignalInfo.hSyncFreq.Numerator = mode.dmDisplayFrequency * mode.dmPelsHeight;
+    target_mode->targetVideoSignalInfo.hSyncFreq.Denominator = 1;
+    target_mode->targetVideoSignalInfo.vSyncFreq.Numerator = mode.dmDisplayFrequency;
+    target_mode->targetVideoSignalInfo.vSyncFreq.Denominator = 1;
+    target_mode->targetVideoSignalInfo.activeSize.cx = mode.dmPelsWidth;
+    target_mode->targetVideoSignalInfo.activeSize.cy = mode.dmPelsHeight;
+    target_mode->targetVideoSignalInfo.totalSize.cx = mode.dmPelsWidth;
+    target_mode->targetVideoSignalInfo.totalSize.cy = mode.dmPelsHeight;
+    target_mode->targetVideoSignalInfo.DUMMYUNIONNAME.videoStandard = D3DKMDT_VSS_NTSC_M;
+    target_mode->targetVideoSignalInfo.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
+
+    modeinfo[0].infoType = DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;
+    modeinfo[0].id = 0;
+    modeinfo[0].adapterId = adapter_id;
+    modeinfo[1].infoType = DISPLAYCONFIG_MODE_INFO_TYPE_TARGET;
+    modeinfo[1].id = 0;
+    modeinfo[1].adapterId = adapter_id;
+
+    source_info->adapterId = adapter_id;
+    source_info->id = 0;
+    source_info->DUMMYUNIONNAME.modeInfoIdx = 0;
+    source_info->statusFlags = DISPLAYCONFIG_SOURCE_IN_USE;
+
+    target_info->adapterId = adapter_id;
+    target_info->id = 0;
+
+    target_info->DUMMYUNIONNAME.modeInfoIdx = 1;
+    target_info->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI;
+    target_info->rotation = DISPLAYCONFIG_ROTATION_IDENTITY;
+    target_info->scaling = DISPLAYCONFIG_SCALING_IDENTITY;
+    target_info->refreshRate.Numerator = mode.dmDisplayFrequency;
+    target_info->refreshRate.Denominator = 1;
+    target_info->scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
+    target_info->targetAvailable = TRUE;
+    target_info->statusFlags = DISPLAYCONFIG_TARGET_IN_USE;
+
+    pathinfo[0].flags = DISPLAYCONFIG_PATH_ACTIVE;
+
+    if (flags == QDC_DATABASE_CURRENT && topologyid)
+    {
+        *topologyid = DISPLAYCONFIG_TOPOLOGY_INTERNAL;
+    }
+
+    return ERROR_SUCCESS;
 }

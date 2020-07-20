@@ -1,0 +1,39 @@
+https://github.com/wine-mirror/wine/commit/1f6423f778f7036a3875613e10b9c8c3b84584f0
+https://github.com/wine-mirror/wine/commit/1dc3383389da636617bfa7d9570e7de5c94f7882
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -3469,6 +3469,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, void **entry, ULONG_PTR unknow
+         if ((status = alloc_thread_tls()) != STATUS_SUCCESS)
+             NtTerminateThread( GetCurrentThread(), status );
+         thread_attach();
++        if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, DLL_THREAD_ATTACH );
+     }
+ 
+     RtlLeaveCriticalSection( &loader_section );
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -3178,6 +3178,7 @@ void WINAPI LdrShutdownThread(void)
+ {
+     PLIST_ENTRY mark, entry;
+     LDR_DATA_TABLE_ENTRY *mod;
++    WINE_MODREF *wm;
+     UINT i;
+     void **pointers;
+ 
+@@ -3187,6 +3188,7 @@ void WINAPI LdrShutdownThread(void)
+     if (process_detaching) return;
+ 
+     RtlEnterCriticalSection( &loader_section );
++    wm = get_modref( NtCurrentTeb()->Peb->ImageBaseAddress );
+ 
+     mark = &NtCurrentTeb()->Peb->LdrData->InInitializationOrderModuleList;
+     for (entry = mark->Blink; entry != mark; entry = entry->Blink)
+@@ -3202,6 +3204,8 @@ void WINAPI LdrShutdownThread(void)
+                         DLL_THREAD_DETACH, NULL );
+     }
+ 
++    if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, DLL_THREAD_DETACH );
++
+     RtlAcquirePebLock();
+     RemoveEntryList( &NtCurrentTeb()->TlsLinks );
+     if ((pointers = NtCurrentTeb()->ThreadLocalStoragePointer))
