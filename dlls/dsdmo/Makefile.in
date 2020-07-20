@@ -1,6 +1,17 @@
 MODULE    = dsdmo.dll
-
+IMPORTS   = uuid
 EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
-	main.c
+	chorus.c \
+	compressor.c \
+	distortion.c \
+	echo.c \
+	flanger.c \
+	gargle.c \
+	main.c \
+	parameq.c \
+	reverb.c \
+	reverb2.c
+
+IDL_SRCS = dsdmo_classes.idl

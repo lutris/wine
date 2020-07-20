@@ -22,7 +22,7 @@
 #define COBJMACROS
 #include "wine/test.h"
 #include "initguid.h"
-#include "xaudio2.h"
+#include "xact3.h"
 #include "xaudio2fx.h"
 #include "xapo.h"
 #include "xapofx.h"

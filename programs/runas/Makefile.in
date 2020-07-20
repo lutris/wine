@@ -1,0 +1,8 @@
+MODULE    = runas.exe
+APPMODE   = -mconsole -municode -mno-cygwin
+IMPORTS   = advapi32 user32
+
+C_SRCS = \
+	runas.c
+
+RC_SRCS = runas.rc

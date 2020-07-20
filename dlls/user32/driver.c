@@ -148,6 +148,7 @@ static const USER_DRIVER *load_driver(void)
         GET_USER_FUNC(MsgWaitForMultipleObjectsEx);
         GET_USER_FUNC(ReleaseDC);
         GET_USER_FUNC(ScrollDC);
+        GET_USER_FUNC(SetActiveWindow);
         GET_USER_FUNC(SetCapture);
         GET_USER_FUNC(SetFocus);
         GET_USER_FUNC(SetLayeredWindowAttributes);
@@ -163,6 +164,7 @@ static const USER_DRIVER *load_driver(void)
         GET_USER_FUNC(WindowPosChanging);
         GET_USER_FUNC(WindowPosChanged);
         GET_USER_FUNC(SystemParametersInfo);
+        GET_USER_FUNC(UpdateCandidatePos);
         GET_USER_FUNC(ThreadDetach);
 #undef GET_USER_FUNC
     }
@@ -210,12 +212,9 @@ static void CDECL nulldrv_Beep(void)
 
 static UINT CDECL nulldrv_GetKeyboardLayoutList( INT size, HKL *layouts )
 {
-    HKEY hKeyKeyboard;
-    DWORD rc;
     INT count = 0;
     ULONG_PTR baselayout;
     LANGID langid;
-    static const WCHAR szKeyboardReg[] = {'S','y','s','t','e','m','\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\','C','o','n','t','r','o','l','\\','K','e','y','b','o','a','r','d',' ','L','a','y','o','u','t','s',0};
 
     baselayout = GetUserDefaultLCID();
     langid = PRIMARYLANGID(LANGIDFROMLCID(baselayout));
@@ -223,30 +222,6 @@ static UINT CDECL nulldrv_GetKeyboardLayoutList( INT size, HKL *layouts )
         baselayout = MAKELONG( baselayout, 0xe001 ); /* IME */
     else
         baselayout |= baselayout << 16;
-
-    /* Enumerate the Registry */
-    rc = RegOpenKeyW(HKEY_LOCAL_MACHINE,szKeyboardReg,&hKeyKeyboard);
-    if (rc == ERROR_SUCCESS)
-    {
-        do {
-            WCHAR szKeyName[9];
-            HKL layout;
-            rc = RegEnumKeyW(hKeyKeyboard, count, szKeyName, 9);
-            if (rc == ERROR_SUCCESS)
-            {
-                layout = (HKL)(ULONG_PTR)strtoulW(szKeyName,NULL,16);
-                if (baselayout != 0 && layout == (HKL)baselayout)
-                    baselayout = 0; /* found in the registry do not add again */
-                if (size && layouts)
-                {
-                    if (count >= size ) break;
-                    layouts[count] = layout;
-                }
-                count ++;
-            }
-        } while (rc == ERROR_SUCCESS);
-        RegCloseKey(hKeyKeyboard);
-    }
 
     /* make sure our base layout is on the list */
     if (baselayout != 0)
@@ -411,6 +386,10 @@ static BOOL CDECL nulldrv_ScrollDC( HDC hdc, INT dx, INT dy, HRGN update )
                    hdc, rect.left - dx, rect.top - dy, SRCCOPY );
 }
 
+static void CDECL nulldrv_SetActiveWindow( HWND hwnd )
+{
+}
+
 static void CDECL nulldrv_SetCapture( HWND hwnd, UINT flags )
 {
 }
@@ -482,6 +461,10 @@ static BOOL CDECL nulldrv_SystemParametersInfo( UINT action, UINT int_param, voi
     return FALSE;
 }
 
+static void CDECL nulldrv_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect )
+{
+}
+
 static void CDECL nulldrv_ThreadDetach( void )
 {
 }
@@ -524,6 +507,7 @@ static USER_DRIVER null_driver =
     nulldrv_MsgWaitForMultipleObjectsEx,
     nulldrv_ReleaseDC,
     nulldrv_ScrollDC,
+    nulldrv_SetActiveWindow,
     nulldrv_SetCapture,
     nulldrv_SetFocus,
     nulldrv_SetLayeredWindowAttributes,
@@ -540,6 +524,8 @@ static USER_DRIVER null_driver =
     nulldrv_WindowPosChanged,
     /* system parameters */
     nulldrv_SystemParametersInfo,
+    /* candidate pos functions */
+    nulldrv_UpdateCandidatePos,
     /* thread management */
     nulldrv_ThreadDetach
 };
@@ -701,6 +687,11 @@ static BOOL CDECL loaderdrv_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDW
     return load_driver()->pUpdateLayeredWindow( hwnd, info, window_rect );
 }
 
+static void CDECL loaderdrv_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect )
+{
+    load_driver()->pUpdateCandidatePos( hwnd, caret_rect );
+}
+
 static USER_DRIVER lazy_load_driver =
 {
     /* keyboard functions */
@@ -739,6 +730,7 @@ static USER_DRIVER lazy_load_driver =
     nulldrv_MsgWaitForMultipleObjectsEx,
     nulldrv_ReleaseDC,
     nulldrv_ScrollDC,
+    nulldrv_SetActiveWindow,
     nulldrv_SetCapture,
     nulldrv_SetFocus,
     loaderdrv_SetLayeredWindowAttributes,
@@ -755,6 +747,8 @@ static USER_DRIVER lazy_load_driver =
     nulldrv_WindowPosChanged,
     /* system parameters */
     nulldrv_SystemParametersInfo,
+    /* candidate pos functions */
+    loaderdrv_UpdateCandidatePos,
     /* thread management */
     nulldrv_ThreadDetach
 };

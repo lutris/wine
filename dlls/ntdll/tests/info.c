@@ -22,6 +22,7 @@
 #include <winnls.h>
 #include <stdio.h>
 
+static NTSTATUS (WINAPI * pRtlDowncaseUnicodeString)(UNICODE_STRING *, const UNICODE_STRING *, BOOLEAN);
 static NTSTATUS (WINAPI * pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 static NTSTATUS (WINAPI * pRtlGetNativeSystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 static NTSTATUS (WINAPI * pNtQuerySystemInformationEx)(SYSTEM_INFORMATION_CLASS, void*, ULONG, void*, ULONG, ULONG*);
@@ -75,6 +76,7 @@ static BOOL InitFunctionPtrs(void)
         return FALSE;
     }
 
+    NTDLL_GET_PROC(RtlDowncaseUnicodeString);
     NTDLL_GET_PROC(NtQuerySystemInformation);
     NTDLL_GET_PROC(RtlGetNativeSystemInformation);
     NTDLL_GET_PROC(NtPowerInformation);
@@ -602,6 +604,62 @@ static void test_query_handle(void)
     ok( status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got %08x\n", status );
 
 done:
+    HeapFree( GetProcessHeap(), 0, shi);
+}
+
+static void test_query_handle_ex(void)
+{
+    NTSTATUS status;
+    ULONG ExpectedLength, ReturnLength;
+    ULONG SystemInformationLength = sizeof(SYSTEM_HANDLE_INFORMATION_EX);
+    SYSTEM_HANDLE_INFORMATION_EX* shi = HeapAlloc(GetProcessHeap(), 0, SystemInformationLength);
+    HANDLE EventHandle;
+    BOOL found;
+    INT i;
+
+    EventHandle = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok( EventHandle != NULL, "CreateEventA failed %u\n", GetLastError() );
+
+    ReturnLength = 0xdeadbeef;
+    status = pNtQuerySystemInformation(SystemExtendedHandleInformation, shi, SystemInformationLength, &ReturnLength);
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
+    ok( ReturnLength != 0xdeadbeef, "Expected valid ReturnLength\n" );
+
+    SystemInformationLength = ReturnLength;
+    shi = HeapReAlloc(GetProcessHeap(), 0, shi , SystemInformationLength);
+    memset(shi, 0x55, SystemInformationLength);
+
+    ReturnLength = 0xdeadbeef;
+    status = pNtQuerySystemInformation(SystemExtendedHandleInformation, shi, SystemInformationLength, &ReturnLength);
+    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status );
+    ExpectedLength = FIELD_OFFSET(SYSTEM_HANDLE_INFORMATION_EX, Handle[shi->Count]);
+    ok( ReturnLength == ExpectedLength, "Expected length %u, got %u\n", ExpectedLength, ReturnLength );
+    ok( shi->Count > 1, "Expected more than 1 handle, got %u\n", (DWORD)shi->Count );
+
+    for (i = 0, found = FALSE; i < shi->Count && !found; i++)
+        found = (shi->Handle[i].UniqueProcessId == GetCurrentProcessId()) &&
+                ((HANDLE)(ULONG_PTR)shi->Handle[i].HandleValue == EventHandle);
+    ok( found, "Expected to find event handle %p (pid %x) in handle list\n", EventHandle, GetCurrentProcessId() );
+
+    if (!found)
+    {
+        for (i = 0; i < shi->Count; i++)
+            trace( "%d: handle %x pid %x\n", i, (DWORD)shi->Handle[i].HandleValue, (DWORD)shi->Handle[i].UniqueProcessId );
+    }
+
+    CloseHandle(EventHandle);
+
+    ReturnLength = 0xdeadbeef;
+    status = pNtQuerySystemInformation(SystemExtendedHandleInformation, shi, SystemInformationLength, &ReturnLength);
+    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status );
+    for (i = 0, found = FALSE; i < shi->Count && !found; i++)
+        found = (shi->Handle[i].UniqueProcessId == GetCurrentProcessId()) &&
+                ((HANDLE)(ULONG_PTR)shi->Handle[i].HandleValue == EventHandle);
+    ok( !found, "Unexpectedly found event handle in handle list\n" );
+
+    status = pNtQuerySystemInformation(SystemExtendedHandleInformation, NULL, SystemInformationLength, &ReturnLength);
+    ok( status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got %08x\n", status );
+
     HeapFree( GetProcessHeap(), 0, shi);
 }
 
@@ -2120,12 +2178,17 @@ static void test_queryvirtualmemory(void)
 {
     NTSTATUS status;
     SIZE_T readcount;
+    static const WCHAR windowsW[] = {'w','i','n','d','o','w','s'};
     static const char teststring[] = "test string";
     static char datatestbuf[42] = "abc";
     static char rwtestbuf[42];
     MEMORY_BASIC_INFORMATION mbi;
     char stackbuf[42];
     HMODULE module;
+    char buffer_name[sizeof(MEMORY_SECTION_NAME) + MAX_PATH * sizeof(WCHAR)];
+    MEMORY_SECTION_NAME *msn = (MEMORY_SECTION_NAME *)buffer_name;
+    BOOL found;
+    int i;
 
     module = GetModuleHandleA( "ntdll.dll" );
     trace("Check flags of the PE header of NTDLL.DLL at %p\n", module);
@@ -2206,6 +2269,43 @@ static void test_queryvirtualmemory(void)
     /* check error code when len is less than MEMORY_BASIC_INFORMATION size */
     status = pNtQueryVirtualMemory(NtCurrentProcess(), GetProcessHeap(), MemoryBasicInformation, &mbi, sizeof(MEMORY_BASIC_INFORMATION) - 1, &readcount);
     ok(status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
+
+    trace("Check section name of NTDLL.DLL with invalid size\n");
+    module = GetModuleHandleA( "ntdll.dll" );
+    memset(msn, 0, sizeof(*msn));
+    readcount = 0;
+    status = pNtQueryVirtualMemory(NtCurrentProcess(), module, MemorySectionName, msn, sizeof(*msn), &readcount);
+    ok( status == STATUS_BUFFER_OVERFLOW, "Expected STATUS_BUFFER_OVERFLOW, got %08x\n", status);
+    ok( readcount > 0, "Expected readcount to be > 0\n");
+
+    trace("Check section name of NTDLL.DLL with invalid size\n");
+    module = GetModuleHandleA( "ntdll.dll" );
+    memset(msn, 0, sizeof(*msn));
+    readcount = 0;
+    status = pNtQueryVirtualMemory(NtCurrentProcess(), module, MemorySectionName, msn, sizeof(*msn) - 1, &readcount);
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
+    ok( readcount > 0, "Expected readcount to be > 0\n");
+
+    trace("Check section name of NTDLL.DLL\n");
+    module = GetModuleHandleA( "ntdll.dll" );
+    memset(msn, 0x55, sizeof(*msn));
+    memset(buffer_name, 0x77, sizeof(buffer_name));
+    readcount = 0;
+    status = pNtQueryVirtualMemory(NtCurrentProcess(), module, MemorySectionName, msn, sizeof(buffer_name), &readcount);
+    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status);
+    ok( readcount > 0, "Expected readcount to be > 0\n");
+    trace ("Section Name: %s\n", wine_dbgstr_w(msn->SectionFileName.Buffer));
+    pRtlDowncaseUnicodeString( &msn->SectionFileName, &msn->SectionFileName, FALSE );
+    for (found = FALSE, i = (msn->SectionFileName.Length - sizeof(windowsW)) / sizeof(WCHAR); i >= 0; i--)
+        found |= !memcmp( &msn->SectionFileName.Buffer[i], windowsW, sizeof(windowsW) );
+    ok( found, "Section name does not contain \"Windows\"\n");
+
+    trace("Check section name of non mapped memory\n");
+    memset(msn, 0, sizeof(*msn));
+    readcount = 0;
+    status = pNtQueryVirtualMemory(NtCurrentProcess(), &buffer_name, MemorySectionName, msn, sizeof(buffer_name), &readcount);
+    ok( status == STATUS_INVALID_ADDRESS, "Expected STATUS_INVALID_ADDRESS, got %08x\n", status);
+    ok( readcount == 0 || broken(readcount != 0) /* wow64 */, "Expected readcount to be 0\n");
 }
 
 static void test_affinity(void)
@@ -2552,6 +2652,10 @@ START_TEST(info)
     /* 0x10 SystemHandleInformation */
     trace("Starting test_query_handle()\n");
     test_query_handle();
+
+    /* 0x40 SystemHandleInformation */
+    trace("Starting test_query_handle_ex()\n");
+    test_query_handle_ex();
 
     /* 0x15 SystemCacheInformation */
     trace("Starting test_query_cache()\n");

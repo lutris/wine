@@ -7,9 +7,12 @@ EXTRAINCL = $(FAUDIO_CFLAGS)
 C_SRCS = \
 	compat.c \
 	x3daudio.c \
+	xact_dll.c \
 	xapo.c \
 	xapofx.c \
 	xaudio_allocator.c \
 	xaudio_dll.c
 
-IDL_SRCS = xaudio_classes.idl
+IDL_SRCS = \
+	xact_classes.idl \
+	xaudio_classes.idl

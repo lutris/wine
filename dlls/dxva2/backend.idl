@@ -1,0 +1,96 @@
+/*
+ * Copyright (C) 2015 Michael Müller for Pipelight
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+#pragma makedep header
+
+import "unknwn.idl";
+import "dxva2api.idl";
+
+typedef struct _WineVideoImage
+{
+    void *buffer;
+    UINT width;
+    UINT height;
+    D3DFORMAT format;
+    UINT planeCount;
+    UINT *pitches;
+    UINT *offsets;
+} WineVideoImage;
+
+[
+    object,
+    local,
+    uuid(4C22E900-B16F-11E4-AB27-0800200C9A66)
+]
+interface IWineVideoDecoder : IUnknown
+{
+    HRESULT LockBuffer(
+        [in] UINT type,
+        [out] void **buffer,
+        [out] UINT *size);
+
+    HRESULT UnlockBuffer(
+        [in] UINT type);
+
+    HRESULT ExecuteBuffers(
+        [in] DXVA2_DecodeBufferDesc *pictureParam,
+        [in] DXVA2_DecodeBufferDesc *qMatrix,
+        [in] DXVA2_DecodeBufferDesc *sliceInfo,
+        [in] DXVA2_DecodeBufferDesc *bitStream);
+
+    HRESULT BeginFrame(
+        [in] UINT surfaceIndex);
+
+    HRESULT EndFrame();
+
+    HRESULT LockImage(
+        [in] WineVideoImage *image);
+
+    HRESULT UnlockImage();
+}
+
+[
+    object,
+    local,
+    uuid(21E19BB0-B16E-11E4-AB27-0800200C9A66)
+]
+interface IWineVideoService : IUnknown
+{
+    HRESULT GetDecoderDeviceGuids(
+        [out] UINT *count,
+        [out] GUID **guids);
+
+    HRESULT GetDecoderRenderTargets(
+        [in] REFGUID guid,
+        [out] UINT *count,
+        [out] D3DFORMAT **formats);
+
+    HRESULT GetDecoderConfigurations(
+        [in] REFGUID guid,
+        [in] const DXVA2_VideoDesc *videoDesc,
+        [in] IUnknown *reserved,
+        [out] UINT *count,
+        [out] DXVA2_ConfigPictureDecode **configs);
+
+    HRESULT CreateVideoDecoder(
+        [in] REFGUID guid,
+        [in] const DXVA2_VideoDesc *videoDesc,
+        [in] DXVA2_ConfigPictureDecode *config,
+        [in] UINT numSurfaces,
+        [out] IWineVideoDecoder **decoder);
+}
