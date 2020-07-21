@@ -1,0 +1,23 @@
+From: Jacek Caban <jacek@codeweavers.com>
+Subject: [PATCH] server: Fix setting context flags in get_thread_context.
+Message-Id: <a24cb3aa-abc7-dbde-11bd-e2b7e3fbc578@codeweavers.com>
+Date: Sat, 25 Apr 2020 21:13:33 +0200
+
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=49011
+Signed-off-by: Jacek Caban <jacek@codeweavers.com>
+---
+diff --git a/server/thread.c b/server/thread.c
+index cfdf42c756..7c1c1108eb 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -1848,7 +1848,7 @@ DECL_HANDLER(get_thread_context)
+             {
+                 assert( reply->self );
+                 memset( context, 0, sizeof(context_t) );
+-                context->cpu = thread_context->regs.cpu;
++                context->cpu = thread->process->cpu;
+                 if (req->flags & system_flags)
+                 {
+                     get_thread_context( thread, context, req->flags & system_flags );
+

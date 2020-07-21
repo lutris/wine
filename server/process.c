@@ -49,6 +49,7 @@
 #include "user.h"
 #include "security.h"
 #include "esync.h"
+#include "fsync.h"
 
 /* process structure */
 
@@ -69,6 +70,7 @@ static void process_poll_event( struct fd *fd, int event );
 static struct list *process_get_kernel_obj_list( struct object *obj );
 static void process_destroy( struct object *obj );
 static int process_get_esync_fd( struct object *obj, enum esync_type *type );
+static unsigned int process_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static void terminate_process( struct process *process, struct thread *skip, int exit_code );
 
 static const struct object_ops process_ops =
@@ -80,6 +82,7 @@ static const struct object_ops process_ops =
     remove_queue,                /* remove_queue */
     process_signaled,            /* signaled */
     process_get_esync_fd,        /* get_esync_fd */
+    process_get_fsync_idx,       /* get_fsync_idx */
     no_satisfied,                /* satisfied */
     no_signal,                   /* signal */
     no_get_fd,                   /* get_fd */
@@ -132,6 +135,7 @@ static const struct object_ops startup_info_ops =
     remove_queue,                  /* remove_queue */
     startup_info_signaled,         /* signaled */
     NULL,                          /* get_esync_fd */
+    NULL,                          /* get_fsync_idx */
     no_satisfied,                  /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
@@ -162,6 +166,7 @@ struct job
     struct object obj;             /* object header */
     struct list process_list;      /* list of all processes */
     int num_processes;             /* count of running processes */
+    int assign_counter;            /* Number of processes which have been assigned */
     unsigned int limit_flags;      /* limit flags */
     int terminating;               /* job is terminating */
     int signaled;                  /* job is signaled */
@@ -178,6 +183,7 @@ static const struct object_ops job_ops =
     remove_queue,                  /* remove_queue */
     job_signaled,                  /* signaled */
     NULL,                          /* get_esync_fd */
+    NULL,                          /* get_fsync_idx */
     no_satisfied,                  /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
@@ -206,6 +212,7 @@ static struct job *create_job_object( struct object *root, const struct unicode_
             /* initialize it if it didn't already exist */
             list_init( &job->process_list );
             job->num_processes = 0;
+            job->assign_counter = 0;
             job->limit_flags = 0;
             job->terminating = 0;
             job->signaled = 0;
@@ -247,6 +254,7 @@ static void add_job_process( struct job *job, struct process *process )
     process->job = (struct job *)grab_object( job );
     list_add_tail( &job->process_list, &process->job_entry );
     job->num_processes++;
+    job->assign_counter++;
 
     add_job_completion( job, JOB_OBJECT_MSG_NEW_PROCESS, get_process_id(process) );
 }
@@ -536,8 +544,9 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
     process->trace_data      = 0;
     process->rawinput_mouse  = NULL;
     process->rawinput_kbd    = NULL;
-    process->esync_fd        = -1;
     list_init( &process->kernel_object );
+    process->esync_fd        = -1;
+    process->fsync_idx       = 0;
     list_init( &process->thread_list );
     list_init( &process->locks );
     list_init( &process->asyncs );
@@ -580,6 +589,9 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
         process->affinity = parent->affinity;
     }
     if (!process->handles || !process->token) goto error;
+
+    if (do_fsync())
+        process->fsync_idx = fsync_alloc_shm( 0, 0 );
 
     if (do_esync())
         process->esync_fd = esync_create_fd( 0, 0 );
@@ -663,6 +675,13 @@ static int process_get_esync_fd( struct object *obj, enum esync_type *type )
     struct process *process = (struct process *)obj;
     *type = ESYNC_MANUAL_SERVER;
     return process->esync_fd;
+}
+
+static unsigned int process_get_fsync_idx( struct object *obj, enum fsync_type *type )
+{
+    struct process *process = (struct process *)obj;
+    *type = FSYNC_MANUAL_SERVER;
+    return process->fsync_idx;
 }
 
 static unsigned int process_map_access( struct object *obj, unsigned int access )
@@ -1765,6 +1784,17 @@ DECL_HANDLER(process_in_job)
         release_object( job );
     }
     release_object( process );
+}
+
+/* retrieve information about a job */
+DECL_HANDLER(get_job_info)
+{
+    struct job *job = get_job_obj( current->process, req->handle, JOB_OBJECT_QUERY );
+
+    reply->total_processes = job->assign_counter;
+    reply->active_processes = job->num_processes;
+
+    release_object( job );
 }
 
 /* terminate all processes associated with the job */
