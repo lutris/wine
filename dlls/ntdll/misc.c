@@ -61,6 +61,14 @@ const char * CDECL NTDLL_wine_get_version(void)
 }
 
 /*********************************************************************
+ *                  wine_get_patches   (NTDLL.@)
+ */
+const void * CDECL NTDLL_wine_get_patches(void)
+{
+    return wine_get_patches();
+}
+
+/*********************************************************************
  *                  wine_get_build_id   (NTDLL.@)
  */
 const char * CDECL NTDLL_wine_get_build_id(void)

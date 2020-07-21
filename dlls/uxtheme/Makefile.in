@@ -2,12 +2,25 @@ MODULE    = uxtheme.dll
 IMPORTLIB = uxtheme
 IMPORTS   = user32 gdi32 advapi32
 DELAYIMPORTS = msimg32
-
-EXTRADLLFLAGS = -mno-cygwin
+EXTRAINCL = $(GTK3_CFLAGS)
 
 C_SRCS = \
 	buffer.c \
 	draw.c \
+	gtk-button.c \
+	gtk-combobox.c \
+	gtk-edit.c \
+	gtk-header.c \
+	gtk-listbox.c \
+	gtk-listview.c \
+	gtk-menu.c \
+	gtk-rebar.c \
+	gtk-status.c \
+	gtk-tab.c \
+	gtk-toolbar.c \
+	gtk-trackbar.c \
+	gtk-window.c \
+	gtk.c \
 	main.c \
 	metric.c \
 	msstyles.c \

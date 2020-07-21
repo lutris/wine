@@ -2658,6 +2658,49 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
     return ret;
 }
 
+/******************************************************************************
+ * Get the default and the app-specific config keys.
+ */
+BOOL get_app_key(HKEY *defkey, HKEY *appkey)
+{
+    char buffer[MAX_PATH+16];
+    DWORD len;
+
+    *appkey = 0;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\System */
+    if (RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\System", defkey))
+        *defkey = 0;
+
+    len = GetModuleFileNameA(0, buffer, MAX_PATH);
+    if (len && len < MAX_PATH)
+    {
+        HKEY tmpkey;
+
+        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\System */
+        if (!RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey))
+        {
+            char *p, *appname = buffer;
+            if ((p = strrchr(appname, '/'))) appname = p + 1;
+            if ((p = strrchr(appname, '\\'))) appname = p + 1;
+            strcat(appname, "\\System");
+
+            if (RegOpenKeyA(tmpkey, appname, appkey)) *appkey = 0;
+            RegCloseKey(tmpkey);
+        }
+    }
+
+    return *defkey || *appkey;
+}
+
+static DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char *name, DWORD *data)
+{
+    DWORD type;
+    DWORD size = sizeof(DWORD);
+    if (appkey && !RegQueryValueExA(appkey, name, 0, &type, (BYTE *)data, &size) && (type == REG_DWORD)) return 0;
+    if (defkey && !RegQueryValueExA(defkey, name, 0, &type, (BYTE *)data, &size) && (type == REG_DWORD)) return 0;
+    return ERROR_FILE_NOT_FOUND;
+}
 
 /***********************************************************************
  *		GetSystemMetrics (USER32.@)
@@ -2902,7 +2945,21 @@ INT WINAPI GetSystemMetrics( INT index )
         return 1;
     case SM_TABLETPC:
     case SM_MEDIACENTER:
-        return 0;
+    {
+        const char *name = (index == SM_TABLETPC) ? "TabletPC" : "MediaCenter";
+        HKEY defkey, appkey;
+        DWORD value;
+
+        if (!get_app_key(&defkey, &appkey))
+            return 0;
+
+        if (get_config_key_dword(defkey, appkey, name, &value))
+            value = 0;
+
+        if (appkey) RegCloseKey( appkey );
+        if (defkey) RegCloseKey( defkey );
+        return value;
+    }
     case SM_CMETRICS:
         return SM_CMETRICS;
     default:

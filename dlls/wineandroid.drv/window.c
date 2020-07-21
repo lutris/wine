@@ -364,6 +364,8 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
 }
 
 
+extern void __wine_esync_set_queue_fd( int fd );
+
 /***********************************************************************
  *           init_event_queue
  */
@@ -377,6 +379,7 @@ static void init_event_queue(void)
         ERR( "could not create data\n" );
         ExitProcess(1);
     }
+    __wine_esync_set_queue_fd( event_pipe[0] );
     if (wine_server_fd_to_handle( event_pipe[0], GENERIC_READ | SYNCHRONIZE, 0, &handle ))
     {
         ERR( "Can't allocate handle for event fd\n" );
@@ -521,7 +524,7 @@ static int process_events( DWORD mask )
                     }
                     SERVER_END_REQ;
                 }
-                __wine_send_input( capture ? capture : event->data.motion.hwnd, &event->data.motion.input );
+                __wine_send_input( capture ? capture : event->data.motion.hwnd, &event->data.motion.input, SEND_HWMSG_RAWINPUT|SEND_HWMSG_WINDOW );
             }
             break;
 
@@ -535,7 +538,7 @@ static int process_events( DWORD mask )
                       event->data.kbd.input.u.ki.wVk, event->data.kbd.input.u.ki.wVk,
                       event->data.kbd.input.u.ki.wScan );
             update_keyboard_lock_state( event->data.kbd.input.u.ki.wVk, event->data.kbd.lock_state );
-            __wine_send_input( 0, &event->data.kbd.input );
+            __wine_send_input( 0, &event->data.kbd.input, SEND_HWMSG_RAWINPUT|SEND_HWMSG_WINDOW );
             break;
 
         default:

@@ -123,6 +123,7 @@ static const struct object_ops handle_table_ops =
     no_add_queue,                    /* add_queue */
     NULL,                            /* remove_queue */
     NULL,                            /* signaled */
+    NULL,                            /* get_esync_fd */
     NULL,                            /* satisfied */
     no_signal,                       /* signal */
     no_get_fd,                       /* get_fd */
@@ -134,6 +135,7 @@ static const struct object_ops handle_table_ops =
     NULL,                            /* unlink_name */
     no_open_file,                    /* open_file */
     no_kernel_obj_list,              /* get_kernel_obj_list */
+    no_alloc_handle,                 /* alloc_handle */
     no_close_handle,                 /* close_handle */
     handle_table_destroy             /* destroy */
 };
@@ -233,7 +235,7 @@ static int grow_handle_table( struct handle_table *table )
 }
 
 /* allocate the first free entry in the handle table */
-static obj_handle_t alloc_entry( struct handle_table *table, void *obj, unsigned int access )
+static obj_handle_t alloc_entry( struct handle_table *table, struct object *obj, unsigned int access )
 {
     struct handle_entry *entry = table->entries + table->free;
     int i;
@@ -249,6 +251,10 @@ static obj_handle_t alloc_entry( struct handle_table *table, void *obj, unsigned
     table->free = i + 1;
     entry->ptr    = grab_object_for_handle( obj );
     entry->access = access;
+
+    if (table->process)
+        obj->ops->alloc_handle( obj, table->process, index_to_handle(i) );
+
     return index_to_handle(i);
 }
 
@@ -374,7 +380,11 @@ struct handle_table *copy_handle_table( struct process *process, struct process 
         for (i = 0; i <= table->last; i++, ptr++)
         {
             if (!ptr->ptr) continue;
-            if (ptr->access & RESERVED_INHERIT) grab_object_for_handle( ptr->ptr );
+            if (ptr->access & RESERVED_INHERIT)
+            {
+                ptr->ptr->ops->alloc_handle( ptr->ptr, process, index_to_handle(i) );
+                grab_object_for_handle( ptr->ptr );
+            }
             else ptr->ptr = NULL; /* don't inherit this entry */
         }
     }
@@ -489,7 +499,7 @@ obj_handle_t find_inherited_handle( struct process *process, const struct object
 /* enumerate handles of a given type */
 /* this is needed for window stations and desktops */
 obj_handle_t enumerate_handles( struct process *process, const struct object_ops *ops,
-                                unsigned int *index )
+                                obj_handle_t *index, struct object **obj )
 {
     struct handle_table *table = process->handles;
     unsigned int i;
@@ -502,6 +512,7 @@ obj_handle_t enumerate_handles( struct process *process, const struct object_ops
         if (!entry->ptr) continue;
         if (entry->ptr->ops != ops) continue;
         *index = i + 1;
+        if (obj) *obj = grab_object( entry->ptr );
         return index_to_handle(i);
     }
     return 0;
@@ -790,6 +801,7 @@ static int enum_handles( struct process *process, void *user )
     struct handle_table *table = process->handles;
     struct handle_entry *entry;
     struct handle_info *handle;
+    struct object_type *type;
     unsigned int i;
 
     if (!table)
@@ -808,6 +820,15 @@ static int enum_handles( struct process *process, void *user )
         handle->owner  = process->id;
         handle->handle = index_to_handle(i);
         handle->access = entry->access & ~RESERVED_ALL;
+
+        if ((type = entry->ptr->ops->get_type(entry->ptr)))
+        {
+            handle->type = type_get_index(type);
+            release_object(type);
+        }
+        else
+            handle->type = 0;
+
         info->count--;
     }
 

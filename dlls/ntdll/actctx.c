@@ -56,6 +56,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(actctx);
 /* we don't want to include winuser.h */
 #define RT_MANIFEST                        ((ULONG_PTR)24)
 #define CREATEPROCESS_MANIFEST_RESOURCE_ID ((ULONG_PTR)1)
+#define MINIMUM_RESERVED_MANIFEST_RESOURCE_ID ((ULONG_PTR)1)
+#define MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID ((ULONG_PTR)16)
 
 /* from oaidl.h */
 typedef enum tagLIBFLAGS {
@@ -2892,7 +2894,7 @@ static NTSTATUS open_nt_file( HANDLE *handle, UNICODE_STRING *name )
     attr.ObjectName = name;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    return NtOpenFile( handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
+    return __syscall_NtOpenFile( handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
 }
 
 static NTSTATUS get_manifest_in_module( struct actctx_loader* acl, struct assembly_identity* ai,
@@ -3209,7 +3211,7 @@ static NTSTATUS lookup_winsxs(struct actctx_loader* acl, struct assembly_identit
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    if (!NtOpenFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    if (!__syscall_NtOpenFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
                      FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT ))
     {
         sxs_ai = *ai;
@@ -3308,8 +3310,14 @@ static NTSTATUS lookup_assembly(struct actctx_loader* acl,
             status = open_nt_file( &file, &nameW );
             if (!status)
             {
-                status = get_manifest_in_pe_file( acl, ai, nameW.Buffer, directory, FALSE, file,
-                                                  (LPCWSTR)CREATEPROCESS_MANIFEST_RESOURCE_ID, 0 );
+                INT rid;
+                for (rid = MINIMUM_RESERVED_MANIFEST_RESOURCE_ID;
+                     rid <= MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID; rid++)
+                {
+                    status = get_manifest_in_pe_file( acl, ai, nameW.Buffer, directory, FALSE, file,
+                                                      (LPCWSTR)(ULONG_PTR)rid, 0 );
+                    if (status == STATUS_SUCCESS) break;
+                }
                 NtClose( file );
                 if (status == STATUS_SUCCESS)
                     break;
@@ -4853,6 +4861,9 @@ static NTSTATUS find_string(ACTIVATION_CONTEXT* actctx, ULONG section_kind,
 
     switch (section_kind)
     {
+    case ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION:
+        FIXME("Unsupported yet section_kind %x\n", section_kind);
+        return STATUS_SXS_KEY_NOT_FOUND;
     case ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION:
         status = find_dll_redirection(actctx, section_name, data);
         break;

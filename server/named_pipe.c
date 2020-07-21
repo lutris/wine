@@ -118,6 +118,7 @@ static const struct object_ops named_pipe_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -129,6 +130,7 @@ static const struct object_ops named_pipe_ops =
     default_unlink_name,          /* unlink_name */
     named_pipe_open_file,         /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
+    no_alloc_handle,              /* alloc_handle */
     no_close_handle,              /* close_handle */
     named_pipe_destroy            /* destroy */
 };
@@ -160,6 +162,7 @@ static const struct object_ops pipe_server_ops =
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
+    default_fd_get_esync_fd,      /* get_esync_fd */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     pipe_end_get_fd,              /* get_fd */
@@ -171,6 +174,7 @@ static const struct object_ops pipe_server_ops =
     NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
+    no_alloc_handle,              /* alloc_handle */
     fd_close_handle,              /* close_handle */
     pipe_server_destroy           /* destroy */
 };
@@ -202,6 +206,7 @@ static const struct object_ops pipe_client_ops =
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
+    default_fd_get_esync_fd,      /* get_esync_fd */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     pipe_end_get_fd,              /* get_fd */
@@ -213,6 +218,7 @@ static const struct object_ops pipe_client_ops =
     NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
+    no_alloc_handle,              /* alloc_handle */
     fd_close_handle,              /* close_handle */
     pipe_end_destroy              /* destroy */
 };
@@ -248,6 +254,7 @@ static const struct object_ops named_pipe_device_ops =
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
+    NULL,                             /* get_esync_fd */
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
@@ -259,7 +266,8 @@ static const struct object_ops named_pipe_device_ops =
     default_unlink_name,              /* unlink_name */
     named_pipe_device_open_file,      /* open_file */
     no_kernel_obj_list,               /* get_kernel_obj_list */
-    no_close_handle,                  /* close_handle */
+    no_alloc_handle,                  /* alloc_handle */
+    fd_close_handle,                  /* close_handle */
     named_pipe_device_destroy         /* destroy */
 };
 
@@ -277,6 +285,7 @@ static const struct object_ops named_pipe_device_file_ops =
     add_queue,                               /* add_queue */
     remove_queue,                            /* remove_queue */
     default_fd_signaled,                     /* signaled */
+    NULL,                                    /* get_esync_fd */
     no_satisfied,                            /* satisfied */
     no_signal,                               /* signal */
     named_pipe_device_file_get_fd,           /* get_fd */
@@ -288,6 +297,7 @@ static const struct object_ops named_pipe_device_file_ops =
     NULL,                                    /* unlink_name */
     no_open_file,                            /* open_file */
     no_kernel_obj_list,                      /* get_kernel_obj_list */
+    no_alloc_handle,                         /* alloc_handle */
     fd_close_handle,                         /* close_handle */
     named_pipe_device_file_destroy           /* destroy */
 };
@@ -455,8 +465,7 @@ static void named_pipe_device_dump( struct object *obj, int verbose )
 
 static struct object_type *named_pipe_device_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'D','e','v','i','c','e'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    const struct unicode_str str = { type_Device, sizeof(type_Device) };
     return get_object_type( &str );
 }
 
