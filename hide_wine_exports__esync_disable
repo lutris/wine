@@ -1,0 +1,41 @@
+From fcac9c20959c67b28d7ea5700370923f4b69c5a4 Mon Sep 17 00:00:00 2001
+From: Tk-Glitch <ti3nou@gmail.com>
+Date: Sat, 11 Jul 2020 12:25:35 +0200
+Subject: hide wine exports & esync disable
+
+
+diff --git a/loader/wine.inf.in b/loader/wine.inf.in
+--- a/loader/wine.inf.in
++++ b/loader/wine.inf.in
+@@ -717,6 +717,7 @@ HKLM,%MciExtStr%,"wmx",,"MPEGVideo"
+ HKLM,%MciExtStr%,"wvx",,"MPEGVideo"
+ 
+ [Misc]
++HKCU,Software\Wine,"HideWineExports",,"Y"
+ HKLM,Software\Borland\Database Engine\Settings\SYSTEM\INIT,SHAREDMEMLOCATION,,9000
+ HKLM,Software\Clients\Mail,,2,"Native Mail Client"
+ HKLM,Software\Clients\Mail\Native Mail Client,,2,"Native Mail Client"
+diff --git a/dlls/ntdll/esync.c b/dlls/ntdll/esync.c
+--- a/dlls/ntdll/esync.c
++++ b/dlls/ntdll/esync.c
+@@ -55,7 +55,7 @@ int do_esync(void)
+ int do_esync(void)
+ {
+ #ifdef HAVE_SYS_EVENTFD_H
+-    static int do_esync_cached = -1;
++    static int do_esync_cached = 0;
+ 
+     if (do_esync_cached == -1)
+         do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC"));
+diff --git a/server/esync.c b/server/esync.c
+--- a/server/esync.c
++++ b/server/esync.c
+@@ -50,7 +50,7 @@ int do_esync(void)
+ int do_esync(void)
+ {
+ #ifdef HAVE_SYS_EVENTFD_H
+-    static int do_esync_cached = -1;
++    static int do_esync_cached = 0;
+ 
+     if (do_esync_cached == -1)
+         do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC"));

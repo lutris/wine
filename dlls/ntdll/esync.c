@@ -54,7 +54,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(esync);
 int do_esync(void)
 {
 #ifdef HAVE_SYS_EVENTFD_H
-    static int do_esync_cached = -1;
+    static int do_esync_cached = 0;
 
     if (do_esync_cached == -1)
         do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC"));
