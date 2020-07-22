@@ -46,6 +46,9 @@
 #ifdef HAVE_SYS_THR_H
 # include <sys/thr.h>
 #endif
+#ifdef HAVE_SYS_UIO_H
+#include <sys/uio.h>
+#endif
 #include <unistd.h>
 
 #include "ntstatus.h"
@@ -343,70 +346,91 @@ static struct thread *get_ptrace_thread( struct process *process )
 /* read data from a process memory space */
 int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, char *dest )
 {
-    struct thread *thread = get_ptrace_thread( process );
-    unsigned int first_offset, last_offset, len;
-    unsigned long data, *addr;
+    static int have_process_vm_readv = -1;
+    int page_size = get_page_size();
+    char procmem[24];
+    int fd;
+    ssize_t ret;
 
-    if (!thread) return 0;
+    if (!get_ptrace_thread( process )) return 0;
 
-    if ((unsigned long)ptr != ptr)
+    if ((unsigned long)ptr != ptr) /* Still no idea what this is for. */
     {
         set_error( STATUS_ACCESS_DENIED );
         return 0;
     }
 
-    first_offset = ptr % sizeof(long);
-    last_offset = (size + first_offset) % sizeof(long);
-    if (!last_offset) last_offset = sizeof(long);
-
-    addr = (unsigned long *)(unsigned long)(ptr - first_offset);
-    len = (size + first_offset + sizeof(long) - 1) / sizeof(long);
-
-    if (suspend_for_ptrace( thread ))
+#ifdef HAVE_SYS_UIO_H
+    /* Use process_vm_readv if the memory region does not cross a page boundary. */
+    if (have_process_vm_readv && ((size_t)ptr & (page_size - 1)) + size < page_size)
     {
-        if (len > 3)  /* /proc/pid/mem should be faster for large sizes */
-        {
-            char procmem[24];
-            int fd;
+        struct iovec local_iov, remote_iov;
 
-            sprintf( procmem, "/proc/%u/mem", process->unix_pid );
-            if ((fd = open( procmem, O_RDONLY )) != -1)
+        if ((size_t)size != size)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return 0;
+        }
+
+        do {
+            local_iov.iov_base  = (void*)dest;
+            local_iov.iov_len   = (size_t)size;
+            remote_iov.iov_base = (void*)ptr;
+            remote_iov.iov_len  = (size_t)size;
+
+            errno = 0;
+            ret = process_vm_readv( process->unix_pid, &local_iov, 1, &remote_iov, 1, 0 );
+            if (errno == ENOSYS)
             {
-                ssize_t ret = pread( fd, dest, size, ptr );
-                close( fd );
-                if (ret == size)
-                {
-                    len = 0;
-                    goto done;
-                }
+                have_process_vm_readv = 0;
+                goto do_pread;
             }
-        }
 
-        if (len > 1)
-        {
-            if (read_thread_long( thread, addr++, &data ) == -1) goto done;
-            memcpy( dest, (char *)&data + first_offset, sizeof(long) - first_offset );
-            dest += sizeof(long) - first_offset;
-            first_offset = 0;
-            len--;
-        }
+            if (ret == -1) /* An error occurred. */
+                return 0;
+            if (ret == 0 && size != 0) /* No data could be read, try pread instead. */
+                goto do_pread;
 
-        while (len > 1)
-        {
-            if (read_thread_long( thread, addr++, &data ) == -1) goto done;
-            memcpy( dest, &data, sizeof(long) );
-            dest += sizeof(long);
-            len--;
-        }
+            /* Try reading the next part. */
+            if ((size_t)ret > size) ret = (ssize_t)size;
+            ptr += ret;
+            dest += ret;
+            size -= ret;
+        } while (size > 0);
 
-        if (read_thread_long( thread, addr++, &data ) == -1) goto done;
-        memcpy( dest, (char *)&data + first_offset, last_offset - first_offset );
-        len--;
-
-    done:
-        resume_after_ptrace( thread );
+        return 1;
     }
-    return !len;
+do_pread:
+#endif
+
+    if ((size_t)size != size || size == (data_size_t)-1 || (off_t)ptr != ptr)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
+
+    sprintf( procmem, "/proc/%lu/mem", (unsigned long)process->unix_pid );
+    if ((fd = open( procmem, O_RDONLY )) == -1)
+        return 0;
+
+    do {
+        ret = pread( fd, dest, size, ptr );
+
+        if (ret == -1) /* An error occurred. */
+            return 0;
+        if (ret == 0 && size != 0) /* No data could be read. */
+            return 0;
+
+        /* Try reading the next part. */
+        if ((size_t)ret > size) ret = (ssize_t)size;
+        ptr += ret;
+        dest += ret;
+        size -= ret;
+    } while (size > 0);
+
+    close( fd );
+
+    return 1;
 }
 
 /* make sure we can write to the whole address range */
