@@ -1,0 +1,25 @@
+From 11d21a0a7508be1fae5b4e3beef1875820b09ab9 Mon Sep 17 00:00:00 2001
+From: David Torok <dt@zeroitlab.com>
+Date: Sun, 17 Nov 2019 19:08:12 +0100
+Subject: [PATCH] Send WM_NCPOINTERUP on focus regain
+
+---
+ dlls/user32/focus.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/dlls/user32/focus.c b/dlls/user32/focus.c
+index c0ace237c0..a998dd3ec0 100644
+--- a/dlls/user32/focus.c
++++ b/dlls/user32/focus.c
+@@ -166,6 +166,9 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
+         SendMessageW( hwnd, WM_ACTIVATE,
+                       MAKEWPARAM( mouse ? WA_CLICKACTIVE : WA_ACTIVE, IsIconic(hwnd) ),
+                       (LPARAM)previous );
++
++        SendMessageW( hwnd, WM_NCPOINTERUP, 0, 0);
++
+         if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
+             PostMessageW( GetDesktopWindow(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
+ 
+-- 
+2.24.0
