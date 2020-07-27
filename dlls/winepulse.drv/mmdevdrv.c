@@ -669,6 +669,9 @@ static HRESULT pulse_connect(void)
     WCHAR path[MAX_PATH], *name;
     char *str;
 
+    if (!pulse_ml)
+        pulse_ml = pa_mainloop_new();
+
     if (!pulse_thread)
     {
         if (!(pulse_thread = CreateThread(NULL, 0, pulse_mainloop_thread, NULL, 0, NULL)))
