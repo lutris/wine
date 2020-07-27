@@ -405,7 +405,8 @@ static HRESULT WINAPI DirectXVideoProcessorService_CreateVideoProcessor( IDirect
     FIXME("(%p/%p)->(%s, %#x, %u, %p): semi-stub\n",
         iface, This, debugstr_guid(VideoProcDeviceGuid), RenderTargetFormat, MaxNumSubStreams, ppVidProcess);
 
-    if (IsEqualIID(VideoProcDeviceGuid, &DXVA2_VideoProcSoftwareDevice))
+    if (IsEqualIID(VideoProcDeviceGuid, &DXVA2_VideoProcSoftwareDevice) ||
+            IsEqualIID(VideoProcDeviceGuid, &DXVA2_VideoProcProgressiveDevice))
         return processor_software_create(iface, This->device, pVideoDesc, RenderTargetFormat, MaxNumSubStreams, ppVidProcess);
 
     return E_NOTIMPL;
