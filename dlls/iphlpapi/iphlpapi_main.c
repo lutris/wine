@@ -2861,7 +2861,7 @@ DWORD WINAPI NotifyUnicastIpAddressChange(ADDRESS_FAMILY family, PUNICAST_IPADDR
 {
     FIXME("(family %d, callback %p, context %p, init_notify %d, handle %p): semi-stub\n",
           family, callback, context, init_notify, handle);
-    if (handle) *handle = NULL;
+    if (handle) *handle = INVALID_HANDLE_VALUE;
 
     if (init_notify)
         callback(context, NULL, MibInitialNotification);
