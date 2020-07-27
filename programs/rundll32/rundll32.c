@@ -42,6 +42,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(rundll32);
 
+static const WCHAR SZ_RUNDLL32[]   = {'\\','r','u','n','d','l','l','3','2','.','e','x','e',0};
 
 #ifdef __i386__
 /* wrapper for dlls that declare the entry point incorrectly */
@@ -278,6 +279,53 @@ static LPWSTR get_next_arg(LPWSTR *cmdline, BOOL can_have_commas)
     return arg;
 }
 
+static BOOL try_restart_process( LPWSTR szDllName )
+{
+    WCHAR path[MAX_PATH];
+    PROCESS_INFORMATION pi;
+    STARTUPINFOW si;
+    PVOID ov;
+    DWORD binary_type;
+    BOOL is_wow64;
+
+    if (!GetBinaryTypeW(szDllName, &binary_type))
+        return FALSE;
+
+    IsWow64Process( GetCurrentProcess(), &is_wow64 );
+
+    switch (binary_type)
+    {
+        case SCS_32BIT_BINARY:
+            if (is_wow64 || !GetSystemWow64DirectoryW( path, MAX_PATH - 1 - lstrlenW(SZ_RUNDLL32) ))
+                return FALSE;
+            WINE_TRACE("Restarting rundll32 process in 32-bit mode\n");
+            break;
+        case SCS_64BIT_BINARY:
+            Wow64DisableWow64FsRedirection(&ov);
+            if (!is_wow64 || !GetSystemDirectoryW( path, MAX_PATH - 1 - lstrlenW(SZ_RUNDLL32) ))
+                return FALSE;
+            WINE_TRACE("Restarting rundll32 process in 64-bit mode\n");
+            break;
+        default:
+            return FALSE;
+    }
+
+    lstrcatW(path, SZ_RUNDLL32);
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    if (CreateProcessW( path, GetCommandLineW(),
+            NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi ))
+    {
+        WaitForSingleObject( pi.hProcess, INFINITE );
+        CloseHandle( pi.hProcess );
+        CloseHandle( pi.hThread );
+    }
+    else WINE_ERR("Failed to restart process (%s, err %u)\n",
+            wine_dbgstr_w(path), GetLastError());
+
+    return TRUE;
+}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE hOldInstance, LPWSTR szCmdLine, int nCmdShow)
 {
     HWND hWnd;
@@ -318,8 +366,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE hOldInstance, LPWSTR szCmdLine
         HINSTANCE16 dll = load_dll16( szDllName );
         if (dll <= 32)
         {
-            /* Windows has a MessageBox here... */
-            WINE_ERR("Unable to load %s\n",wine_dbgstr_w(szDllName));
+            if (!try_restart_process( szDllName ))
+            {
+                /* Windows has a MessageBox here... */
+                WINE_ERR("Unable to load %s\n",wine_dbgstr_w(szDllName));
+            }
             goto CLEANUP;
         }
         win16 = TRUE;
