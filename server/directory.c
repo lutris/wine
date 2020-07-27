@@ -44,6 +44,7 @@
 struct object_type
 {
     struct object     obj;        /* object header */
+    unsigned int      index;      /* type index */
 };
 
 static void object_type_dump( struct object *obj, int verbose );
@@ -68,10 +69,13 @@ static const struct object_ops object_type_ops =
     default_unlink_name,          /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
+    no_alloc_handle,              /* alloc_handle */
     no_close_handle,              /* close_handle */
     no_destroy                    /* destroy */
 };
 
+static struct object_type *object_type_list[64];
+static unsigned int object_type_count;
 
 struct directory
 {
@@ -104,6 +108,7 @@ static const struct object_ops directory_ops =
     default_unlink_name,          /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
+    no_alloc_handle,              /* alloc_handle */
     no_close_handle,              /* close_handle */
     directory_destroy             /* destroy */
 };
@@ -119,8 +124,7 @@ static void object_type_dump( struct object *obj, int verbose )
 
 static struct object_type *object_type_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'O','b','j','e','c','t','T','y','p','e'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Type, sizeof(type_Type) };
     return get_object_type( &str );
 }
 
@@ -131,8 +135,7 @@ static void directory_dump( struct object *obj, int verbose )
 
 static struct object_type *directory_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'D','i','r','e','c','t','o','r','y'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Directory, sizeof(type_Directory) };
     return get_object_type( &str );
 }
 
@@ -236,12 +239,20 @@ struct object_type *get_object_type( const struct unicode_str *name )
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
-            grab_object( type );
+            assert( object_type_count < sizeof(object_type_list)/sizeof(object_type_list[0]) );
+            type->index = object_type_count++;
+            object_type_list[ type->index ] = (struct object_type *)grab_object( type );
             make_object_static( &type->obj );
         }
         clear_error();
     }
     return type;
+}
+
+/* retrieve the object type index */
+unsigned int type_get_index( struct object_type *type )
+{
+    return type->index;
 }
 
 /* Global initialization */
@@ -533,7 +544,22 @@ DECL_HANDLER(get_object_type)
     {
         if ((name = get_object_name( &type->obj, &reply->total )))
             set_reply_data( name, min( reply->total, get_reply_max_size() ) );
+        reply->index = type->index;
         release_object( type );
     }
     release_object( obj );
+}
+
+/* query object type name information by index */
+DECL_HANDLER(get_object_type_by_index)
+{
+    struct object_type *type;
+    const WCHAR *name;
+
+    if (req->index < object_type_count && (type = object_type_list[ req->index ]))
+    {
+        if ((name = get_object_name( &type->obj, &reply->total )))
+            set_reply_data( name, min( reply->total, get_reply_max_size() ) );
+    }
+    else set_error( STATUS_NO_MORE_ENTRIES );
 }

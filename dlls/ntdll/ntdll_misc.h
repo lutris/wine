@@ -28,6 +28,7 @@
 #include "winnt.h"
 #include "winternl.h"
 #include "unixlib.h"
+#include "wine/debug.h"
 #include "wine/server.h"
 #include "wine/asm.h"
 
@@ -80,6 +81,7 @@ extern LPCSTR debugstr_ObjectAttributes(const OBJECT_ATTRIBUTES *oa) DECLSPEC_HI
 extern SIZE_T signal_stack_size DECLSPEC_HIDDEN;
 extern SIZE_T signal_stack_mask DECLSPEC_HIDDEN;
 extern void signal_init_process(void) DECLSPEC_HIDDEN;
+extern void signal_init_early(void) DECLSPEC_HIDDEN;
 extern void signal_start_thread( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend ) DECLSPEC_HIDDEN;
 extern void signal_start_process( LPTHREAD_START_ROUTINE entry, BOOL suspend ) DECLSPEC_HIDDEN;
 extern void version_init(void) DECLSPEC_HIDDEN;
@@ -98,6 +100,9 @@ extern NTSTATUS restart_process( RTL_USER_PROCESS_PARAMETERS *params, NTSTATUS s
 extern int __wine_main_argc;
 extern char **__wine_main_argv;
 extern WCHAR **__wine_main_wargv;
+
+/* token */
+extern HANDLE CDECL __wine_create_default_token(BOOL admin);
 
 /* server support */
 extern const char *build_dir DECLSPEC_HIDDEN;
@@ -168,7 +173,7 @@ extern NTSTATUS fill_file_info( const struct stat *st, ULONG attr, void *ptr,
                                 FILE_INFORMATION_CLASS class ) DECLSPEC_HIDDEN;
 extern NTSTATUS server_get_unix_name( HANDLE handle, ANSI_STRING *unix_name ) DECLSPEC_HIDDEN;
 extern void init_directories(void) DECLSPEC_HIDDEN;
-extern BOOL DIR_is_hidden_file( const UNICODE_STRING *name ) DECLSPEC_HIDDEN;
+extern BOOL DIR_is_hidden_file( const char *name ) DECLSPEC_HIDDEN;
 extern NTSTATUS DIR_unmount_device( HANDLE handle ) DECLSPEC_HIDDEN;
 extern NTSTATUS DIR_get_unix_cwd( char **cwd ) DECLSPEC_HIDDEN;
 extern unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] ) DECLSPEC_HIDDEN;
@@ -177,6 +182,7 @@ extern NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_S
                                            UINT disposition ) DECLSPEC_HIDDEN;
 
 /* virtual memory */
+extern NTSTATUS read_nt_symlink( HANDLE root, UNICODE_STRING *name, WCHAR *target, size_t length ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, unsigned short zero_bits_64, SIZE_T commit_size,
                                      const LARGE_INTEGER *offset_ptr, SIZE_T *size_ptr, ULONG alloc_type,
                                      ULONG protect, pe_image_info_t *image_info ) DECLSPEC_HIDDEN;
@@ -218,6 +224,43 @@ extern int ntdll_wcstoumbs( const WCHAR* src, DWORD srclen, char* dst, DWORD dst
 extern int CDECL NTDLL__vsnprintf( char *str, SIZE_T len, const char *format, __ms_va_list args ) DECLSPEC_HIDDEN;
 extern int CDECL NTDLL__vsnwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, __ms_va_list args ) DECLSPEC_HIDDEN;
 
+#ifdef __WINE_WINE_PORT_H
+
+/* inline version of RtlEnterCriticalSection */
+static inline void enter_critical_section( RTL_CRITICAL_SECTION *crit )
+{
+    if (InterlockedIncrement( &crit->LockCount ))
+    {
+        if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
+        {
+            crit->RecursionCount++;
+            return;
+        }
+        RtlpWaitForCriticalSection( crit );
+    }
+    crit->OwningThread   = ULongToHandle(GetCurrentThreadId());
+    crit->RecursionCount = 1;
+}
+
+/* inline version of RtlLeaveCriticalSection */
+static inline void leave_critical_section( RTL_CRITICAL_SECTION *crit )
+{
+    WINE_DECLARE_DEBUG_CHANNEL(ntdll);
+    if (--crit->RecursionCount)
+    {
+        if (crit->RecursionCount > 0) InterlockedDecrement( &crit->LockCount );
+        else ERR_(ntdll)( "section %p is not acquired\n", crit );
+    }
+    else
+    {
+        crit->OwningThread = 0;
+        if (InterlockedDecrement( &crit->LockCount ) >= 0)
+            RtlpUnWaitCriticalSection( crit );
+    }
+}
+
+#endif  /* __WINE_WINE_PORT_H */
+
 /* load order */
 
 enum loadorder
@@ -251,6 +294,7 @@ struct ntdll_thread_data
     int                wait_fd[2];    /* fd for sleeping server requests */
     BOOL               wow64_redir;   /* Wow64 filesystem redirection flag */
     pthread_t          pthread_id;    /* pthread thread id */
+    void              *pthread_stack; /* pthread stack */
 };
 
 C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
@@ -281,6 +325,16 @@ void     WINAPI LdrInitializeThunk(CONTEXT*,void**,ULONG_PTR,ULONG_PTR);
 #ifndef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8
 #define InterlockedCompareExchange64(dest,xchg,cmp) RtlInterlockedCompareExchange64(dest,xchg,cmp)
 #endif
+
+/* version */
+extern const char * CDECL NTDLL_wine_get_version(void);
+extern const char * CDECL NTDLL_wine_get_build_id(void);
+extern void CDECL NTDLL_wine_get_host_version( const char **sysname, const char **release );
+
+/* process / thread time */
+extern BOOL read_process_time(int unix_pid, int unix_tid, unsigned long clk_tck,
+                              LARGE_INTEGER *kernel, LARGE_INTEGER *user) DECLSPEC_HIDDEN;
+extern BOOL read_process_memory_stats(int unix_pid, VM_COUNTERS *pvmi) DECLSPEC_HIDDEN;
 
 /* string functions */
 int    __cdecl NTDLL_tolower( int c );
@@ -332,5 +386,13 @@ static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
 {
     while (len--) *dst++ = (unsigned char)*src++;
 }
+
+#if defined(__i386__) || defined(__x86_64__)
+NTSTATUS WINAPI __syscall_NtOpenFile( PHANDLE handle, ACCESS_MASK access,
+                            POBJECT_ATTRIBUTES attr, PIO_STATUS_BLOCK io,
+                            ULONG sharing, ULONG options );
+#else
+#define __syscall_NtOpenFile NtOpenFile
+#endif
 
 #endif

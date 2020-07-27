@@ -79,6 +79,7 @@ static const struct object_ops ranges_ops =
     NULL,                      /* unlink_name */
     no_open_file,              /* open_file */
     no_kernel_obj_list,        /* get_kernel_obj_list */
+    no_alloc_handle,           /* alloc_handle */
     no_close_handle,           /* close_handle */
     ranges_destroy             /* destroy */
 };
@@ -114,6 +115,7 @@ static const struct object_ops shared_map_ops =
     NULL,                      /* unlink_name */
     no_open_file,              /* open_file */
     no_kernel_obj_list,        /* get_kernel_obj_list */
+    no_alloc_handle,           /* alloc_handle */
     no_close_handle,           /* close_handle */
     shared_map_destroy         /* destroy */
 };
@@ -171,6 +173,7 @@ static const struct object_ops mapping_ops =
     default_unlink_name,         /* unlink_name */
     no_open_file,                /* open_file */
     no_kernel_obj_list,          /* get_kernel_obj_list */
+    no_alloc_handle,             /* alloc_handle */
     fd_close_handle,             /* close_handle */
     mapping_destroy              /* destroy */
 };
@@ -915,8 +918,7 @@ static void mapping_dump( struct object *obj, int verbose )
 
 static struct object_type *mapping_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'S','e','c','t','i','o','n'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Section, sizeof(type_Section) };
     return get_object_type( &str );
 }
 
@@ -964,7 +966,11 @@ struct object *create_user_data_mapping( struct object *root, const struct unico
     if (!(mapping = create_mapping( root, name, OBJ_OPENIF, sizeof(KSHARED_USER_DATA),
                                     SEC_COMMIT, 0, FILE_READ_DATA | FILE_WRITE_DATA, NULL ))) return NULL;
     ptr = mmap( NULL, mapping->size, PROT_WRITE, MAP_SHARED, get_unix_fd( mapping->fd ), 0 );
-    if (ptr != MAP_FAILED) user_shared_data = ptr;
+    if (ptr != MAP_FAILED)
+    {
+        user_shared_data = ptr;
+        user_shared_data->SystemCallPad[0] = 1;
+    }
     return &mapping->obj;
 }
 
@@ -1089,6 +1095,35 @@ DECL_HANDLER(unmap_view)
     struct memory_view *view = find_mapped_view( current->process, req->base );
 
     if (view) free_memory_view( view );
+}
+
+/* get file handle from mapping by address */
+DECL_HANDLER(get_mapping_file)
+{
+    struct memory_view *view;
+    struct process *process;
+    struct file *file;
+
+    if (!(process = get_process_from_handle( req->process, 0 ))) return;
+
+    LIST_FOR_EACH_ENTRY( view, &process->views, struct memory_view, entry )
+        if (req->addr >= view->base && req->addr < view->base + view->size) break;
+
+    if (&view->entry == &process->views)
+    {
+        set_error( STATUS_NOT_MAPPED_VIEW );
+        release_object( process );
+        return;
+    }
+
+    if (view->fd && (file = create_file_for_fd_obj( view->fd, GENERIC_READ,
+                                                    FILE_SHARE_READ | FILE_SHARE_WRITE )))
+    {
+        reply->handle = alloc_handle( process, file, GENERIC_READ, 0 );
+        release_object( file );
+    }
+
+    release_object( process );
 }
 
 /* get a range of committed pages in a file mapping */

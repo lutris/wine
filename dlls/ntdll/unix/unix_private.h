@@ -68,6 +68,7 @@ extern unsigned int CDECL server_wait( const select_op_t *select_op, data_size_t
                                        const LARGE_INTEGER *timeout ) DECLSPEC_HIDDEN;
 extern unsigned int CDECL server_queue_process_apc( HANDLE process, const apc_call_t *call, apc_result_t *result ) DECLSPEC_HIDDEN;
 extern void CDECL server_send_fd( int fd ) DECLSPEC_HIDDEN;
+extern void CDECL server_remove_fds_from_cache_by_type( enum server_fd_type type ) DECLSPEC_HIDDEN;
 extern int CDECL server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
                                      int *needs_close, enum server_fd_type *type,
                                      unsigned int *options ) DECLSPEC_HIDDEN;

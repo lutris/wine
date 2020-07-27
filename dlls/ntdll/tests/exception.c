@@ -1643,6 +1643,8 @@ static void test_thread_context(void)
     ok( (char *)context.Eip >= (char *)pNtGetContextThread - 0x40000 &&
         (char *)context.Eip <= (char *)pNtGetContextThread + 0x40000,
         "wrong Eip %08x/%08x\n", context.Eip, (DWORD)pNtGetContextThread );
+    ok( *(WORD *)context.Eip == 0xc483 || *(WORD *)context.Eip == 0x08c2 || *(WORD *)context.Eip == 0x8dc3,
+        "expected 0xc483 or 0x08c2 or 0x8dc3, got %04x\n", *(WORD *)context.Eip );
     /* segment registers clear the high word */
     ok( context.SegCs == LOWORD(expect.SegCs), "wrong SegCs %08x/%08x\n", context.SegCs, expect.SegCs );
     ok( context.SegDs == LOWORD(expect.SegDs), "wrong SegDs %08x/%08x\n", context.SegDs, expect.SegDs );
@@ -2773,7 +2775,7 @@ static LONG CALLBACK outputdebugstring_vectored_handler(EXCEPTION_POINTERS *Exce
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-static void test_outputdebugstring(DWORD numexc, BOOL todo)
+static void test_outputdebugstring(DWORD numexc)
 {
     PVOID vectored_handler;
 
@@ -2789,7 +2791,6 @@ static void test_outputdebugstring(DWORD numexc, BOOL todo)
     outputdebugstring_exceptions = 0;
     OutputDebugStringA("Hello World");
 
-    todo_wine_if(todo)
     ok(outputdebugstring_exceptions == numexc, "OutputDebugStringA generated %d exceptions, expected %d\n",
        outputdebugstring_exceptions, numexc);
 
@@ -3546,9 +3547,9 @@ START_TEST(exception)
             run_rtlraiseexception_test(EXCEPTION_BREAKPOINT);
             run_rtlraiseexception_test(EXCEPTION_INVALID_HANDLE);
             test_stage = 3;
-            test_outputdebugstring(0, FALSE);
+            test_outputdebugstring(0);
             test_stage = 4;
-            test_outputdebugstring(2, TRUE); /* is this a Windows bug? */
+            test_outputdebugstring(2);
             test_stage = 5;
             test_ripevent(0);
             test_stage = 6;
@@ -3579,7 +3580,7 @@ START_TEST(exception)
     test_exceptions();
     test_rtlraiseexception();
     test_debug_registers();
-    test_outputdebugstring(1, FALSE);
+    test_outputdebugstring(1);
     test_ripevent(1);
     test_debug_service(1);
     test_breakpoint(1);
@@ -3617,7 +3618,7 @@ START_TEST(exception)
                                                                  "_setjmp" );
 
     test_debug_registers();
-    test_outputdebugstring(1, FALSE);
+    test_outputdebugstring(1);
     test_ripevent(1);
     test_debug_service(1);
     test_breakpoint(1);

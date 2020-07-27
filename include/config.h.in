@@ -49,6 +49,9 @@
 /* Define to 1 if you have the `atanhf' function. */
 #undef HAVE_ATANHF
 
+/* Define to 1 if you have the <attr/xattr.h> header file. */
+#undef HAVE_ATTR_XATTR_H
+
 /* Define to 1 if you have the <AudioToolbox/AudioConverter.h> header file. */
 #undef HAVE_AUDIOTOOLBOX_AUDIOCONVERTER_H
 
@@ -221,6 +224,9 @@
 /* Define to 1 if you have the `futimesat' function. */
 #undef HAVE_FUTIMESAT
 
+/* Define to 1 if you have the <gcrypt.h> header file. */
+#undef HAVE_GCRYPT_H
+
 /* Define to 1 if you have the `getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
 
@@ -280,6 +286,9 @@
 
 /* Define to 1 if you have the <gssapi/gssapi.h> header file. */
 #undef HAVE_GSSAPI_GSSAPI_H
+
+/* Define to 1 if you have the <gtk/gtk.h> header file. */
+#undef HAVE_GTK_GTK_H
 
 /* Define to 1 if you have the <ieeefp.h> header file. */
 #undef HAVE_IEEEFP_H
@@ -481,6 +490,9 @@
 
 /* Define to 1 if you have the <linux/rtnetlink.h> header file. */
 #undef HAVE_LINUX_RTNETLINK_H
+
+/* Define to 1 if you have the <linux/seccomp.h> header file. */
+#undef HAVE_LINUX_SECCOMP_H
 
 /* Define to 1 if you have the <linux/serial.h> header file. */
 #undef HAVE_LINUX_SERIAL_H
@@ -739,6 +751,12 @@
 
 /* Define to 1 if you have the `remquof' function. */
 #undef HAVE_REMQUOF
+
+/* Define to 1 if you have the `renameat' function. */
+#undef HAVE_RENAMEAT
+
+/* Define to 1 if you have the `renameat2' function. */
+#undef HAVE_RENAMEAT2
 
 /* Define to 1 if the system has the type `request_sense'. */
 #undef HAVE_REQUEST_SENSE
@@ -1006,6 +1024,9 @@
 /* Define to 1 if you have the <sys/event.h> header file. */
 #undef HAVE_SYS_EVENT_H
 
+/* Define to 1 if you have the <sys/extattr.h> header file. */
+#undef HAVE_SYS_EXTATTR_H
+
 /* Define to 1 if you have the <sys/filio.h> header file. */
 #undef HAVE_SYS_FILIO_H
 
@@ -1138,6 +1159,9 @@
 /* Define to 1 if you have the <sys/wait.h> header file. */
 #undef HAVE_SYS_WAIT_H
 
+/* Define to 1 if you have the <sys/xattr.h> header file. */
+#undef HAVE_SYS_XATTR_H
+
 /* Define to 1 if you have the `tcdrain' function. */
 #undef HAVE_TCDRAIN
 
@@ -1174,11 +1198,20 @@
 /* Define to 1 if you have the <utime.h> header file. */
 #undef HAVE_UTIME_H
 
+/* Define if you have the libva development files */
+#undef HAVE_VAAPI
+
 /* Define to 1 if you have the <valgrind/memcheck.h> header file. */
 #undef HAVE_VALGRIND_MEMCHECK_H
 
 /* Define to 1 if you have the <valgrind/valgrind.h> header file. */
 #undef HAVE_VALGRIND_VALGRIND_H
+
+/* Define to 1 if you have the <va/va_drm.h> header file. */
+#undef HAVE_VA_VA_DRM_H
+
+/* Define to 1 if you have the <va/va_x11.h> header file. */
+#undef HAVE_VA_VA_X11_H
 
 /* Define to 1 if you have the <X11/extensions/shape.h> header file. */
 #undef HAVE_X11_EXTENSIONS_SHAPE_H
@@ -1276,6 +1309,9 @@
 /* Define to 1 if you have the `_spawnvp' function. */
 #undef HAVE__SPAWNVP
 
+/* Define to 1 if you have the `__builtin_ctzl' built-in function. */
+#undef HAVE___BUILTIN_CTZL
+
 /* Define to 1 if you have the `__builtin_popcount' built-in function. */
 #undef HAVE___BUILTIN_POPCOUNT
 
@@ -1315,6 +1351,9 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
+/* Define to the soname of the libcairo library. */
+#undef SONAME_LIBCAIRO
+
 /* Define to the soname of the libcapi20 library. */
 #undef SONAME_LIBCAPI20
 
@@ -1339,6 +1378,9 @@
 /* Define to the soname of the libfreetype library. */
 #undef SONAME_LIBFREETYPE
 
+/* Define to the soname of the libgcrypt library. */
+#undef SONAME_LIBGCRYPT
+
 /* Define to the soname of the libGL library. */
 #undef SONAME_LIBGL
 
@@ -1351,11 +1393,17 @@
 /* Define to the soname of the libgnutls library. */
 #undef SONAME_LIBGNUTLS
 
+/* Define to the soname of the libgobject-2.0 library. */
+#undef SONAME_LIBGOBJECT_2_0
+
 /* Define to the soname of the libgsm library. */
 #undef SONAME_LIBGSM
 
 /* Define to the soname of the libgssapi_krb5 library. */
 #undef SONAME_LIBGSSAPI_KRB5
+
+/* Define to the soname of the libgtk-3 library. */
+#undef SONAME_LIBGTK_3
 
 /* Define to the soname of the libhal library. */
 #undef SONAME_LIBHAL
@@ -1381,8 +1429,14 @@
 /* Define to the soname of the libopenal library. */
 #undef SONAME_LIBOPENAL
 
+/* Define to the soname of the libOpenCL library. */
+#undef SONAME_LIBOPENCL
+
 /* Define to the soname of the libOSMesa library. */
 #undef SONAME_LIBOSMESA
+
+/* Define to the soname of the libpcap library. */
+#undef SONAME_LIBPCAP
 
 /* Define to the soname of the libpng library. */
 #undef SONAME_LIBPNG
@@ -1398,6 +1452,15 @@
 
 /* Define to the soname of the libv4l2 library. */
 #undef SONAME_LIBV4L2
+
+/* Define to the soname of the libva library. */
+#undef SONAME_LIBVA
+
+/* Define to the soname of the libva-drm library. */
+#undef SONAME_LIBVA_DRM
+
+/* Define to the soname of the libva-x11 library. */
+#undef SONAME_LIBVA_X11
 
 /* Define to the soname of the libvkd3d library. */
 #undef SONAME_LIBVKD3D
@@ -1443,6 +1506,9 @@
 
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
+
+/* Define if xattr functions take additional arguments (Mac OS X) */
+#undef XATTR_ADDITIONAL_OPTIONS
 
 /* Define to 1 if the X Window System is missing or not being used. */
 #undef X_DISPLAY_MISSING

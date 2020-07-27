@@ -1374,6 +1374,12 @@ NTSTATUS key_import_ecc( struct key *key, UCHAR *input, ULONG len )
     ERR( "support for keys not available at build time\n" );
     return STATUS_NOT_IMPLEMENTED;
 }
+
+NTSTATUS compute_secret_ecc (struct key *pubkey_in, struct key *privkey_in, struct secret *secret)
+{
+    ERR( "support for secrets not available at build time\n" );
+    return STATUS_NOT_IMPLEMENTED;
+}
 #endif
 
 NTSTATUS WINAPI BCryptGenerateSymmetricKey( BCRYPT_ALG_HANDLE algorithm, BCRYPT_KEY_HANDLE *handle,
@@ -1786,27 +1792,191 @@ NTSTATUS WINAPI BCryptDeriveKeyPBKDF2( BCRYPT_ALG_HANDLE handle, UCHAR *pwd, ULO
     return STATUS_SUCCESS;
 }
 
-NTSTATUS WINAPI BCryptSecretAgreement(BCRYPT_KEY_HANDLE handle, BCRYPT_KEY_HANDLE key, BCRYPT_SECRET_HANDLE *secret, ULONG flags)
+NTSTATUS WINAPI BCryptSecretAgreement(BCRYPT_KEY_HANDLE hPrivKey, BCRYPT_KEY_HANDLE hPubKey, BCRYPT_SECRET_HANDLE *secret_out, ULONG flags)
 {
-    FIXME( "%p, %p, %p, %08x\n", handle, key, secret, flags );
+    struct key *privkey = hPrivKey;
+    struct key *pubkey = hPubKey;
+    struct secret *secret;
+    NTSTATUS status;
 
-    if(secret)
-        *secret = (BCRYPT_SECRET_HANDLE *)0xDEADFEED;
+    TRACE( "%p, %p, %p, %08x\n", hPrivKey, hPubKey, secret_out, flags );
+
+    secret = heap_alloc( sizeof(*secret) );
+
+    if ((status = compute_secret_ecc(privkey, pubkey, secret)))
+    {
+        heap_free(secret);
+        *secret_out = NULL;
+    }
+    else
+    {
+        *secret_out = secret;
+    }
+
+    return status;
+}
+
+NTSTATUS WINAPI BCryptDestroySecret(BCRYPT_SECRET_HANDLE hSecret)
+{
+    struct secret *secret = hSecret;
+
+    TRACE( "%p\n", hSecret );
+
+    if (!hSecret)
+    {
+        return STATUS_INVALID_HANDLE;
+    }
+
+    heap_free(secret->data);
+    heap_free(secret);
 
     return STATUS_SUCCESS;
 }
 
-NTSTATUS WINAPI BCryptDestroySecret(BCRYPT_SECRET_HANDLE secret)
-{
-    FIXME( "%p\n", secret );
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS WINAPI BCryptDeriveKey(BCRYPT_SECRET_HANDLE secret, LPCWSTR kdf, BCryptBufferDesc *parameter,
+NTSTATUS WINAPI BCryptDeriveKey(BCRYPT_SECRET_HANDLE hSecret, LPCWSTR deriv_func, BCryptBufferDesc *parameter,
         PUCHAR derived, ULONG derived_size, ULONG *result, ULONG flags)
 {
-    FIXME( "%p, %s, %p, %p, %d, %p, %08x\n", secret, debugstr_w(kdf), parameter, derived, derived_size, result, flags );
-    return STATUS_INTERNAL_ERROR;
+    struct secret *secret = hSecret;
+
+    TRACE( "%p, %s, %p, %p, %d, %p, %08x\n", secret, debugstr_w(deriv_func), parameter, derived, derived_size, result, flags );
+
+    if (!hSecret)
+    {
+        return STATUS_INVALID_HANDLE;
+    }
+
+    if (flags)
+    {
+        FIXME("flags ignored: %08x\n", flags);
+    }
+
+    if (!(strcmpW(deriv_func, BCRYPT_KDF_HASH)))
+    {
+        unsigned int i;
+        BCryptBuffer *hash_algorithm = NULL;
+        BCryptBuffer *secret_prepend = NULL;
+        BCryptBuffer *secret_append = NULL;
+        enum alg_id hash_alg_id;
+        ULONG hash_length;
+        struct hash_impl hash;
+        NTSTATUS status;
+
+        if (parameter)
+        {
+            for (i = 0; i < parameter->cBuffers; i++)
+            {
+                BCryptBuffer *cur_buffer = &parameter->pBuffers[i];
+                switch(cur_buffer->BufferType)
+                {
+                case KDF_HASH_ALGORITHM:
+                    if (hash_algorithm)
+                        FIXME("Duplicate KDF_HASH_ALGORITHM, untested\n");
+                    hash_algorithm = cur_buffer;
+                    break;
+                case KDF_SECRET_PREPEND:
+                    if (secret_prepend)
+                        FIXME("Multiple prefixes unsupported\n");
+                    secret_prepend = cur_buffer;
+                    break;
+                case KDF_SECRET_APPEND:
+                    if (secret_append)
+                        FIXME("Multiple suffixes unsupported\n");
+                    secret_append = cur_buffer;
+                    break;
+                default:
+                    FIXME("Unsupported BCRYPT_KDF_HASH parameter type %x\n", cur_buffer->BufferType);
+                    break;
+                }
+            }
+        }
+
+        if (!(hash_algorithm))
+            hash_alg_id = ALG_ID_SHA1;
+        else
+        {
+            for (i = 0; i < ARRAY_SIZE( builtin_algorithms ); i++)
+            {
+                if (!strcmpW( hash_algorithm->pvBuffer, builtin_algorithms[i].name))
+                {
+                    hash_alg_id = i;
+                    break;
+                }
+            }
+            if (i == ARRAY_SIZE(builtin_algorithms))
+            {
+                WARN("Algorithm %s not found\n", debugstr_w(hash_algorithm->pvBuffer));
+                return STATUS_NOT_SUPPORTED;
+            }
+            if (builtin_algorithms[hash_alg_id].class != BCRYPT_HASH_INTERFACE)
+            {
+                return STATUS_NOT_SUPPORTED;
+            }
+        }
+
+        hash_length = builtin_algorithms[hash_alg_id].hash_length;
+
+        if (!derived)
+        {
+            *result = hash_length;
+            return STATUS_SUCCESS;
+        }
+
+        if ((status = hash_init(&hash, hash_alg_id)))
+        {
+            return status;
+        }
+
+        if (secret_prepend)
+        {
+            hash_update(&hash, hash_alg_id, secret_prepend->pvBuffer, secret_prepend->cbBuffer);
+        }
+
+        hash_update(&hash, hash_alg_id, secret->data, secret->len);
+
+        if (secret_append)
+        {
+            hash_update(&hash, hash_alg_id, secret_append->pvBuffer, secret_append->cbBuffer);
+        }
+
+        if (derived_size >= hash_length)
+        {
+            hash_finish(&hash, hash_alg_id, derived, derived_size);
+            *result = hash_length;
+        }
+        else
+        {
+            UCHAR *output = heap_alloc(hash_length);
+            hash_finish(&hash, hash_alg_id, output, hash_length);
+            memcpy(derived, output, derived_size);
+            heap_free(output);
+            *result = derived_size;
+        }
+
+        return STATUS_SUCCESS;
+    }
+    else
+    if (!(strcmpW(deriv_func, BCRYPT_KDF_RAW_SECRET)))
+    {
+        ULONG n;
+        ULONG secret_length = secret->len;
+
+        if (!derived)
+        {
+            *result = secret_length;
+            return STATUS_SUCCESS;
+        }
+
+        /* outputs in little endian for some reason */
+        for (n = 0; n < secret_length && n < derived_size; n++)
+        {
+            derived[n] = secret->data[secret_length - n - 1];
+        }
+
+        *result = n;
+        return STATUS_SUCCESS;
+    }
+    FIXME( "Derivation function %s not supported.\n", debugstr_w(deriv_func) );
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
@@ -1818,6 +1988,9 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         DisableThreadLibraryCalls( hinst );
 #ifdef HAVE_GNUTLS_CIPHER_INIT
         gnutls_initialize();
+#ifdef SONAME_LIBGCRYPT
+        gcrypt_initialize();
+#endif
 #endif
         break;
 
@@ -1825,6 +1998,9 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         if (reserved) break;
 #ifdef HAVE_GNUTLS_CIPHER_INIT
         gnutls_uninitialize();
+#ifdef SONAME_LIBGCRYPT
+    gcrypt_uninitialize();
+#endif
 #endif
         break;
     }

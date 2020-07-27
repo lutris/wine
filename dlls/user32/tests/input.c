@@ -46,11 +46,13 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
 #include <assert.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
+#include "wingdi.h"
 #include "winnls.h"
 #include "ddk/hidsdi.h"
 
@@ -82,6 +84,7 @@ static int (WINAPI *pGetMouseMovePointsEx) (UINT, LPMOUSEMOVEPOINT, LPMOUSEMOVEP
 static UINT (WINAPI *pGetRawInputDeviceList) (PRAWINPUTDEVICELIST, PUINT, UINT);
 static UINT (WINAPI *pGetRawInputDeviceInfoW) (HANDLE, UINT, void *, UINT *);
 static UINT (WINAPI *pGetRawInputDeviceInfoA) (HANDLE, UINT, void *, UINT *);
+static int  (WINAPI *pGetWindowRgnBox)(HWND, LPRECT);
 
 #define MAXKEYEVENTS 12
 #define MAXKEYMESSAGES MAXKEYEVENTS /* assuming a key event generates one
@@ -159,6 +162,7 @@ static void init_function_pointers(void)
     GET_PROC(GetRawInputDeviceList);
     GET_PROC(GetRawInputDeviceInfoW);
     GET_PROC(GetRawInputDeviceInfoA);
+    GET_PROC(GetWindowRgnBox);
 #undef GET_PROC
 }
 
@@ -1819,6 +1823,330 @@ static void test_RegisterRawInputDevices(void)
     DestroyWindow(hwnd);
 }
 
+static int rawinput_received;
+static int rawinput_received_foreground;
+static int rawinput_motion_x;
+static int rawinput_motion_y;
+static HANDLE rawinput_wndproc_done;
+
+static LRESULT CALLBACK rawinput_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    UINT ret, raw_size;
+    RAWINPUT raw;
+
+    if (msg == WM_INPUT)
+    {
+        rawinput_received++;
+
+        ok(wparam == RIM_INPUT || wparam == RIM_INPUTSINK, "Unexpected wparam: %lu\n", wparam);
+        if (wparam == RIM_INPUT)
+            rawinput_received_foreground++;
+
+        ret = GetRawInputData((HRAWINPUT)lparam, RID_INPUT, NULL, &raw_size, sizeof(RAWINPUTHEADER));
+        ok(ret == 0, "GetRawInputData failed\n");
+        ok(raw_size <= sizeof(raw), "Unexpected rawinput data size: %u", raw_size);
+
+        if (raw_size <= sizeof(raw))
+        {
+            ret = GetRawInputData((HRAWINPUT)lparam, RID_INPUT, &raw, &raw_size, sizeof(RAWINPUTHEADER));
+            ok(ret > 0 && ret != (UINT)-1, "GetRawInputData failed\n");
+            ok(raw.header.dwType == RIM_TYPEMOUSE, "Unexpected rawinput type: %u\n", raw.header.dwType);
+
+            if (raw.header.dwType == RIM_TYPEMOUSE)
+            {
+                ok(!(raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE), "Unexpected absolute rawinput motion\n");
+                ok(!(raw.data.mouse.usFlags & MOUSE_VIRTUAL_DESKTOP), "Unexpected virtual desktop rawinput motion\n");
+                rawinput_motion_x += raw.data.mouse.lLastX;
+                rawinput_motion_y += raw.data.mouse.lLastY;
+            }
+        }
+    }
+
+    if (msg == WM_USER)
+        SetEvent(rawinput_wndproc_done);
+
+    return DefWindowProcA(hwnd, msg, wparam, lparam);
+}
+
+struct rawinput_mouse_thread_params
+{
+    int step;
+    HWND window;
+    HANDLE ready;
+    HANDLE start;
+    const char *argv0;
+};
+
+static void rawinput_mouse_process(void)
+{
+    HWND window;
+    HANDLE start_event, stop_event;
+
+    start_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "test_rawinput_mouse_start");
+    ok(start_event != 0, "OpenEventA failed, error: %u\n", GetLastError());
+
+    stop_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "test_rawinput_mouse_stop");
+    ok(stop_event != 0, "OpenEventA failed, error: %u\n", GetLastError());
+
+    window = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP, 200, 100, 100, 100, 0, NULL, NULL, NULL);
+    ok(window != 0, "CreateWindow failed\n");
+
+    ShowWindow(window, SW_SHOW);
+    SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
+    SetForegroundWindow(window);
+    UpdateWindow(window);
+    empty_message_queue();
+
+    SetEvent(start_event);
+    while (MsgWaitForMultipleObjects(1, &stop_event, FALSE, INFINITE, QS_ALLINPUT) != WAIT_OBJECT_0)
+	    empty_message_queue();
+
+    DestroyWindow(window);
+}
+
+static DWORD WINAPI rawinput_mouse_thread(void *arg)
+{
+    struct rawinput_mouse_thread_params *params = arg;
+    RECT rect_105 = { 105, 105, 105, 105 };
+    RECT rect_110 = { 110, 110, 110, 110 };
+    HWND window;
+    int i;
+    char path[MAX_PATH];
+    PROCESS_INFORMATION process_info;
+    STARTUPINFOA startup_info;
+    HANDLE start_event, stop_event;
+    BOOL ret;
+
+    while (WaitForSingleObject(params->ready, INFINITE) == 0)
+    {
+        ResetEvent(params->ready);
+        SetEvent(params->start);
+
+        switch (params->step)
+        {
+            case 0:
+            case 1:
+            case 2:
+                mouse_event(MOUSEEVENTF_MOVE, -1, 0, 0, 0);
+                mouse_event(MOUSEEVENTF_MOVE, 0, -1, 0, 0);
+                break;
+            case 3:
+                for (i = 0; i < 10; ++i)
+                {
+                    ClipCursor(&rect_105);
+                    Sleep(5);
+                    ClipCursor(&rect_110);
+                    Sleep(5);
+                    ClipCursor(NULL);
+                    Sleep(5);
+                }
+                break;
+            case 4:
+                for (i = 0; i < 10; ++i)
+                {
+                    ClipCursor(&rect_110);
+                    Sleep(5);
+                    mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
+                    ClipCursor(NULL);
+                    Sleep(5);
+                    mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
+                    ClipCursor(&rect_110);
+                    ClipCursor(NULL);
+                    Sleep(5);
+                }
+                break;
+            case 5:
+            case 6:
+                window = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP, 100, 100, 100, 100, 0, NULL, NULL, NULL);
+                ok(window != 0, "%d: CreateWindow failed\n", params->step);
+
+                ShowWindow(window, SW_SHOW);
+                SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
+                SetForegroundWindow(window);
+                UpdateWindow(window);
+                empty_message_queue();
+
+                mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
+                SendMessageA(GetForegroundWindow(), WM_USER, 0, 0);
+                mouse_event(MOUSEEVENTF_MOVE, -1, -1, 0, 0);
+                SendMessageA(GetForegroundWindow(), WM_USER, 0, 0);
+
+                empty_message_queue();
+
+                DestroyWindow(window);
+                break;
+            case 7:
+            case 8:
+                start_event = CreateEventA(NULL, 0, 0, "test_rawinput_mouse_start");
+                ok(start_event != 0, "%d: CreateEventA failed, error %u\n", params->step, GetLastError());
+
+                stop_event = CreateEventA(NULL, 0, 0, "test_rawinput_mouse_stop");
+                ok(stop_event != 0, "%d: CreateEventA failed, error %u\n", params->step, GetLastError());
+
+                memset(&startup_info, 0, sizeof(startup_info));
+                startup_info.cb = sizeof(startup_info);
+                startup_info.dwFlags = STARTF_USESHOWWINDOW;
+                startup_info.wShowWindow = SW_SHOWNORMAL;
+
+                sprintf(path, "%s input test_rawinput_mouse", params->argv0);
+                ret = CreateProcessA(NULL, path, NULL, NULL, TRUE, 0, NULL, NULL, &startup_info, &process_info );
+                ok(ret, "%d: CreateProcess '%s' failed err %u.\n", params->step, path, GetLastError());
+
+                ret = WaitForSingleObject(start_event, 5000);
+                ok(ret == WAIT_OBJECT_0, "%d: WaitForSingleObject failed\n", params->step);
+
+                mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
+                SendMessageA(GetForegroundWindow(), WM_USER, 0, 0);
+                mouse_event(MOUSEEVENTF_MOVE, -1, -1, 0, 0);
+                SendMessageA(GetForegroundWindow(), WM_USER, 0, 0);
+
+                SetEvent(stop_event);
+
+                winetest_wait_child_process(process_info.hProcess);
+                CloseHandle(process_info.hProcess);
+                CloseHandle(process_info.hThread);
+                CloseHandle(start_event);
+                CloseHandle(stop_event);
+                break;
+            default:
+                return 0;
+        }
+
+        PostMessageA(params->window, WM_USER, 0, 0);
+    }
+
+    return 0;
+}
+
+struct rawinput_mouse_test
+{
+    BOOL register_device;
+    BOOL register_window;
+    DWORD register_flags;
+    int expect_received;
+    int expect_received_foreground;
+    int expect_motion_x;
+    int expect_motion_y;
+    BOOL todo;
+};
+
+static void test_rawinput_mouse(const char *argv0)
+{
+    struct rawinput_mouse_thread_params params;
+    RAWINPUTDEVICE raw_devices[1];
+    HANDLE thread;
+    DWORD ret;
+    int i;
+
+    struct rawinput_mouse_test tests[] =
+    {
+        { FALSE, FALSE, 0, 0, 0, 0, 0, FALSE },
+        { TRUE, FALSE, 0, 2, 2, -1, -1, FALSE },
+        { TRUE, TRUE, 0, 2, 2, -1, -1, FALSE },
+
+        /* clip cursor tests */
+        { TRUE, TRUE, 0, 0, 0, 0, 0, FALSE },
+        { TRUE, TRUE, 0, 20, 20, 20, 20, FALSE },
+
+        /* same-process foreground tests */
+        { TRUE, TRUE, 0, 2, 2, 0, 0, FALSE },
+        { TRUE, TRUE, RIDEV_INPUTSINK, 2, 2, 0, 0, FALSE },
+
+        /* cross-process foreground tests */
+        { TRUE, TRUE, 0, 0, 0, 0, 0, FALSE },
+        { TRUE, TRUE, RIDEV_INPUTSINK, 2, 0, 0, 0, TRUE },
+    };
+
+    mouse_event(MOUSEEVENTF_ABSOLUTE, 100, 100, 0, 0);
+    SetCursorPos(100, 100);
+
+    params.argv0 = argv0;
+
+    rawinput_wndproc_done = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok(rawinput_wndproc_done != NULL, "CreateEvent failed\n");
+
+    params.window = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP, 100, 100, 100, 100, 0, NULL, NULL, NULL);
+    ok(params.window != 0, "CreateWindow failed\n");
+
+    ShowWindow(params.window, SW_SHOW);
+    SetWindowPos(params.window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
+    SetForegroundWindow(params.window);
+    UpdateWindow(params.window);
+    empty_message_queue();
+
+    SetWindowLongPtrA(params.window, GWLP_WNDPROC, (LONG_PTR)rawinput_wndproc);
+
+    params.step = 0;
+    params.ready = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok(params.ready != NULL, "CreateEvent failed\n");
+
+    params.start = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok(params.start != NULL, "CreateEvent failed\n");
+
+    thread = CreateThread(NULL, 0, rawinput_mouse_thread, &params, 0, NULL);
+    ok(thread != NULL, "CreateThread failed\n");
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        rawinput_received = 0;
+        rawinput_received_foreground = 0;
+        rawinput_motion_x = 0;
+        rawinput_motion_y = 0;
+
+        raw_devices[0].usUsagePage = 0x01;
+        raw_devices[0].usUsage = 0x02;
+        raw_devices[0].dwFlags = tests[i].register_flags;
+        raw_devices[0].hwndTarget = tests[i].register_window ? params.window : 0;
+
+        if (tests[i].register_device)
+        {
+            SetLastError(0xdeadbeef);
+            ret = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
+            ok(ret, "%d: RegisterRawInputDevices failed\n", i);
+            ok(GetLastError() == 0xdeadbeef, "%d: RegisterRawInputDevices returned %08x\n", i, GetLastError());
+        }
+
+        params.step = i;
+        SetEvent(params.ready);
+
+        WaitForSingleObject(params.start, INFINITE);
+        ResetEvent(params.start);
+
+        while (MsgWaitForMultipleObjects(1, &rawinput_wndproc_done, FALSE, INFINITE, QS_ALLINPUT) != WAIT_OBJECT_0)
+            empty_message_queue();
+        ResetEvent(rawinput_wndproc_done);
+
+        /* Wine is sometimes passing some of the conditions, but not always, let's test
+         * all at once in the todo block, there should be at least one that fails. */
+        todo_wine_if(tests[i].todo)
+        ok(rawinput_received == tests[i].expect_received &&
+           rawinput_received_foreground == tests[i].expect_received_foreground &&
+           rawinput_motion_x == tests[i].expect_motion_x &&
+           rawinput_motion_y == tests[i].expect_motion_y,
+           "%d: Unexpected rawinput results: received %d, %d in foreground, motion is %dx%d\n",
+           i, rawinput_received, rawinput_received_foreground, rawinput_motion_x, rawinput_motion_y);
+
+        if (tests[i].register_device)
+        {
+            raw_devices[0].dwFlags = RIDEV_REMOVE;
+            raw_devices[0].hwndTarget = 0;
+
+            SetLastError(0xdeadbeef);
+            ret = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
+            ok(ret, "%d: RegisterRawInputDevices failed\n", i);
+            ok(GetLastError() == 0xdeadbeef, "%d: RegisterRawInputDevices returned %08x\n", i, GetLastError());
+        }
+    }
+
+    params.step = -1;
+    SetEvent(params.ready);
+    WaitForSingleObject(thread, INFINITE);
+
+    CloseHandle(params.start);
+    CloseHandle(params.ready);
+    CloseHandle(thread);
+}
+
 static void test_key_map(void)
 {
     HKL kl = GetKeyboardLayout(0);
@@ -2217,6 +2545,23 @@ static DWORD WINAPI create_static_win(void *arg)
     return 0;
 }
 
+static void get_dc_region(RECT *region, HWND hwnd, DWORD flags)
+{
+    int region_type;
+    HRGN hregion;
+    HDC hdc;
+
+    hdc = GetDCEx(hwnd, 0, flags);
+    ok(hdc != NULL, "GetDCEx failed\n");
+    hregion = CreateRectRgn(40, 40, 60, 60);
+    ok(hregion != NULL, "CreateRectRgn failed\n");
+    GetRandomRgn(hdc, hregion, SYSRGN);
+    region_type = GetRgnBox(hregion, region);
+    ok(region_type == SIMPLEREGION, "expected SIMPLEREGION, got %d\n", region_type);
+    DeleteObject(hregion);
+    ReleaseDC(hwnd, hdc);
+}
+
 static void test_Input_mouse(void)
 {
     BOOL got_button_down, got_button_up;
@@ -2224,7 +2569,11 @@ static void test_Input_mouse(void)
     struct thread_data thread_data;
     HANDLE thread;
     DWORD thread_id;
+    WNDCLASSA wclass;
     POINT pt, pt_org;
+    int region_type;
+    HRGN hregion;
+    RECT region;
     MSG msg;
     BOOL ret;
 
@@ -2327,8 +2676,8 @@ static void test_Input_mouse(void)
         }
     }
     ok(hittest_no && hittest_no<50, "expected WM_NCHITTEST message\n");
-    todo_wine ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
-    todo_wine ok(got_button_up, "expected WM_LBUTTONUP message\n");
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
     DestroyWindow(static_win);
 
     /* click on HTTRANSPARENT top-level window that belongs to other thread */
@@ -2438,6 +2787,247 @@ static void test_Input_mouse(void)
     ok(got_button_up, "expected WM_LBUTTONUP message\n");
     DestroyWindow(hwnd);
     ok(ReleaseCapture(), "ReleaseCapture failed\n");
+
+    wclass.style         = 0;
+    wclass.lpfnWndProc   = WndProc;
+    wclass.cbClsExtra    = 0;
+    wclass.cbWndExtra    = 0;
+    wclass.hInstance     = GetModuleHandleA(NULL);
+    wclass.hIcon         = LoadIconA(0, (LPCSTR)IDI_APPLICATION);
+    wclass.hCursor       = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+    wclass.hbrBackground = CreateSolidBrush(RGB(128, 128, 128));
+    wclass.lpszMenuName  = NULL;
+    wclass.lpszClassName = "InputLayeredTestClass";
+    RegisterClassA( &wclass );
+
+    /* click through layered window with alpha channel / color key */
+    hwnd = CreateWindowA(wclass.lpszClassName, "InputLayeredTest",
+            WS_VISIBLE | WS_POPUP, 100, 100, 100, 100, button_win, NULL, NULL, NULL);
+    ok(hwnd != NULL, "CreateWindowEx failed\n");
+
+    static_win = CreateWindowA("static", "Title", WS_VISIBLE | WS_CHILD,
+                          10, 10, 20, 20, hwnd, NULL, NULL, NULL);
+    ok(static_win != NULL, "CreateWindowA failed %u\n", GetLastError());
+
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowLongA(hwnd, GWL_EXSTYLE, GetWindowLongA(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED);
+    ret = SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    ok(ret, "SetLayeredWindowAttributes failed\n");
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    get_dc_region(&region, hwnd, DCX_PARENTCLIP);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, hwnd, DCX_WINDOW | DCX_USESTYLE);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, hwnd, DCX_USESTYLE);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, static_win, DCX_PARENTCLIP);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, static_win, DCX_WINDOW | DCX_USESTYLE);
+    ok(region.left == 110 && region.top == 110 && region.right == 130 && region.bottom == 130,
+       "expected region (110,110)-(130,130), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, static_win, DCX_USESTYLE);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    ret = SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+    ok(ret, "SetLayeredWindowAttributes failed\n");
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down || broken(!got_button_down), "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    ret = SetLayeredWindowAttributes(hwnd, RGB(0, 255, 0), 255, LWA_ALPHA | LWA_COLORKEY);
+    ok(ret, "SetLayeredWindowAttributes failed\n");
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    ret = SetLayeredWindowAttributes(hwnd, RGB(128, 128, 128), 0, LWA_COLORKEY);
+    ok(ret, "SetLayeredWindowAttributes failed\n");
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            todo_wine
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            todo_wine
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    SetWindowLongA(hwnd, GWL_EXSTYLE, GetWindowLongA(hwnd, GWL_EXSTYLE) & ~WS_EX_LAYERED);
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    hregion = CreateRectRgn(0, 0, 10, 10);
+    ok(hregion != NULL, "CreateRectRgn failed\n");
+    ret = SetWindowRgn(hwnd, hregion, TRUE);
+    ok(ret, "SetWindowRgn failed\n");
+    DeleteObject(hregion);
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(1000);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == SIMPLEREGION, "expected SIMPLEREGION, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    DestroyWindow(static_win);
+    DestroyWindow(hwnd);
     SetCursorPos(pt_org.x, pt_org.y);
 
     CloseHandle(thread_data.start_event);
@@ -3010,12 +3600,55 @@ static void test_UnregisterDeviceNotification(void)
     ok(ret == FALSE, "Unregistering NULL Device Notification returned: %d\n", ret);
 }
 
+static void test_GetKeyboardLayoutList(void)
+{
+    int cnt, cnt2;
+    HKL *layouts;
+    ULONG_PTR baselayout;
+    LANGID langid;
+
+    baselayout = GetUserDefaultLCID();
+    langid = PRIMARYLANGID(LANGIDFROMLCID(baselayout));
+    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
+        baselayout = MAKELONG( baselayout, 0xe001 ); /* IME */
+    else
+        baselayout |= baselayout << 16;
+
+    cnt = GetKeyboardLayoutList(0, NULL);
+    /* Most users will not have more than a few keyboard layouts installed at a time. */
+    ok(cnt > 0 && cnt < 10, "Layout count %d\n", cnt);
+    if (cnt > 0)
+    {
+        layouts = HeapAlloc(GetProcessHeap(), 0, sizeof(*layouts) * cnt );
+
+        cnt2 = GetKeyboardLayoutList(cnt, layouts);
+        ok(cnt == cnt2, "wrong value %d!=%d\n", cnt, cnt2);
+        for(cnt = 0; cnt < cnt2; cnt++)
+        {
+            if(layouts[cnt] == (HKL)baselayout)
+                break;
+        }
+        ok(cnt < cnt2, "Didnt find current keyboard\n");
+
+        HeapFree(GetProcessHeap(), 0, layouts);
+    }
+}
+
 START_TEST(input)
 {
+    char **argv;
+    int argc;
     POINT pos;
 
     init_function_pointers();
     GetCursorPos( &pos );
+
+    argc = winetest_get_mainargs(&argv);
+    if (argc >= 3 && strcmp(argv[2], "test_rawinput_mouse") == 0)
+    {
+        rawinput_mouse_process();
+        return;
+    }
 
     test_Input_blackbox();
     test_Input_whitebox();
@@ -3033,7 +3666,9 @@ START_TEST(input)
     test_GetKeyState();
     test_OemKeyScan();
     test_GetRawInputData();
+    test_GetKeyboardLayoutList();
     test_RegisterRawInputDevices();
+    test_rawinput_mouse(argv[0]);
 
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx();

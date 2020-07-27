@@ -76,10 +76,26 @@ static NTSTATUS (WINAPI *pNtQuerySystemTime)( LARGE_INTEGER * );
 static NTSTATUS (WINAPI *pRtlWaitOnAddress)( const void *, const void *, SIZE_T, const LARGE_INTEGER * );
 static void     (WINAPI *pRtlWakeAddressAll)( const void * );
 static void     (WINAPI *pRtlWakeAddressSingle)( const void * );
+static NTSTATUS (WINAPI *pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 
 #define KEYEDEVENT_WAIT       0x0001
 #define KEYEDEVENT_WAKE       0x0002
 #define KEYEDEVENT_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | 0x0003)
+
+#define ROUND_UP(value, alignment) (((value) + ((alignment) - 1)) & ~((alignment)-1))
+
+static LPCSTR wine_dbgstr_us( const UNICODE_STRING *us )
+{
+    if (!us) return "(null)";
+    return wine_dbgstr_wn(us->Buffer, us->Length / sizeof(WCHAR));
+}
+
+static inline int strncmpW( const WCHAR *str1, const WCHAR *str2, int n )
+{
+    if (n <= 0) return 0;
+    while ((--n > 0) && *str1 && (*str1 == *str2)) { str1++; str2++; }
+    return *str1 - *str2;
+}
 
 static void test_case_sensitive (void)
 {
@@ -1583,6 +1599,108 @@ static void test_query_object(void)
 
 }
 
+static BOOL winver_equal_or_newer(WORD major, WORD minor)
+{
+    OSVERSIONINFOEXW info = {sizeof(info)};
+    ULONGLONG mask = 0;
+
+    info.dwMajorVersion = major;
+    info.dwMinorVersion = minor;
+
+    VER_SET_CONDITION(mask, VER_MAJORVERSION, VER_GREATER_EQUAL);
+    VER_SET_CONDITION(mask, VER_MINORVERSION, VER_GREATER_EQUAL);
+
+    return VerifyVersionInfoW(&info, VER_MAJORVERSION | VER_MINORVERSION, mask);
+}
+
+static void test_query_object_types(void)
+{
+    static const WCHAR typeW[] = {'T','y','p','e'};
+    static const WCHAR eventW[] = {'E','v','e','n','t'};
+    SYSTEM_HANDLE_INFORMATION_EX *shi;
+    OBJECT_TYPES_INFORMATION *buffer;
+    OBJECT_TYPE_INFORMATION *type;
+    NTSTATUS status;
+    HANDLE handle;
+    BOOL found;
+    ULONG len, i, event_type_index = 0;
+
+    buffer = HeapAlloc( GetProcessHeap(), 0, sizeof(OBJECT_TYPES_INFORMATION) );
+    ok( buffer != NULL, "Failed to allocate memory\n" );
+
+    status = pNtQueryObject( NULL, ObjectTypesInformation, buffer, sizeof(OBJECT_TYPES_INFORMATION), &len );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %x\n", status );
+    ok( len, "len is zero\n");
+
+    buffer = HeapReAlloc( GetProcessHeap(), 0, buffer, len );
+    ok( buffer != NULL, "Failed to allocate memory\n" );
+
+    memset( buffer, 0, len );
+    status = pNtQueryObject( NULL, ObjectTypesInformation, buffer, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryObject failed %x\n", status );
+    ok( buffer->NumberOfTypes, "NumberOfTypes is zero\n" );
+
+    type = (OBJECT_TYPE_INFORMATION *)(buffer + 1);
+    for (i = 0; i < buffer->NumberOfTypes; i++)
+    {
+        USHORT length = type->TypeName.MaximumLength;
+        trace( "Type %u: %s\n", i, wine_dbgstr_us(&type->TypeName) );
+
+        if (i == 0)
+        {
+            ok( type->TypeName.Length == sizeof(typeW) && !strncmpW(typeW, type->TypeName.Buffer, 4),
+                "Expected 'Type' as first type, got %s\n", wine_dbgstr_us(&type->TypeName) );
+        }
+        if (type->TypeName.Length == sizeof(eventW) && !strncmpW(eventW, type->TypeName.Buffer, 5))
+        {
+            if (winver_equal_or_newer( 6, 2 ))
+                event_type_index = type->TypeIndex;
+            else
+                event_type_index = winver_equal_or_newer( 6, 1 ) ? i + 2 : i + 1;
+        }
+
+        type = (OBJECT_TYPE_INFORMATION *)ROUND_UP( (DWORD_PTR)(type + 1) + length, sizeof(DWORD_PTR) );
+    }
+
+    HeapFree( GetProcessHeap(), 0, buffer );
+
+    ok( event_type_index, "Could not find object type for events\n" );
+
+    handle = CreateEventA( NULL, FALSE, FALSE, NULL );
+    ok( handle != NULL, "Failed to create event\n" );
+
+    shi = HeapAlloc( GetProcessHeap(), 0, sizeof(*shi) );
+    ok( shi != NULL, "Failed to allocate memory\n" );
+
+    status = pNtQuerySystemInformation( SystemExtendedHandleInformation, shi, sizeof(*shi), &len );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status );
+
+    shi = HeapReAlloc( GetProcessHeap(), 0, shi, len );
+    ok( shi != NULL, "Failed to allocate memory\n" );
+
+    status = pNtQuerySystemInformation( SystemExtendedHandleInformation, shi, len, &len );
+    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status );
+
+    found = FALSE;
+    for (i = 0; i < shi->Count; i++)
+    {
+        if (shi->Handle[i].UniqueProcessId != GetCurrentProcessId())
+            continue;
+        if ((HANDLE)(ULONG_PTR)shi->Handle[i].HandleValue != handle)
+            continue;
+
+        ok( shi->Handle[i].ObjectTypeIndex == event_type_index, "Event type does not match: %u vs %u\n",
+            shi->Handle[i].ObjectTypeIndex, event_type_index );
+
+        found = TRUE;
+        break;
+    }
+    ok( found, "Expected to find event handle %p (pid %x) in handle list\n", handle, GetCurrentProcessId() );
+
+    HeapFree( GetProcessHeap(), 0, shi );
+    CloseHandle( handle );
+}
+
 static void test_type_mismatch(void)
 {
     HANDLE h;
@@ -2207,6 +2325,7 @@ START_TEST(om)
     pRtlWaitOnAddress       =  (void *)GetProcAddress(hntdll, "RtlWaitOnAddress");
     pRtlWakeAddressAll      =  (void *)GetProcAddress(hntdll, "RtlWakeAddressAll");
     pRtlWakeAddressSingle   =  (void *)GetProcAddress(hntdll, "RtlWakeAddressSingle");
+    pNtQuerySystemInformation = (void *)GetProcAddress(hntdll, "NtQuerySystemInformation");
 
     test_case_sensitive();
     test_namespace_pipe();
@@ -2215,6 +2334,7 @@ START_TEST(om)
     test_directory();
     test_symboliclink();
     test_query_object();
+    test_query_object_types();
     test_type_mismatch();
     test_event();
     test_mutant();

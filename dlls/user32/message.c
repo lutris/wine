@@ -2285,10 +2285,17 @@ static BOOL process_rawinput_message( MSG *msg, const struct hardware_msg_data *
 {
     struct user_thread_info *thread_info = get_user_thread_info();
     RAWINPUT *rawinput = thread_info->rawinput;
+    SIZE_T data_len = 0;
+
+    if (msg_data->rawinput.type == RIM_TYPEHID)
+    {
+        data_len = msg_data->rawinput.hid.length;
+        rawinput = thread_info->rawinput = HeapReAlloc( GetProcessHeap(), 0, rawinput, sizeof(*rawinput) + data_len );
+    }
 
     if (!rawinput)
     {
-        thread_info->rawinput = HeapAlloc( GetProcessHeap(), 0, sizeof(*rawinput) );
+        thread_info->rawinput = HeapAlloc( GetProcessHeap(), 0, sizeof(*rawinput) + data_len );
         if (!(rawinput = thread_info->rawinput)) return FALSE;
     }
 
@@ -2311,7 +2318,12 @@ static BOOL process_rawinput_message( MSG *msg, const struct hardware_msg_data *
         rawinput->header.hDevice = WINE_MOUSE_HANDLE;
         rawinput->header.wParam  = 0;
 
-        rawinput->data.mouse.usFlags           = MOUSE_MOVE_RELATIVE;
+        if (msg_data->flags & MOUSEEVENTF_ABSOLUTE)
+            rawinput->data.mouse.usFlags = MOUSE_MOVE_ABSOLUTE;
+        else
+            rawinput->data.mouse.usFlags = MOUSE_MOVE_RELATIVE;
+        if (msg_data->flags & MOUSEEVENTF_VIRTUALDESK)
+            rawinput->data.mouse.usFlags |= MOUSE_VIRTUAL_DESKTOP;
         rawinput->data.mouse.u.s.usButtonFlags = 0;
         rawinput->data.mouse.u.s.usButtonData  = 0;
         for (i = 1; i < ARRAY_SIZE(button_flags); ++i)
@@ -2382,6 +2394,16 @@ static BOOL process_rawinput_message( MSG *msg, const struct hardware_msg_data *
 
         rawinput->data.keyboard.Message          = msg_data->rawinput.kbd.message;
         rawinput->data.keyboard.ExtraInformation = msg_data->info;
+    }
+    else if (msg_data->rawinput.type == RIM_TYPEHID)
+    {
+        rawinput->header.dwSize  = FIELD_OFFSET(RAWINPUT, data.hid.bRawData) + data_len;
+        rawinput->header.hDevice = rawinput_handle_from_device_handle(wine_server_ptr_handle(msg_data->rawinput.hid.device));
+        rawinput->header.wParam  = 0;
+
+        rawinput->data.hid.dwSizeHid = data_len;
+        rawinput->data.hid.dwCount = 1;
+        memcpy(rawinput->data.hid.bRawData, msg_data + 1, data_len);
     }
     else
     {
@@ -2508,7 +2530,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     {
         HWND orig = msg->hwnd;
 
-        msg->hwnd = WINPOS_WindowFromPoint( msg->hwnd, msg->pt, &hittest );
+        msg->hwnd = WINPOS_WindowFromPoint( 0, msg->pt, &hittest );
         if (!msg->hwnd) /* As a heuristic, try the next window if it's the owner of orig */
         {
             HWND next = GetWindow( orig, GW_HWNDNEXT );
@@ -3343,10 +3365,10 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
     {
         req->win        = wine_server_user_handle( hwnd );
         req->flags      = flags;
-        req->input.type = input->type;
         switch (input->type)
         {
         case INPUT_MOUSE:
+            req->input.type        = HW_INPUT_MOUSE;
             req->input.mouse.x     = input->u.mi.dx;
             req->input.mouse.y     = input->u.mi.dy;
             req->input.mouse.data  = input->u.mi.mouseData;
@@ -3355,6 +3377,7 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
             req->input.mouse.info  = input->u.mi.dwExtraInfo;
             break;
         case INPUT_KEYBOARD:
+            req->input.type      = HW_INPUT_KEYBOARD;
             req->input.kbd.vkey  = input->u.ki.wVk;
             req->input.kbd.scan  = input->u.ki.wScan;
             req->input.kbd.flags = input->u.ki.dwFlags;
@@ -3362,6 +3385,7 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
             req->input.kbd.info  = input->u.ki.dwExtraInfo;
             break;
         case INPUT_HARDWARE:
+            req->input.type      = HW_INPUT_HARDWARE;
             req->input.hw.msg    = input->u.hi.uMsg;
             req->input.hw.lparam = MAKELONG( input->u.hi.wParamL, input->u.hi.wParamH );
             break;
@@ -4499,7 +4523,7 @@ UINT_PTR WINAPI SetCoalescableTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMER
 
     if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
 
-    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
+    timeout = min( max( 5, timeout ), USER_TIMER_MAXIMUM );
 
     SERVER_START_REQ( set_win_timer )
     {

@@ -1303,6 +1303,12 @@ int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
     return 0;
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
 
 /**********************************************************************
  *		signal_init_process

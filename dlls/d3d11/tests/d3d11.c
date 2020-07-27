@@ -1691,10 +1691,11 @@ static void release_test_context_(unsigned int line, struct d3d11_test_context *
     ok_(__FILE__, line)(!ref, "Device has %u references left.\n", ref);
 }
 
-#define draw_quad(context) draw_quad_vs_(__LINE__, context, NULL, 0)
-#define draw_quad_vs(a, b, c) draw_quad_vs_(__LINE__, a, b, c)
+#define draw_quad(context) draw_quad_vs_(__LINE__, context, NULL, 0, (context)->immediate_context)
+#define draw_quad_vs(a, b, c) draw_quad_vs_(__LINE__, a, b, c, (a)->immediate_context)
+#define draw_quad_ext(a, b, c, d) draw_quad_vs_(__LINE__, a, b, c, d)
 static void draw_quad_vs_(unsigned int line, struct d3d11_test_context *context,
-        const DWORD *vs_code, size_t vs_code_size)
+        const DWORD *vs_code, size_t vs_code_size, ID3D11DeviceContext *draw_context)
 {
     static const D3D11_INPUT_ELEMENT_DESC default_layout_desc[] =
     {
@@ -1763,14 +1764,14 @@ static void draw_quad_vs_(unsigned int line, struct d3d11_test_context *context,
     if (!context->vb)
         context->vb = create_buffer(device, D3D11_BIND_VERTEX_BUFFER, sizeof(quad), quad);
 
-    ID3D11DeviceContext_IASetInputLayout(context->immediate_context, context->input_layout);
-    ID3D11DeviceContext_IASetPrimitiveTopology(context->immediate_context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    ID3D11DeviceContext_IASetInputLayout(draw_context, context->input_layout);
+    ID3D11DeviceContext_IASetPrimitiveTopology(draw_context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     stride = sizeof(*quad);
     offset = 0;
-    ID3D11DeviceContext_IASetVertexBuffers(context->immediate_context, 0, 1, &context->vb, &stride, &offset);
-    ID3D11DeviceContext_VSSetShader(context->immediate_context, context->vs, NULL, 0);
+    ID3D11DeviceContext_IASetVertexBuffers(draw_context, 0, 1, &context->vb, &stride, &offset);
+    ID3D11DeviceContext_VSSetShader(draw_context, context->vs, NULL, 0);
 
-    ID3D11DeviceContext_Draw(context->immediate_context, 4, 0);
+    ID3D11DeviceContext_Draw(draw_context, 4, 0);
 }
 
 #define draw_quad_z(context, z) draw_quad_z_(__LINE__, context, z)
@@ -1806,19 +1807,27 @@ static void draw_quad_z_(unsigned int line, struct d3d11_test_context *context, 
             (ID3D11Resource *)context->vs_cb, 0, NULL, &data, 0, 0);
 
     ID3D11DeviceContext_VSSetConstantBuffers(context->immediate_context, 0, 1, &context->vs_cb);
-    draw_quad_vs_(__LINE__, context, vs_code, sizeof(vs_code));
+    draw_quad_vs_(__LINE__, context, vs_code, sizeof(vs_code), context->immediate_context);
+}
+
+static void set_quad_color_ext(struct d3d11_test_context *context, const struct vec4 *color,
+        ID3D11DeviceContext *draw_context)
+{
+    ID3D11DeviceContext_UpdateSubresource(draw_context,
+            (ID3D11Resource *)context->ps_cb, 0, NULL, color, 0, 0);
 }
 
 static void set_quad_color(struct d3d11_test_context *context, const struct vec4 *color)
 {
-    ID3D11DeviceContext_UpdateSubresource(context->immediate_context,
-            (ID3D11Resource *)context->ps_cb, 0, NULL, color, 0, 0);
+    set_quad_color_ext(context, color, context->immediate_context);
 }
 
-#define draw_color_quad(a, b) draw_color_quad_(__LINE__, a, b, NULL, 0)
-#define draw_color_quad_vs(a, b, c, d) draw_color_quad_(__LINE__, a, b, c, d)
+#define draw_color_quad(a, b) draw_color_quad_(__LINE__, a, b, NULL, 0, (a)->immediate_context)
+#define draw_color_quad_vs(a, b, c, d) draw_color_quad_(__LINE__, a, b, c, d, (a)->immediate_context)
+#define draw_color_quad_ext(a, b, c, d, e) draw_color_quad_(__LINE__, a, b, c, d, e)
 static void draw_color_quad_(unsigned int line, struct d3d11_test_context *context,
-        const struct vec4 *color, const DWORD *vs_code, size_t vs_code_size)
+        const struct vec4 *color, const DWORD *vs_code, size_t vs_code_size,
+        ID3D11DeviceContext *draw_context)
 {
     static const DWORD ps_color_code[] =
     {
@@ -1855,12 +1864,12 @@ static void draw_color_quad_(unsigned int line, struct d3d11_test_context *conte
     if (!context->ps_cb)
         context->ps_cb = create_buffer(device, D3D11_BIND_CONSTANT_BUFFER, sizeof(*color), NULL);
 
-    ID3D11DeviceContext_PSSetShader(context->immediate_context, context->ps, NULL, 0);
-    ID3D11DeviceContext_PSSetConstantBuffers(context->immediate_context, 0, 1, &context->ps_cb);
+    ID3D11DeviceContext_PSSetShader(draw_context, context->ps, NULL, 0);
+    ID3D11DeviceContext_PSSetConstantBuffers(draw_context, 0, 1, &context->ps_cb);
 
-    set_quad_color(context, color);
+    set_quad_color_ext(context, color, draw_context);
 
-    draw_quad_vs_(line, context, vs_code, vs_code_size);
+    draw_quad_vs_(line, context, vs_code, vs_code_size, draw_context);
 }
 
 static void test_create_device(void)
@@ -2087,6 +2096,59 @@ static void test_create_device(void)
     DestroyWindow(window);
 }
 
+static void test_draw_deferred_context(void)
+{
+    static const struct vec4 red = {1.0f, 0.0f, 0.0f, 1.0f};
+    static const float white[] = {1.0f, 1.0f, 1.0f, 1.0f};
+    static const float black[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    ID3D11DeviceContext *context, *deferred_context;
+    struct d3d11_test_context test_context;
+    ID3D11CommandList *command_list;
+    ID3D11Device *device;
+    DWORD color;
+    HRESULT hr;
+
+    if (!init_test_context(&test_context, NULL))
+        return;
+
+    device = test_context.device;
+    context = test_context.immediate_context;
+
+    hr = ID3D11Device_CreateDeferredContext(device, 0, &deferred_context);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    ID3D11DeviceContext_ClearRenderTargetView(context, test_context.backbuffer_rtv, white);
+    color = get_texture_color(test_context.backbuffer, 320, 240);
+    ok(color == 0xffffffff, "Got unexpected color 0x%08x.\n", color);
+
+    ID3D11DeviceContext_ClearRenderTargetView(deferred_context, test_context.backbuffer_rtv, black);
+
+    hr = ID3D11DeviceContext_FinishCommandList(deferred_context, FALSE, &command_list);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    ID3D11DeviceContext_ExecuteCommandList(context, command_list, TRUE);
+    color = get_texture_color(test_context.backbuffer, 320, 240);
+    ok(color == 0x00000000, "Got unexpected color 0x%08x.\n", color);
+    ID3D11CommandList_Release(command_list);
+
+    ID3D11DeviceContext_OMSetRenderTargets(deferred_context, 1, &test_context.backbuffer_rtv, NULL);
+
+    draw_color_quad_ext(&test_context, &red, NULL, 0, deferred_context);
+    color = get_texture_color(test_context.backbuffer, 320, 240);
+    ok(color == 0x00000000, "Got unexpected color 0x%08x.\n", color);
+
+    hr = ID3D11DeviceContext_FinishCommandList(deferred_context, TRUE, &command_list);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ID3D11DeviceContext_ExecuteCommandList(context, command_list, TRUE);
+
+    color = get_texture_color(test_context.backbuffer, 320, 240);
+    ok(color == 0xff0000ff, "Got unexpected color 0x%08x.\n", color);
+    ID3D11CommandList_Release(command_list);
+
+    ID3D11DeviceContext_Release(deferred_context);
+    release_test_context(&test_context);
+}
+
 static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
 {
     struct device_desc device_desc;
@@ -2259,6 +2321,8 @@ static void test_create_deferred_context(void)
 
     hr = ID3D11Device_CreateDeferredContext(device, 0, &context);
     todo_wine ok(hr == DXGI_ERROR_INVALID_CALL, "Failed to create deferred context, hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+        ID3D11DeviceContext_Release(context);
 
     refcount = ID3D11Device_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
@@ -2271,7 +2335,7 @@ static void test_create_deferred_context(void)
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D11Device_CreateDeferredContext(device, 0, &context);
-    todo_wine ok(hr == S_OK, "Failed to create deferred context, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to create deferred context, hr %#x.\n", hr);
     if (FAILED(hr))
         goto done;
     refcount = get_refcount(device);
@@ -30112,11 +30176,11 @@ START_TEST(d3d11)
     }
 
     print_adapter_info();
-
     queue_test(test_create_device);
     queue_for_each_feature_level(test_device_interfaces);
     queue_test(test_immediate_context);
     queue_test(test_create_deferred_context);
+    queue_test(test_draw_deferred_context);
     queue_test(test_create_texture1d);
     queue_test(test_texture1d_interfaces);
     queue_test(test_create_texture2d);

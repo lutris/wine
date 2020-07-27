@@ -140,6 +140,15 @@ sigset_t server_block_set;  /* signals to block during server calls */
  */
 unsigned int CDECL wine_server_call( void *req_ptr )
 {
+    struct __server_request_info * const req = req_ptr;
+
+    /* trigger write watches, otherwise read() might return EFAULT */
+    if (req->u.req.request_header.reply_size &&
+        !virtual_check_buffer_for_write( req->reply_data, req->u.req.request_header.reply_size ))
+    {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
     return unix_funcs->server_call( req_ptr );
 }
 
@@ -237,6 +246,14 @@ int CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *uni
 void CDECL wine_server_release_fd( HANDLE handle, int unix_fd )
 {
     unix_funcs->server_release_fd( handle, unix_fd );
+}
+
+ /***********************************************************************
+ *           wine_server_close_fds_by_type
+ */
+void CDECL wine_server_close_fds_by_type( enum server_fd_type type )
+{
+    unix_funcs->server_remove_fds_from_cache_by_type( type );
 }
 
 
