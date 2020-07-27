@@ -367,11 +367,23 @@ static HRESULT WINAPI DirectXVideoProcessorService_GetProcAmpRange( IDirectXVide
         const DXVA2_VideoDesc *pVideoDesc, D3DFORMAT RenderTargetFormat, UINT ProcAmpCap, DXVA2_ValueRange *pRange )
 {
     DirectXVideoAccelerationServiceImpl *This = impl_from_IDirectXVideoProcessorService(iface);
+    DXVA2_ValueRange range;
 
-    FIXME("(%p/%p)->(%s, %p, %#x, %u, %p): stub\n",
+    FIXME("(%p/%p)->(%s, %p, %#x, %u, %p): semi-stub\n",
         iface, This, debugstr_guid(VideoProcDeviceGuid), pVideoDesc, RenderTargetFormat, ProcAmpCap, pRange);
 
-    return E_NOTIMPL;
+    range.MinValue.ll = 0;
+    range.MaxValue.ll = 100;
+    if (ProcAmpCap == DXVA2_ProcAmp_Brightness)
+        range.DefaultValue.ll = 100;
+    else
+        range.DefaultValue.ll = 50;
+    range.StepSize.ll = 1;
+
+    if (pRange)
+        *pRange = range;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI DirectXVideoProcessorService_GetFilterPropertyRange( IDirectXVideoProcessorService *iface, REFGUID VideoProcDeviceGuid,
