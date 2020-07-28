@@ -92,6 +92,7 @@ struct ACImpl {
     IAudioRenderClient IAudioRenderClient_iface;
     IAudioCaptureClient IAudioCaptureClient_iface;
     IAudioClock IAudioClock_iface;
+    IAudioClockAdjustment IAudioClockAdjustment_iface;
     IAudioClock2 IAudioClock2_iface;
     IAudioStreamVolume IAudioStreamVolume_iface;
 
@@ -178,6 +179,7 @@ static const IAudioCaptureClientVtbl AudioCaptureClient_Vtbl;
 static const IAudioSessionControl2Vtbl AudioSessionControl2_Vtbl;
 static const ISimpleAudioVolumeVtbl SimpleAudioVolume_Vtbl;
 static const IAudioClockVtbl AudioClock_Vtbl;
+static const IAudioClockAdjustmentVtbl AudioClockAdjustment_Vtbl;
 static const IAudioClock2Vtbl AudioClock2_Vtbl;
 static const IAudioStreamVolumeVtbl AudioStreamVolume_Vtbl;
 static const IChannelAudioVolumeVtbl ChannelAudioVolume_Vtbl;
@@ -218,6 +220,11 @@ static inline AudioSessionWrapper *impl_from_IChannelAudioVolume(IChannelAudioVo
 static inline ACImpl *impl_from_IAudioClock(IAudioClock *iface)
 {
     return CONTAINING_RECORD(iface, ACImpl, IAudioClock_iface);
+}
+
+static inline ACImpl *impl_from_IAudioClockAdjustment(IAudioClockAdjustment *iface)
+{
+    return CONTAINING_RECORD(iface, ACImpl, IAudioClockAdjustment_iface);
 }
 
 static inline ACImpl *impl_from_IAudioClock2(IAudioClock2 *iface)
@@ -792,6 +799,7 @@ HRESULT WINAPI AUDDRV_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient 
     This->IAudioRenderClient_iface.lpVtbl = &AudioRenderClient_Vtbl;
     This->IAudioCaptureClient_iface.lpVtbl = &AudioCaptureClient_Vtbl;
     This->IAudioClock_iface.lpVtbl = &AudioClock_Vtbl;
+    This->IAudioClockAdjustment_iface.lpVtbl = &AudioClockAdjustment_Vtbl;
     This->IAudioClock2_iface.lpVtbl = &AudioClock2_Vtbl;
     This->IAudioStreamVolume_iface.lpVtbl = &AudioStreamVolume_Vtbl;
 
@@ -2603,6 +2611,9 @@ static HRESULT WINAPI AudioClient_GetService(IAudioClient *iface, REFIID riid,
     }else if(IsEqualIID(riid, &IID_IAudioClock)){
         IAudioClock_AddRef(&This->IAudioClock_iface);
         *ppv = &This->IAudioClock_iface;
+    } else if (IsEqualIID(riid, &IID_IAudioClockAdjustment)) {
+        IAudioClockAdjustment_AddRef(&This->IAudioClockAdjustment_iface);
+        *ppv = &This->IAudioClockAdjustment_iface;
     }else if(IsEqualIID(riid, &IID_IAudioStreamVolume)){
         IAudioStreamVolume_AddRef(&This->IAudioStreamVolume_iface);
         *ppv = &This->IAudioStreamVolume_iface;
@@ -3146,6 +3157,56 @@ static const IAudioClockVtbl AudioClock_Vtbl =
     AudioClock_GetFrequency,
     AudioClock_GetPosition,
     AudioClock_GetCharacteristics
+};
+
+static HRESULT WINAPI AudioClockAdjustment_QueryInterface(IAudioClockAdjustment *iface,
+        REFIID riid, void **ppv)
+{
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppv);
+
+    if (!ppv)
+        return E_POINTER;
+    *ppv = NULL;
+
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IAudioClockAdjustment))
+        *ppv = iface;
+    if (*ppv) {
+        IUnknown_AddRef((IUnknown*)*ppv);
+        return S_OK;
+    }
+
+    WARN("Unknown interface %s\n", debugstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI AudioClockAdjustment_AddRef(IAudioClockAdjustment *iface)
+{
+    ACImpl *This = impl_from_IAudioClockAdjustment(iface);
+    return IAudioClient_AddRef(&This->IAudioClient_iface);
+}
+
+static ULONG WINAPI AudioClockAdjustment_Release(IAudioClockAdjustment *iface)
+{
+    ACImpl *This = impl_from_IAudioClockAdjustment(iface);
+    return IAudioClient_Release(&This->IAudioClient_iface);
+}
+
+static HRESULT WINAPI AudioClockAdjustment_SetSampleRate(IAudioClockAdjustment *iface,
+        float flSampleRate)
+{
+    ACImpl *This = impl_from_IAudioClockAdjustment(iface);
+
+    FIXME("(%p)->(%f): stub\n", This, flSampleRate);
+
+    return S_OK;
+}
+
+static const IAudioClockAdjustmentVtbl AudioClockAdjustment_Vtbl =
+{
+    AudioClockAdjustment_QueryInterface,
+    AudioClockAdjustment_AddRef,
+    AudioClockAdjustment_Release,
+    AudioClockAdjustment_SetSampleRate
 };
 
 static HRESULT WINAPI AudioClock2_QueryInterface(IAudioClock2 *iface,
