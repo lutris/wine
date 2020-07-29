@@ -2413,10 +2413,13 @@ static NTSTATUS read_changes_apc( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS st
                 pfni->Action = event->action;
                 pfni->FileNameLength = ntdll_umbstowcs( event->name, event->len, pfni->FileName, len );
                 last_entry_offset = &pfni->NextEntryOffset;
+                
+                pfni->NextEntryOffset = 0;
 
                 if (pfni->FileNameLength == len) break;
 
-                i = offsetof(FILE_NOTIFY_INFORMATION, FileName[pfni->FileNameLength]);
+                i = (offsetof(FILE_NOTIFY_INFORMATION, FileName[pfni->FileNameLength])
+                     + sizeof(int)-1) / sizeof(int) * sizeof(int);
                 pfni->FileNameLength *= sizeof(WCHAR);
                 pfni->NextEntryOffset = i;
                 pfni = (FILE_NOTIFY_INFORMATION*)((char*)pfni + i);
