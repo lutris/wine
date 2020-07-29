@@ -3,7 +3,7 @@ This repo contains patches to run GeForceNOW in Wine
 It works but it's BLURRY
 
 How to use:
-1. build WoW64 wine
+1. build WoW64 wine (https://wiki.winehq.org/Building_Wine)
 2. install GFN in a NEW wineprefix
 3. replace 'dx11' with 'dx9' in ~/.wine/drive_c/users/$USER/Local Settings/Application Data/NVIDIA Corporation/GeForceNOW/CEF/GeForceNOWStreamer.json
 4. replace 'nv-gpu-accel=true' with 'nv-gpu-accel=false' in ~/.wine/drive_c/users/$USER/Local Settings/Application Data/NVIDIA Corporation/GeForceNOW/CEF/GeForceNOW.json
