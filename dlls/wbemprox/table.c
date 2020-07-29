@@ -112,10 +112,16 @@ HRESULT get_value( const struct table *table, UINT row, UINT column, LONGLONG *v
     case CIM_BOOLEAN:
         *val = *(const int *)ptr;
         break;
+    case CIM_STRING:
+        if(!ptr)
+        {
+            FIXME("ptr is NULL\n");
+            *val = strdup("");
+            return WBEM_E_FAILED;
+        }
     case CIM_DATETIME:
     case CIM_REFERENCE:
-    case CIM_STRING:
-        *val = (INT_PTR)*(const WCHAR **)ptr;
+            *val = (INT_PTR)*(const WCHAR **)ptr;
         break;
     case CIM_SINT8:
         *val = *(const INT8 *)ptr;
@@ -175,7 +181,11 @@ BSTR get_value_bstr( const struct table *table, UINT row, UINT column )
     case CIM_DATETIME:
     case CIM_REFERENCE:
     case CIM_STRING:
-        if (!val) return NULL;
+        if (!val)
+        {
+            FIXME("val is null\n");
+            return NULL;
+        }
         len = lstrlenW( (const WCHAR *)(INT_PTR)val ) + 2;
         if (!(ret = SysAllocStringLen( NULL, len ))) return NULL;
         swprintf( ret, len, L"\"%s\"", (const WCHAR *)(INT_PTR)val );
@@ -223,6 +233,11 @@ HRESULT set_value( const struct table *table, UINT row, UINT column, LONGLONG va
     case CIM_DATETIME:
     case CIM_REFERENCE:
     case CIM_STRING:
+        if (!val)
+        {
+            FIXME("pointer is NULL\n");
+            return WBEM_E_FAILED;
+        }
         *(WCHAR **)ptr = (WCHAR *)(INT_PTR)val;
         break;
     case CIM_SINT8:
