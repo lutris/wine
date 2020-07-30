@@ -14,6 +14,8 @@ How to use:
 
 If the loading window opens but stays black, run wineserver -k and start the game again.
 
+Don't install DXVK, as it's not supported and will prevent the games from launching.
+
 If you're sure you followed all the instructions and your system supports VAAPI, but the games don't launch, please send an output log obtained by running your wine command with WINEDEBUG=warn+all in front of it (e.g. in Issues or to @kxsz98 in Lutris discord).
 
 =====================
