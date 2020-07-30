@@ -12,6 +12,8 @@ How to use:
 5. make sure the "Enable VAAPI as backend for DXVA2 GPU decoding" checkbox is checked in winecfg
 6. run GeForceNOW and start a game
 
+If the loading window opens but stays black, run wineserver -k and start the game again.
+
 If you're sure you followed all the instructions and your system supports VAAPI, but the games don't launch, please send an output log obtained by running your wine command with WINEDEBUG=warn+all in front of it (e.g. in Issues or to @kxsz98 in Lutris discord).
 
 =====================
