@@ -324,7 +324,7 @@ static BOOL enumerate_vaprofiles( VADisplay va_display )
             if (profile)
                 profile->supported = TRUE;
             else
-                WARN("missing decoder translation for format %d/%d\n", profiles[i], entryPoints[i]);
+                WARN("missing decoder translation for format %d/%d\n", profiles[i], entryPoints[j]);
         }
     }
 
