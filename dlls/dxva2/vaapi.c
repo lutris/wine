@@ -342,7 +342,7 @@ BOOL vaapi_is_format_supported( VADisplay va_display, struct vaapi_profile *prof
     VAConfigID config;
     VAStatus status;
     unsigned int i;
-    BOOL ret = FALSE;
+    BOOL ret = FALSE, found_pixel_format_attrib = FALSE;
 
     attrib.type  = VAConfigAttribRTFormat;
     attrib.value = format->vaformat;
@@ -366,6 +366,8 @@ BOOL vaapi_is_format_supported( VADisplay va_display, struct vaapi_profile *prof
             {
                 for (i = 0; i < numSurfaceAttribs; i++)
                 {
+                    if (surfaceAttribs[i].type == VASurfaceAttribPixelFormat)
+                        found_pixel_format_attrib = TRUE;
                     if (surfaceAttribs[i].type == VASurfaceAttribPixelFormat &&
                         surfaceAttribs[i].value.value.i == format->vafourcc)
                     {
@@ -373,6 +375,10 @@ BOOL vaapi_is_format_supported( VADisplay va_display, struct vaapi_profile *prof
                         break;
                     }
                 }
+                /* The vdpau backend doesn't give us a VASurfaceAttribPixelFormat attribute. */
+                /* HACK: We consider that in this case, a VA_FOURCC_NV12 format is valid. This format is used by e.g. GeForceNOW. */
+                if (!found_pixel_format_attrib && format->vafourcc == VA_FOURCC_NV12)
+                    ret = TRUE;
             }
             HeapFree(GetProcessHeap(), 0, surfaceAttribs);
         }
