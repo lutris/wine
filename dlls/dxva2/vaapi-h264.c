@@ -43,8 +43,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(dxva2);
 #define SLICE_TYPE_SP  3
 #define SLICE_TYPE_SI  4
 
-#define UGLY_HACK 1
-
 static inline UINT estimate_maximum_slice_size( UINT width, UINT height )
 {
     return (3 * width * height * min(width, height)) / max(width, height);
@@ -77,11 +75,6 @@ typedef struct
     DXVA_PicParams_H264 d3dPictureParam;
     DXVA_Qmatrix_H264 d3dQMatrix;
     DXVA_Slice_H264_Long d3dSliceInfo[MAX_SLICES];
-
-#ifdef UGLY_HACK
-    INT last_frame_idx;
-    VAPictureH264 saved_ref_frames[64];
-#endif
 } WineVideoDecoderH264Impl;
 
 /* caller has to hold the vaapi_lock */
@@ -122,22 +115,9 @@ static HRESULT process_picture_parameters( WineVideoDecoderH264Impl *This, const
     params.CurrPic.TopFieldOrderCnt = This->d3dPictureParam.CurrFieldOrderCnt[0] & 0xffff;
     params.CurrPic.BottomFieldOrderCnt = This->d3dPictureParam.CurrFieldOrderCnt[1] & 0xffff;
 
-#ifdef UGLY_HACK
-    This->saved_ref_frames[This->d3dPictureParam.CurrPic.Index7Bits % 64] = params.CurrPic;
-#endif
-
     for (i = 0; i < 16; i++)
     {
         unsigned int flags = 0;
-
-#ifdef UGLY_HACK
-        if (This->last_frame_idx >= 0)
-        {
-            TRACE("using saved reference frame\n");
-            params.ReferenceFrames[i] = This->saved_ref_frames[This->last_frame_idx % 64];
-            continue;
-        }
-#endif
 
         if (This->d3dPictureParam.RefFrameList[i].Index7Bits == 127)
         {
@@ -184,10 +164,6 @@ static HRESULT process_picture_parameters( WineVideoDecoderH264Impl *This, const
         params.ReferenceFrames[i].TopFieldOrderCnt    = This->d3dPictureParam.FieldOrderCntList[i][0] & 0xFFFF;
         params.ReferenceFrames[i].BottomFieldOrderCnt = This->d3dPictureParam.FieldOrderCntList[i][1] & 0xFFFF;
     }
-
-#ifdef UGLY_HACK
-    This->last_frame_idx = This->d3dPictureParam.CurrPic.Index7Bits;
-#endif
 
     params.picture_width_in_mbs_minus1                              = This->d3dPictureParam.wFrameWidthInMbsMinus1;
     params.picture_height_in_mbs_minus1                             = This->d3dPictureParam.wFrameHeightInMbsMinus1;
@@ -833,9 +809,6 @@ HRESULT vaapi_h264decoder_create( IWineVideoService *service, const DXVA2_VideoD
     VAConfigAttrib codecAttrib;
     VADisplay va_display;
     VAStatus status;
-#ifdef UGLY_HACK
-    int i;
-#endif
 
     if (!service || !videoDesc || !config || !decoder)
         return E_INVALIDARG;
@@ -887,16 +860,6 @@ HRESULT vaapi_h264decoder_create( IWineVideoService *service, const DXVA2_VideoD
     h264decoder->context           = 0;
 
     h264decoder->vaBitstream       = VA_INVALID_ID;
-
-#ifdef UGLY_HACK
-    h264decoder->last_frame_idx = -1;
-
-    for (i = 0; i < 64; i++)
-    {
-        h264decoder->saved_ref_frames[i].picture_id = VA_INVALID_ID;
-        h264decoder->saved_ref_frames[i].flags = VA_PICTURE_H264_INVALID;
-    }
-#endif
 
     vaapi_lock();
 
