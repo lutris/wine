@@ -5712,37 +5712,59 @@ BOOL WINAPI DECLSPEC_HOTPATCH SystemTimeToTzSpecificLocalTime( const TIME_ZONE_I
 
 
 /***********************************************************************
+ *	TzSpecificLocalTimeToSystemTimeEx   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH TzSpecificLocalTimeToSystemTimeEx( const DYNAMIC_TIME_ZONE_INFORMATION *info,
+                                                               const SYSTEMTIME *local,
+                                                               SYSTEMTIME *system )
+{
+    DYNAMIC_TIME_ZONE_INFORMATION tzinfo;
+    LARGE_INTEGER ft;
+    LONG bias = 0;
+
+    if (!info)
+    {
+        RtlQueryDynamicTimeZoneInformation( (RTL_TIME_ZONE_INFORMATION *)&tzinfo );
+        info = &tzinfo;
+    }
+
+    if (!SystemTimeToFileTime( local, (FILETIME *)&ft )) return FALSE;
+    switch (get_timezone_id( (const TIME_ZONE_INFORMATION *) info, ft, TRUE ))
+    {
+    case TIME_ZONE_ID_UNKNOWN:
+        break;
+    case TIME_ZONE_ID_DAYLIGHT:
+        bias = info->DaylightBias;
+        if (FALSE == info->DynamicDaylightTimeDisabled)
+            break;
+    case TIME_ZONE_ID_STANDARD:
+        bias = info->StandardBias;
+        break;
+    default:
+        return FALSE;
+    }
+    ft.QuadPart += (info->Bias + bias) * (LONGLONG)600000000;
+    return FileTimeToSystemTime( (FILETIME *)&ft, system );
+}
+
+/***********************************************************************
  *	TzSpecificLocalTimeToSystemTime   (kernelbase.@)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH TzSpecificLocalTimeToSystemTime( const TIME_ZONE_INFORMATION *info,
                                                                const SYSTEMTIME *local,
                                                                SYSTEMTIME *system )
 {
-    TIME_ZONE_INFORMATION tzinfo;
-    LARGE_INTEGER ft;
+    DYNAMIC_TIME_ZONE_INFORMATION tzinfo;
 
-    if (!info)
+    if (info)
     {
-        RtlQueryTimeZoneInformation( (RTL_TIME_ZONE_INFORMATION *)&tzinfo );
-        info = &tzinfo;
+        memset(&tzinfo, 0, sizeof(tzinfo));
+        *((TIME_ZONE_INFORMATION*)&tzinfo) = *info;
+    } else {
+        RtlQueryDynamicTimeZoneInformation( &tzinfo );
     }
 
-    if (!SystemTimeToFileTime( local, (FILETIME *)&ft )) return FALSE;
-    switch (get_timezone_id( info, ft, TRUE ))
-    {
-    case TIME_ZONE_ID_UNKNOWN:
-        ft.QuadPart += info->Bias * (LONGLONG)600000000;
-        break;
-    case TIME_ZONE_ID_STANDARD:
-        ft.QuadPart += (info->Bias + info->StandardBias) * (LONGLONG)600000000;
-        break;
-    case TIME_ZONE_ID_DAYLIGHT:
-        ft.QuadPart += (info->Bias + info->DaylightBias) * (LONGLONG)600000000;
-        break;
-    default:
-        return FALSE;
-    }
-    return FileTimeToSystemTime( (FILETIME *)&ft, system );
+    return TzSpecificLocalTimeToSystemTimeEx( &tzinfo, local, system );
 }
 
 
