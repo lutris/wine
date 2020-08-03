@@ -1,11 +1,13 @@
 This repo contains patches to run GeForceNOW in Wine
 
-It works but it's BLURRY
+It requires your system to support VAAPI (you can check if it does by running the vainfo command).
 
-It also requires your system to support VAAPI (you can check if it does by running the vainfo command).
+If you have a NVIDIA GPU, clone the nvidia branch.
+Otherwise, clone the master branch.
+Be warned that video output is currently BLURRY on Intel and AMD GPUs.
 
 How to use:
-1. build WoW64 wine (https://wiki.winehq.org/Building_Wine)
+1. build WoW64 wine from this repo (https://wiki.winehq.org/Building_Wine)
 2. install GFN in a NEW wineprefix
 3. replace 'dx11' with 'dx9' in ~/.wine/drive_c/users/$USER/Local Settings/Application Data/NVIDIA Corporation/GeForceNOW/CEF/GeForceNOWStreamer.json
 4. replace 'nv-gpu-accel=true' with 'nv-gpu-accel=false' in ~/.wine/drive_c/users/$USER/Local Settings/Application Data/NVIDIA Corporation/GeForceNOW/CEF/GeForceNOW.json
@@ -14,7 +16,7 @@ How to use:
 
 If the loading window opens but stays black, run wineserver -k and start the game again.
 
-Don't install DXVK, as it's not supported and will prevent the games from launching.
+Don't install DXVK, as it's not a supported configuration. It will prevent the games from launching.
 
 If you're sure you followed all the instructions and your system supports VAAPI, but the games don't launch, please send an output log obtained by running your wine command with WINEDEBUG=warn+all in front of it (e.g. in Issues or to @kxsz98 in Lutris discord).
 
