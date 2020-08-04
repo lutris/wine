@@ -10,7 +10,8 @@ How to use:
 1. build WoW64 wine from this repo (https://wiki.winehq.org/Building_Wine)
 2. install GFN in a NEW wineprefix
 3. Run `sed -i -e 's/nv-gpu-accel=true/nv-gpu-accel=false/' -e 's/dx11/dx9/' ~/.wine/drive_c/users/$USER/Local\ Settings/Application\ Data/NVIDIA\ Corporation/GeForceNOW/CEF/{GeForceNOW.json,GeForceNOWStreamer.json}` to change some configuration settings. Note that this needs to be run every time that the GFN client updates.
-4. run GeForceNOW and start a game
+4. Run `winetricks mf` to avoid issues with `unimplemented function mf.dll.MFCreateMPEG4MediaSink`.
+5. run GeForceNOW and start a game
 
 If the loading window opens but stays black, run wineserver -k and start the game again.
 
