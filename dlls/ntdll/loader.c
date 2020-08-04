@@ -3810,6 +3810,7 @@ void WINAPI LdrShutdownThread(void)
 {
     PLIST_ENTRY mark, entry;
     LDR_DATA_TABLE_ENTRY *mod;
+    WINE_MODREF *wm;
     UINT i;
     void **pointers;
 
@@ -3827,6 +3828,7 @@ void WINAPI LdrShutdownThread(void)
     }
 
     RtlEnterCriticalSection( &loader_section );
+    wm = get_modref( NtCurrentTeb()->Peb->ImageBaseAddress );
 
     mark = &NtCurrentTeb()->Peb->LdrData->InInitializationOrderModuleList;
     for (entry = mark->Blink; entry != mark; entry = entry->Blink)
@@ -3841,6 +3843,8 @@ void WINAPI LdrShutdownThread(void)
         MODULE_InitDLL( CONTAINING_RECORD(mod, WINE_MODREF, ldr), 
                         DLL_THREAD_DETACH, NULL );
     }
+
+    if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, DLL_THREAD_DETACH );
 
     RtlAcquirePebLock();
     RemoveEntryList( &NtCurrentTeb()->TlsLinks );
@@ -4132,6 +4136,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, void **entry, ULONG_PTR unknow
         if ((status = alloc_thread_tls()) != STATUS_SUCCESS)
             NtTerminateThread( GetCurrentThread(), status );
         thread_attach();
+        if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, DLL_THREAD_ATTACH );
     }
 
     RtlLeaveCriticalSection( &loader_section );
