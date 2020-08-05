@@ -1448,10 +1448,10 @@ static HRESULT pulse_stream_connect(ACImpl *This, UINT32 period_bytes) {
 
     if (This->dataflow == eRender)
         ret = pa_stream_connect_playback(This->stream, NULL, &attr,
-        PA_STREAM_START_CORKED|PA_STREAM_START_UNMUTED|PA_STREAM_ADJUST_LATENCY|moving, NULL, NULL);
+        PA_STREAM_START_CORKED|PA_STREAM_VARIABLE_RATE|PA_STREAM_START_UNMUTED|PA_STREAM_ADJUST_LATENCY|moving, NULL, NULL);
     else
         ret = pa_stream_connect_record(This->stream, NULL, &attr,
-        PA_STREAM_START_CORKED|PA_STREAM_START_UNMUTED|PA_STREAM_ADJUST_LATENCY|moving);
+        PA_STREAM_START_CORKED|PA_STREAM_VARIABLE_RATE|PA_STREAM_START_UNMUTED|PA_STREAM_ADJUST_LATENCY|moving);
     if (ret < 0) {
         WARN("Returns %i\n", ret);
         return AUDCLNT_E_ENDPOINT_CREATE_FAILED;
@@ -3138,10 +3138,28 @@ static HRESULT WINAPI AudioClockAdjustment_SetSampleRate(IAudioClockAdjustment *
         float flSampleRate)
 {
     ACImpl *This = impl_from_IAudioClockAdjustment(iface);
+    HRESULT hr;
+    pa_operation *o;
 
-    FIXME("(%p)->(%f): stub\n", This, flSampleRate);
+    TRACE("(%p)->(%f)\n", This, flSampleRate);
 
-    return S_OK;
+    pthread_mutex_lock(&pulse_lock);
+    if (This->share != AUDCLNT_SHAREMODE_SHARED)
+    {
+        pthread_mutex_unlock(&pulse_lock);
+        return E_FAIL;
+    }
+    hr = pulse_stream_valid(This);
+    if (SUCCEEDED(hr))
+    {
+        o = pa_stream_update_sample_rate(This->stream, (uint32_t)flSampleRate, NULL, NULL);
+        if (o)
+            pa_operation_unref(o);
+        else
+            hr = E_FAIL;
+    }
+    pthread_mutex_unlock(&pulse_lock);
+    return hr;
 }
 
 static const IAudioClockAdjustmentVtbl AudioClockAdjustment_Vtbl =
