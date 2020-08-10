@@ -344,7 +344,6 @@ static HRESULT WINAPI class_object_GetQualifierSet(
     return WbemQualifierSet_create( co->name, NULL, (void **)ppQualSet );
 }
 
-
 static HRESULT record_get_value( const struct record *record, UINT index, VARIANT *var, CIMTYPE *type )
 {
     VARTYPE vartype = to_vartype( record->fields[index].type & CIM_TYPE_MASK );
@@ -362,13 +361,7 @@ static HRESULT record_get_value( const struct record *record, UINT index, VARIAN
     case CIM_STRING:
     case CIM_DATETIME:
     case CIM_REFERENCE:
-        if (!record->fields[index].u.sval)
-        {
-            V_BSTR( var ) = NULL;
-            FIXME("sval is NULL\n");
-        }
-        else
-            V_BSTR( var ) = SysAllocString( record->fields[index].u.sval );
+        V_BSTR( var ) = SysAllocString( record->fields[index].u.sval );
         break;
     case CIM_SINT32:
         V_I4( var ) = record->fields[index].u.ival;

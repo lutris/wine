@@ -750,12 +750,7 @@ void free_query( struct query *query )
 
     if (!query) return;
     destroy_view( query->view );
-    LIST_FOR_EACH_SAFE( mem, next, &query->mem ) {
-        if (mem && (long)(void *)mem > 0x1000)///////////////////////////////////////////////////////////
-            heap_free( mem );
-        else
-            FIXME("NOT FREEING MEM='%#lx'\n", mem);
-    }
+    LIST_FOR_EACH_SAFE( mem, next, &query->mem ) { heap_free( mem ); }
     heap_free( query );
 }
 
@@ -819,10 +814,7 @@ static BSTR build_proplist( const struct table *table, UINT row, UINT count, UIN
         {
             const WCHAR *name = table->columns[i].name;
             values[j] = get_value_bstr( table, row, i );
-            if (values[j])
-                *len += lstrlenW( L"%s=%s" ) + lstrlenW( name ) + lstrlenW( values[j] );
-            else
-                *len += lstrlenW( L"%s=" ) + lstrlenW( name );
+            *len += lstrlenW( L"%s=%s" ) + lstrlenW( name ) + lstrlenW( values[j] );
             j++;
         }
     }
@@ -834,10 +826,7 @@ static BSTR build_proplist( const struct table *table, UINT row, UINT count, UIN
             if (table->columns[i].type & COL_FLAG_KEY)
             {
                 const WCHAR *name = table->columns[i].name;
-                if (values[j])
-                    offset += swprintf( ret + offset, *len - offset, L"%s=%s", name, values[j] );
-                else
-                    offset += swprintf( ret + offset, *len - offset, L"%s=", name );
+                offset += swprintf( ret + offset, *len - offset, L"%s=%s", name, values[j] );
                 if (j < count - 1) ret[offset++] = ',';
                 j++;
             }
