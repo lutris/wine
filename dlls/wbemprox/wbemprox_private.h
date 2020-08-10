@@ -187,6 +187,10 @@ struct path
     UINT   filter_len;
 };
 
+void wbemprox_mutex_init( void );
+void wbemprox_mutex_lock( void );
+void wbemprox_mutex_unlock( void );
+
 HRESULT parse_path( const WCHAR *, struct path ** ) DECLSPEC_HIDDEN;
 void free_path( struct path * ) DECLSPEC_HIDDEN;
 WCHAR *query_from_path( const struct path * ) DECLSPEC_HIDDEN;

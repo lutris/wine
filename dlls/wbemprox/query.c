@@ -29,6 +29,25 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wbemprox);
 
+static HANDLE wbemprox_mutex;
+
+void wbemprox_mutex_init( void )
+{
+    static WCHAR nameW[] = { 'w','b','e','m','p','r','o','x','_','m','u','t','e','x', 0 };
+    wbemprox_mutex = CreateMutexW( NULL, FALSE, nameW );
+}
+
+void wbemprox_mutex_lock( void )
+{
+    while (WaitForSingleObject( wbemprox_mutex, INFINITE ) != WAIT_OBJECT_0)
+        ;
+}
+
+void wbemprox_mutex_unlock( void )
+{
+    ReleaseMutex( wbemprox_mutex );
+}
+
 static HRESULT append_table( struct view *view, struct table *table )
 {
     struct table **tmp;
@@ -681,8 +700,11 @@ static HRESULT exec_select_view( struct view *view )
     UINT i, j = 0, len;
     enum fill_status status = FILL_STATUS_UNFILTERED;
     struct table *table;
+    HRESULT hr = S_OK;
 
     if (!view->table_count) return S_OK;
+
+    wbemprox_mutex_lock();
 
     table = view->table[0];
     if (table->fill)
@@ -690,15 +712,22 @@ static HRESULT exec_select_view( struct view *view )
         clear_table( table );
         status = table->fill( table, view->cond );
     }
-    if (status == FILL_STATUS_FAILED) return WBEM_E_FAILED;
-    if (!table->num_rows) return S_OK;
+    if (status == FILL_STATUS_FAILED)
+    {
+        hr = WBEM_E_FAILED;
+        goto done;
+    }
+    if (!table->num_rows) goto done;
 
     len = min( table->num_rows, 16 );
-    if (!(view->result = heap_alloc( len * sizeof(UINT) ))) return E_OUTOFMEMORY;
+    if (!(view->result = heap_alloc( len * sizeof(UINT) )))
+    {
+        hr = E_OUTOFMEMORY;
+        goto done;
+    }
 
     for (i = 0; i < table->num_rows; i++)
     {
-        HRESULT hr;
         LONGLONG val = 0;
         UINT type;
 
@@ -706,16 +735,23 @@ static HRESULT exec_select_view( struct view *view )
         {
             UINT *tmp;
             len *= 2;
-            if (!(tmp = heap_realloc( view->result, len * sizeof(UINT) ))) return E_OUTOFMEMORY;
+            if (!(tmp = heap_realloc( view->result, len * sizeof(UINT) )))
+            {
+                hr = E_OUTOFMEMORY;
+                goto done;
+            }
             view->result = tmp;
         }
         if (status == FILL_STATUS_FILTERED) val = 1;
-        else if ((hr = eval_cond( table, i, view->cond, &val, &type )) != S_OK) return hr;
+        else if ((hr = eval_cond( table, i, view->cond, &val, &type )) != S_OK) goto done;
         if (val) view->result[j++] = i;
     }
 
     view->result_count = j;
-    return S_OK;
+
+done:
+    wbemprox_mutex_unlock();
+    return hr;
 }
 
 HRESULT execute_view( struct view *view )
