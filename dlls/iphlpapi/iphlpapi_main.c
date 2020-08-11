@@ -2184,6 +2184,16 @@ DWORD WINAPI GetIpNetTable(PMIB_IPNETTABLE pIpNetTable, PULONG pdwSize, BOOL bOr
     return ret;
 }
 
+DWORD WINAPI GetIpNetEntry2(PMIB_IPNET_ROW2 pRow)
+{
+    FIXME("(pRow %p): stub\n", pRow);
+
+    if (!pRow)
+        return ERROR_INVALID_PARAMETER;
+
+    return ERROR_SUCCESS;
+}
+
 /* Gets the DNS server list into the list beginning at list.  Assumes that
  * a single server address may be placed at list if *len is at least
  * sizeof(IP_ADDR_STRING) long.  Otherwise, list->Next is set to firstDynamic,
