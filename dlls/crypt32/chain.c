@@ -3521,15 +3521,6 @@ static BOOL WINAPI verify_ssl_policy(LPCSTR szPolicyOID,
          &pPolicyStatus->lElementIndex);
     }
     else if (pChainContext->TrustStatus.dwErrorStatus &
-     CERT_TRUST_IS_OFFLINE_REVOCATION &&
-     !(checks & SECURITY_FLAG_IGNORE_REVOCATION))
-    {
-        pPolicyStatus->dwError = CERT_E_REVOCATION_FAILURE;
-        find_element_with_error(pChainContext,
-         CERT_TRUST_IS_OFFLINE_REVOCATION, &pPolicyStatus->lChainIndex,
-         &pPolicyStatus->lElementIndex);
-    }
-    else if (pChainContext->TrustStatus.dwErrorStatus &
      CERT_TRUST_HAS_NOT_SUPPORTED_CRITICAL_EXT)
     {
         pPolicyStatus->dwError = CERT_E_CRITICAL;
