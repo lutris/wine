@@ -17,11 +17,9 @@ If the loading window opens but stays black, run wineserver -k and start the gam
 
 If you're sure you followed all the instructions and your system supports VAAPI, but the games don't launch, please send an output log obtained by running your wine command with WINEDEBUG=warn+all in front of it (e.g. in Issues or to @kxsz98 in Lutris discord).
 
-It is possible to reduce input lag by following the instructions here:
+It is possible to reduce input lag by doing `sed -i -e 's/nv-sdl-iohid-configurable=false/nv-sdl-iohid-configurable=true/' -e 's/nv-sdl-hidpi=false/nv-sdl-hidpi=true/' ~/.wine/drive_c/users/$USER/Local\ Settings/Application\ Data/NVIDIA\ Corporation/GeForceNOW/CEF/GeForceNOWStreamer.json`.
 
-https://www.getdroidtips.com/fix-geforce-now-input-lag-or-freeze/
-
-More succinctly, you can do `sed -i -e 's/nv-sdl-iohid-config=false/nv-sdl-iohid-config=true/' -e 's/nv-sdl-hidpi=false/nv-sdl-hidpi=true/' ~/.wine/drive_c/users/$USER/Local\ Settings/Application\ Data/NVIDIA\ Corporation/GeForceNOW/CEF/GeForceNOWStreamer.json` to set these.
+Note that config file edits will need to be redone after every update of the software.
 
 =====================
 1. INTRODUCTION
