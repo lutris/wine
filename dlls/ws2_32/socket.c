@@ -3783,61 +3783,6 @@ int WINAPI WS_getpeername(SOCKET s, struct WS_sockaddr *name, int *namelen)
     return res;
 }
 
-/* When binding to an UDP address with filter support the getsockname call on the socket
- * will always return 0.0.0.0 instead of the filtered interface address. This function
- * checks if the socket is interface-bound on UDP and return the correct address.
- * This is required because applications often do a bind() with port zero followed by a
- * getsockname() to retrieve the port and address acquired.
- */
-static void interface_bind_check(int fd, struct sockaddr_in *addr)
-{
-#if !defined(IP_BOUND_IF) && !defined(LINUX_BOUND_IF)
-    return;
-#else
-    unsigned int ifindex;
-    int ret;
-    socklen_t len;
-
-    /* Check for IPv4, address 0.0.0.0 and UDP socket */
-    if (addr->sin_family != AF_INET || addr->sin_addr.s_addr != 0)
-        return;
-    if (_get_fd_type(fd) != SOCK_DGRAM)
-        return;
-
-    len = sizeof(ifindex);
-#if defined(IP_BOUND_IF)
-    ret = getsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &ifindex, &len);
-#elif defined(LINUX_BOUND_IF)
-    ret = getsockopt(fd, IPPROTO_IP, IP_UNICAST_IF, &ifindex, &len);
-    if (!ret) ifindex = ntohl(ifindex);
-#endif
-    if (!ret)
-    {
-        PIP_ADAPTER_INFO adapters, adapter;
-        DWORD adap_size;
-
-        if (GetAdaptersInfo(NULL, &adap_size) != ERROR_BUFFER_OVERFLOW)
-            return;
-        adapters = HeapAlloc(GetProcessHeap(), 0, adap_size);
-        if (adapters && GetAdaptersInfo(adapters, &adap_size) == NO_ERROR)
-        {
-            /* Search the IPv4 adapter list for the appropriate bound interface */
-            for (adapter = adapters; adapter != NULL; adapter = adapter->Next)
-            {
-                in_addr_t adapter_addr;
-                if (adapter->Index != ifindex) continue;
-
-                adapter_addr = inet_addr(adapter->IpAddressList.IpAddress.String);
-                addr->sin_addr.s_addr = adapter_addr;
-                TRACE("reporting interface address from adapter %d\n", ifindex);
-                break;
-            }
-        }
-        HeapFree(GetProcessHeap(), 0, adapters);
-    }
-#endif
-}
-
 /***********************************************************************
  *		getsockname		(WS2_32.6)
  */
@@ -3875,17 +3820,8 @@ int WINAPI WS_getsockname(SOCKET s, struct WS_sockaddr *name, int *namelen)
         }
         else
         {
-            interface_bind_check(fd, (struct sockaddr_in*) &uaddr);
-            if (ws_sockaddr_u2ws(&uaddr.addr, name, namelen) != 0)
-            {
-                /* The buffer was too small */
-                SetLastError(WSAEFAULT);
-            }
-            else
-            {
-                res = 0;
-                TRACE("=> %s\n", debugstr_sockaddr(name));
-            }
+            res = 0;
+            TRACE("=> %s\n", debugstr_sockaddr(name));
         }
         release_sock_fd( s, fd );
     }
