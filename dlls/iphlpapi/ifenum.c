@@ -169,12 +169,8 @@ BOOL isIfIndexLoopback(ULONG idx)
 DWORD get_interface_indices( BOOL skip_loopback, InterfaceIndexTable **table )
 {
     DWORD count = 0, i;
-    static struct if_nameindex *indices = NULL;
-    struct if_nameindex *p;
+    struct if_nameindex *p, *indices = if_nameindex();
     InterfaceIndexTable *ret;
-
-    if (indices == NULL)
-      indices = if_nameindex();
 
     if (table) *table = NULL;
     if (!indices) return 0;
@@ -203,6 +199,7 @@ DWORD get_interface_indices( BOOL skip_loopback, InterfaceIndexTable **table )
     }
 
 end:
+    if_freenameindex( indices );
     return count;
 }
 
@@ -820,23 +817,8 @@ static DWORD getIPAddrRowByName(PMIB_IPADDRROW ipAddrRow, const char *ifName,
 
 #if defined(HAVE_IFADDRS_H) && defined(HAVE_GETIFADDRS)
 
-int getifaddrs_cached(struct ifaddrs **ifap) {
-  static struct ifaddrs *ifa = NULL;
-
-  if (ifa == NULL)
-    getifaddrs(&ifa);
-
-  *ifap = ifa;
-  return 0;
-}
-
-void freeifaddrs_cached(struct ifaddrs *ifa)
-{
-  return;
-}
-
 /* Counts the IPv4 addresses in the system using the return value from
- * getifaddrs_cached, returning the count.
+ * getifaddrs, returning the count.
  */
 static DWORD countIPv4Addresses(struct ifaddrs *ifa)
 {
@@ -853,10 +835,10 @@ DWORD getNumIPAddresses(void)
   DWORD numAddresses = 0;
   struct ifaddrs *ifa;
 
-  if (!getifaddrs_cached(&ifa))
+  if (!getifaddrs(&ifa))
   {
     numAddresses = countIPv4Addresses(ifa);
-    freeifaddrs_cached(ifa);
+    freeifaddrs(ifa);
   }
   return numAddresses;
 }
@@ -871,7 +853,7 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
   {
     struct ifaddrs *ifa;
 
-    if (!getifaddrs_cached(&ifa))
+    if (!getifaddrs(&ifa))
     {
       DWORD size = sizeof(MIB_IPADDRTABLE);
       DWORD numAddresses = countIPv4Addresses(ifa);
@@ -900,7 +882,7 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
       }
       else
         ret = ERROR_OUTOFMEMORY;
-      freeifaddrs_cached(ifa);
+      freeifaddrs(ifa);
     }
     else
       ret = ERROR_INVALID_PARAMETER;
@@ -913,7 +895,7 @@ ULONG v6addressesFromIndex(IF_INDEX index, SOCKET_ADDRESS **addrs, ULONG *num_ad
   struct ifaddrs *ifa;
   ULONG ret;
 
-  if (!getifaddrs_cached(&ifa))
+  if (!getifaddrs(&ifa))
   {
     struct ifaddrs *p;
     ULONG n;
@@ -984,7 +966,7 @@ ULONG v6addressesFromIndex(IF_INDEX index, SOCKET_ADDRESS **addrs, ULONG *num_ad
       *masks = NULL;
       ret = ERROR_SUCCESS;
     }
-    freeifaddrs_cached(ifa);
+    freeifaddrs(ifa);
   }
   else
     ret = ERROR_NO_DATA;
