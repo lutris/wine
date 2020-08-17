@@ -1032,7 +1032,6 @@ NTSTATUS get_thread_context( HANDLE handle, context_t *context, unsigned int fla
     return ret;
 }
 
-
 /******************************************************************************
  *           NtSetLdtEntries   (NTDLL.@)
  *           ZwSetLdtEntries   (NTDLL.@)
