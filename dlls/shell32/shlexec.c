@@ -1850,6 +1850,7 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
     /* Else, try to find the executable */
     wcmd[0] = '\0';
     retval = SHELL_FindExecutable(sei_tmp.lpDirectory, lpFile, sei_tmp.lpVerb, wcmd, wcmdLen, wszKeyname, &env, sei_tmp.lpIDList, sei_tmp.lpParameters);
+    lpFile = sei_tmp.lpFile;
     if (retval > 32)  /* Found */
     {
         retval = SHELL_quote_and_execute( wcmd, wszParameters, wszKeyname,
