@@ -33,7 +33,18 @@ static void test_DwmIsCompositionEnabled(void)
     ok(enabled == TRUE || enabled == FALSE, "Got unexpected %#x.\n", enabled);
 }
 
+static void test_dwm_get_transport_attributes(void)
+{
+    BOOL isremoting, isconnected;
+    DWORD generation;
+    HRESULT hr;
+
+    hr = DwmGetTransportAttributes(&isremoting, &isconnected, &generation);
+    ok(hr == S_OK || hr == DWM_E_COMPOSITIONDISABLED, "Got unexpected %#x.\n", hr);
+}
+
 START_TEST(dwmapi)
 {
     test_DwmIsCompositionEnabled();
+    test_dwm_get_transport_attributes();
 }

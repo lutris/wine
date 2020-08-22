@@ -49,7 +49,7 @@ static LONG WINAPI stub_filter(EXCEPTION_POINTERS *eptr)
 
 static inline cstdstubbuffer_delegating_t *impl_from_delegating( IRpcStubBuffer *iface )
 {
-    return CONTAINING_RECORD(iface, cstdstubbuffer_delegating_t, stub_buffer);
+    return CONTAINING_RECORD((void *)iface, cstdstubbuffer_delegating_t, stub_buffer);
 }
 
 HRESULT CStdStubBuffer_Construct(REFIID riid,

@@ -120,6 +120,14 @@ int CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *uni
     return unix_funcs->server_handle_to_fd( handle, access, unix_fd, options );
 }
 
+ /***********************************************************************
+ *           wine_server_close_fds_by_type
+ */
+void CDECL wine_server_close_fds_by_type( enum server_fd_type type )
+{
+    unix_funcs->server_remove_fds_from_cache_by_type( type );
+}
+
 
 /***********************************************************************
  *           wine_server_release_fd   (NTDLL.@)

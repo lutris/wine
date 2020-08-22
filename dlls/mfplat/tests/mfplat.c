@@ -540,10 +540,7 @@ static void test_source_resolver(void)
     IMFStreamDescriptor_Release(sd);
 
     hr = IMFMediaTypeHandler_GetMajorType(handler, &guid);
-todo_wine
     ok(hr == S_OK, "Failed to get stream major type, hr %#x.\n", hr);
-    if (FAILED(hr))
-        goto skip_source_tests;
 
     /* Check major/minor type for the test media. */
     ok(IsEqualGUID(&guid, &MFMediaType_Video), "Unexpected major type %s.\n", debugstr_guid(&guid));
@@ -619,11 +616,12 @@ todo_wine
 
     hr = IMFMediaStream_RequestSample(video_stream, NULL);
     ok(hr == MF_E_END_OF_STREAM, "Unexpected hr %#x.\n", hr);
-    IMFMediaStream_Release(video_stream);
 
     get_event((IMFMediaEventGenerator *)mediasource, MEEndOfPresentation, NULL);
 
+    IMFMediaStream_Release(video_stream);
     IMFMediaTypeHandler_Release(handler);
+    IMFPresentationDescriptor_Release(descriptor);
 
     hr = IMFMediaSource_Shutdown(mediasource);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
@@ -631,9 +629,6 @@ todo_wine
     hr = IMFMediaSource_CreatePresentationDescriptor(mediasource, NULL);
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
-skip_source_tests:
-
-    IMFPresentationDescriptor_Release(descriptor);
     IMFMediaSource_Release(mediasource);
     IMFByteStream_Release(stream);
 

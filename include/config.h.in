@@ -1385,6 +1385,9 @@
 /* Define to the soname of the libopenal library. */
 #undef SONAME_LIBOPENAL
 
+/* Define to the soname of the libOpenCL library. */
+#undef SONAME_LIBOPENCL
+
 /* Define to the soname of the libOSMesa library. */
 #undef SONAME_LIBOSMESA
 

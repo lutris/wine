@@ -76,6 +76,9 @@ static const WCHAR system_path[] =
 
 static const WCHAR dotW[] = {'.',0};
 
+#define IS_OPTION_TRUE(ch) ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
+
+
 static BOOL imports_fixup_done = FALSE;  /* set once the imports have been fixed up, before attaching them */
 static BOOL process_detaching = FALSE;  /* set on process detach to avoid deadlocks with thread detach */
 static int free_lib_count;   /* recursion depth of LdrUnloadDll calls */
@@ -91,6 +94,8 @@ struct dll_dir_entry
 };
 
 static struct list dll_dir_list = LIST_INIT( dll_dir_list );  /* extra dirs from LdrAddDllDirectory */
+
+static BOOL hide_wine_exports = FALSE;  /* try to hide ntdll wine exports from applications */
 
 struct ldr_notification
 {
@@ -117,6 +122,9 @@ struct file_id
 {
     BYTE ObjectId[16];
 };
+
+#define HASH_MAP_SIZE 32
+static LIST_ENTRY hash_table[HASH_MAP_SIZE];
 
 /* internal representation of loaded modules */
 typedef struct _wine_modref
@@ -163,6 +171,16 @@ static PEB_LDR_DATA ldr = { sizeof(ldr), TRUE };
 static RTL_BITMAP tls_bitmap;
 static RTL_BITMAP tls_expansion_bitmap;
 static RTL_BITMAP fls_bitmap;
+static API_SET_NAMESPACE_ARRAY apiset_map;
+
+static CRITICAL_SECTION fls_section;
+static CRITICAL_SECTION_DEBUG fls_critsect_debug =
+{
+    0, 0, &fls_section,
+    { &fls_critsect_debug.ProcessLocksList, &fls_critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": fls_section") }
+};
+static CRITICAL_SECTION fls_section = { &fls_critsect_debug, -1, 0, 0, 0, 0 };;
 
 static WINE_MODREF *cached_modref;
 static WINE_MODREF *current_modref;
@@ -203,6 +221,16 @@ typedef struct _RTL_UNLOAD_EVENT_TRACE
 static RTL_UNLOAD_EVENT_TRACE unload_traces[RTL_UNLOAD_EVENT_TRACE_NUMBER];
 static RTL_UNLOAD_EVENT_TRACE *unload_trace_ptr;
 static unsigned int unload_trace_seq;
+
+static void WINAPI lock_fls_section( PVOID dummy )
+{
+    RtlEnterCriticalSection( &fls_section );
+}
+
+static void WINAPI unlock_fls_section( PVOID dummy )
+{
+    RtlLeaveCriticalSection( &fls_section );
+}
 
 static void module_push_unload_trace( const LDR_DATA_TABLE_ENTRY *ldr )
 {
@@ -458,6 +486,52 @@ static void call_ldr_notifications( ULONG reason, LDR_DATA_TABLE_ENTRY *module )
 }
 
 /*************************************************************************
+ *      hash_basename
+ *
+ * Calculates the bucket index of a dll using the basename.
+ */
+static ULONG hash_basename(const WCHAR *basename)
+{
+    WORD version = MAKEWORD(NtCurrentTeb()->Peb->OSMinorVersion,
+                            NtCurrentTeb()->Peb->OSMajorVersion);
+    ULONG hash = 0;
+
+    if (version >= 0x0602)
+    {
+        for (; *basename; basename++)
+            hash = hash * 65599 + towupper(*basename);
+    }
+    else if (version == 0x0601)
+    {
+        for (; *basename; basename++)
+            hash = hash + 65599 * towupper(*basename);
+    }
+    else
+        hash = towupper(basename[0]) - 'A';
+
+    return hash & (HASH_MAP_SIZE-1);
+}
+
+/*************************************************************************
+ *      recompute_hash_maps
+ *
+ * Recomputes the LDR hash map (necessary when windows version changes).
+ */
+static void recompute_hash_map(void)
+{
+    LIST_ENTRY *mark, *entry;
+    LDR_DATA_TABLE_ENTRY *mod;
+
+    mark = &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList;
+    for (entry = mark->Flink; entry != mark; entry = entry->Flink)
+    {
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+        RemoveEntryList( &mod->HashLinks );
+        InsertTailList( &hash_table[hash_basename(mod->BaseDllName.Buffer)], &mod->HashLinks );
+    }
+}
+
+/*************************************************************************
  *		get_modref
  *
  * Looks for the referenced HMODULE in the current process
@@ -497,10 +571,10 @@ static WINE_MODREF *find_basename_module( LPCWSTR name )
     if (cached_modref && RtlEqualUnicodeString( &name_str, &cached_modref->ldr.BaseDllName, TRUE ))
         return cached_modref;
 
-    mark = &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList;
+    mark = &hash_table[hash_basename(name)];
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+        LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, HashLinks);
         if (RtlEqualUnicodeString( &name_str, &mod->BaseDllName, TRUE ))
         {
             cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
@@ -1198,7 +1272,12 @@ static WINE_MODREF *alloc_module( HMODULE hModule, const UNICODE_STRING *nt_name
                    &wm->ldr.InLoadOrderLinks);
     InsertTailList(&NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList,
                    &wm->ldr.InMemoryOrderLinks);
+    InsertTailList(&hash_table[hash_basename(wm->ldr.BaseDllName.Buffer)],
+                   &wm->ldr.HashLinks);
+
     /* wait until init is called for inserting into InInitializationOrderModuleList */
+    wm->ldr.InInitializationOrderLinks.Flink = NULL;
+    wm->ldr.InInitializationOrderLinks.Blink = NULL;
 
     if (!(nt->OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_NX_COMPAT))
     {
@@ -1307,6 +1386,8 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved 
     if (wm->ldr.Flags & LDR_WINE_INTERNAL && reason == DLL_PROCESS_ATTACH)
         unix_funcs->init_builtin_dll( wm->ldr.DllBase );
     if (!entry) return STATUS_SUCCESS;
+
+    memset( mod_name, 0, sizeof(mod_name) );
 
     if (TRACE_ON(relay))
     {
@@ -1469,6 +1550,30 @@ static void attach_implicitly_loaded_dlls( LPVOID reserved )
     }
 }
 
+static void call_fls_callbacks(void)
+{
+    PFLS_CALLBACK_FUNCTION *fls_callbacks;
+    PRTL_BITMAP fls_bitmap;
+    void **fls_slot_data;
+    DWORD fls_index;
+
+    if ((fls_callbacks = (PFLS_CALLBACK_FUNCTION *)NtCurrentTeb()->Peb->FlsCallback) && NtCurrentTeb()->FlsSlots)
+    {
+        fls_slot_data = (void **)((BYTE *)NtCurrentTeb()->FlsSlots + sizeof(LIST_ENTRY));
+        fls_bitmap = NtCurrentTeb()->Peb->FlsBitmap;
+        fls_index = 0;
+        for (fls_index = 0; fls_index < fls_bitmap->SizeOfBitMap; ++fls_index)
+        {
+            if (!RtlAreBitsSet( fls_bitmap, fls_index, 1 ))
+                continue;
+
+            if (fls_callbacks[fls_index + 2] && fls_slot_data[fls_index])
+                fls_callbacks[fls_index + 2](fls_slot_data[fls_index]);
+
+            fls_slot_data[fls_index] = NULL;
+        }
+    }
+}
 
 /*************************************************************************
  *		process_detach
@@ -1704,6 +1809,96 @@ NTSTATUS WINAPI LdrUnlockLoaderLock( ULONG flags, ULONG_PTR magic )
 }
 
 
+/***********************************************************************
+ *           hidden_exports_init
+ *
+ * Initializes the hide_wine_exports options.
+ */
+static void hidden_exports_init( const WCHAR *appname )
+{
+    static const WCHAR configW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e',0};
+    static const WCHAR appdefaultsW[] = {'A','p','p','D','e','f','a','u','l','t','s','\\',0};
+    static const WCHAR hideWineExports[] = {'H','i','d','e','W','i','n','e','E','x','p','o','r','t','s',0};
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING nameW;
+    HANDLE root, config_key, hkey;
+    BOOL got_hide_wine_exports = FALSE;
+    char tmp[80];
+    DWORD dummy;
+
+    RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = root;
+    attr.ObjectName = &nameW;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+    RtlInitUnicodeString( &nameW, configW );
+
+    /* @@ Wine registry key: HKCU\Software\Wine */
+    if (NtOpenKey( &config_key, KEY_QUERY_VALUE, &attr )) config_key = 0;
+    NtClose( root );
+    if (!config_key) return;
+
+    if (appname && *appname)
+    {
+        const WCHAR *p;
+        WCHAR appversion[MAX_PATH+20];
+
+        if ((p = wcsrchr( appname, '/' ))) appname = p + 1;
+        if ((p = wcsrchr( appname, '\\' ))) appname = p + 1;
+
+        wcscpy( appversion, appdefaultsW );
+        wcscat( appversion, appname );
+        RtlInitUnicodeString( &nameW, appversion );
+        attr.RootDirectory = config_key;
+
+        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe */
+        if (!NtOpenKey( &hkey, KEY_QUERY_VALUE, &attr ))
+        {
+            TRACE( "getting HideWineExports from %s\n", debugstr_w(appversion) );
+
+            RtlInitUnicodeString( &nameW, hideWineExports );
+            if (!NtQueryValueKey( hkey, &nameW, KeyValuePartialInformation, tmp, sizeof(tmp), &dummy ))
+            {
+                WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)tmp)->Data;
+                hide_wine_exports = IS_OPTION_TRUE( str[0] );
+                got_hide_wine_exports = TRUE;
+            }
+
+            NtClose( hkey );
+        }
+    }
+
+    if (!got_hide_wine_exports)
+    {
+        TRACE( "getting default HideWineExports\n" );
+
+        RtlInitUnicodeString( &nameW, hideWineExports );
+        if (!NtQueryValueKey( config_key, &nameW, KeyValuePartialInformation, tmp, sizeof(tmp), &dummy ))
+        {
+            WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)tmp)->Data;
+            hide_wine_exports = IS_OPTION_TRUE( str[0] );
+        }
+    }
+
+    NtClose( config_key );
+}
+
+
+/***********************************************************************
+ *           is_hidden_export
+ *
+ * Checks if a specific export should be hidden.
+ */
+static BOOL is_hidden_export( void *proc )
+{
+    return hide_wine_exports && (proc == &wine_get_version ||
+                                 proc == &wine_get_build_id ||
+                                 proc == &wine_get_host_version);
+}
+
+
 /******************************************************************
  *		LdrGetProcedureAddress  (NTDLL.@)
  */
@@ -1724,7 +1919,7 @@ NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
         LPCWSTR load_path = NtCurrentTeb()->Peb->ProcessParameters->DllPath.Buffer;
         void *proc = name ? find_named_export( module, exports, exp_size, name->Buffer, -1, load_path )
                           : find_ordinal_export( module, exports, exp_size, ord - exports->Base, load_path );
-        if (proc)
+        if (proc && !is_hidden_export( proc ))
         {
             *address = proc;
             ret = STATUS_SUCCESS;
@@ -1903,6 +2098,7 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
             /* the module has only be inserted in the load & memory order lists */
             RemoveEntryList(&wm->ldr.InLoadOrderLinks);
             RemoveEntryList(&wm->ldr.InMemoryOrderLinks);
+            RemoveEntryList(&wm->ldr.HashLinks);
 
             /* FIXME: there are several more dangling references
              * left. Including dlls loaded by this dll before the
@@ -1933,7 +2129,13 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
 
     if (image_info->image_flags & IMAGE_FLAGS_WineBuiltin)
     {
-        if (TRACE_ON(relay)) RELAY_SetupDLL( *module );
+#ifdef __aarch64__
+        /* Always enable relay entry points on aarch64, to allow restoring
+         * the TEB to x18. */
+#else
+        if (TRACE_ON(relay))
+#endif
+            RELAY_SetupDLL( *module );
     }
     else
     {
@@ -3162,6 +3364,11 @@ fail:
 void WINAPI LdrShutdownProcess(void)
 {
     TRACE("()\n");
+
+    lock_fls_section(NULL);
+    call_fls_callbacks();
+    unlock_fls_section(NULL);
+
     process_detaching = TRUE;
     process_detach();
 }
@@ -3195,6 +3402,14 @@ void WINAPI LdrShutdownThread(void)
 
     /* don't do any detach calls if process is exiting */
     if (process_detaching) return;
+
+    if (NtCurrentTeb()->FlsSlots)
+    {
+        lock_fls_section( NULL );
+        RemoveEntryList( (LIST_ENTRY *)NtCurrentTeb()->FlsSlots );
+        call_fls_callbacks();
+        unlock_fls_section( NULL );
+    }
 
     RtlEnterCriticalSection( &loader_section );
     wm = get_modref( NtCurrentTeb()->Peb->ImageBaseAddress );
@@ -3239,6 +3454,7 @@ static void free_modref( WINE_MODREF *wm )
 {
     RemoveEntryList(&wm->ldr.InLoadOrderLinks);
     RemoveEntryList(&wm->ldr.InMemoryOrderLinks);
+    RemoveEntryList(&wm->ldr.HashLinks);
     if (wm->ldr.InInitializationOrderLinks.Flink)
         RemoveEntryList(&wm->ldr.InInitializationOrderLinks);
 
@@ -3409,6 +3625,7 @@ PIMAGE_NT_HEADERS WINAPI RtlImageNtHeader(HMODULE hModule)
  */
 void WINAPI LdrInitializeThunk( CONTEXT *context, void **entry, ULONG_PTR unknown3, ULONG_PTR unknown4 )
 {
+    static const unsigned int fls_slot_count = 8 * sizeof(NtCurrentTeb()->Peb->FlsBitmapBits);
     static int attach_done;
     int i;
     NTSTATUS status;
@@ -3443,6 +3660,25 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, void **entry, ULONG_PTR unknow
     RtlAcquirePebLock();
     InsertHeadList( &tls_links, &NtCurrentTeb()->TlsLinks );
     RtlReleasePebLock();
+
+    if (!NtCurrentTeb()->Peb->FlsCallback)
+    {
+        NtCurrentTeb()->Peb->FlsCallback = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                 (fls_slot_count + 2) * sizeof(void*) );
+        if (!NtCurrentTeb()->Peb->FlsCallback)
+            ERR( "No memory for FLS callbacks.\n" );
+
+        if (NtCurrentTeb()->Peb->FlsCallback)
+        {
+            NtCurrentTeb()->Peb->FlsCallback[0] = lock_fls_section;
+            NtCurrentTeb()->Peb->FlsCallback[1] = unlock_fls_section;
+        }
+    }
+    NtCurrentTeb()->FlsSlots = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+             sizeof(LIST_ENTRY) + fls_slot_count * sizeof(void*) );
+    lock_fls_section( NULL );
+    InsertTailList(&NtCurrentTeb()->Peb->FlsListHead, (LIST_ENTRY *)NtCurrentTeb()->FlsSlots);
+    unlock_fls_section( NULL );
 
     if (!attach_done)  /* first time around */
     {
@@ -3486,6 +3722,32 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, void **entry, ULONG_PTR unknow
     }
 
     RtlLeaveCriticalSection( &loader_section );
+}
+
+
+/***********************************************************************
+ *           elevate_process
+ */
+static void elevate_process( void )
+{
+    NTSTATUS status;
+    HANDLE token;
+
+    if (!(token = __wine_create_default_token( TRUE )))
+    {
+        ERR( "Failed to create admin token\n" );
+        return;
+    }
+
+    SERVER_START_REQ( replace_process_token )
+    {
+        req->token = wine_server_obj_handle( token );
+        if ((status = wine_server_call( req )))
+            ERR( "Failed to replace process token: %08x\n", status );
+    }
+    SERVER_END_REQ;
+
+    NtClose( token );
 }
 
 
@@ -3886,6 +4148,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
     return TRUE;
 }
 
+void *Wow64Transition;
 
 /***********************************************************************
  *           __wine_process_init
@@ -3895,12 +4158,16 @@ void __wine_process_init(void)
     static const WCHAR ntdllW[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
                                    's','y','s','t','e','m','3','2','\\',
                                    'n','t','d','l','l','.','d','l','l',0};
+    static const WCHAR wow64cpuW[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
+                                      's','y','s','t','e','m','3','2','\\',
+                                      'w','o','w','6','4','c','p','u','.','d','l','l',0};
     static const WCHAR kernel32W[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
                                       's','y','s','t','e','m','3','2','\\',
                                       'k','e','r','n','e','l','3','2','.','d','l','l',0};
     void (WINAPI *kernel32_start_process)(LPTHREAD_START_ROUTINE,void*) = NULL;
     RTL_USER_PROCESS_PARAMETERS *params;
-    WINE_MODREF *wm;
+    ACTIVATION_CONTEXT_RUN_LEVEL_INFORMATION runlevel;
+    WINE_MODREF *wm, *wow64cpu_wm;
     NTSTATUS status;
     ANSI_STRING func_name;
     UNICODE_STRING nt_name;
@@ -3908,9 +4175,11 @@ void __wine_process_init(void)
     INITIAL_TEB stack;
     TEB *teb = NtCurrentTeb();
     PEB *peb = teb->Peb;
+    DWORD i;
 
     peb->LdrData            = &ldr;
     peb->FastPebLock        = &peb_lock;
+    peb->ApiSetMap          = &apiset_map;
     peb->TlsBitmap          = &tls_bitmap;
     peb->TlsExpansionBitmap = &tls_expansion_bitmap;
     peb->FlsBitmap          = &fls_bitmap;
@@ -3946,6 +4215,10 @@ void __wine_process_init(void)
     load_global_options();
     version_init();
 
+    /* initialize hash table */
+    for (i = 0; i < HASH_MAP_SIZE; i++)
+        InitializeListHead(&hash_table[i]);
+
     /* setup the load callback and create ntdll modref */
     RtlInitUnicodeString( &nt_name, ntdllW );
     NtQueryVirtualMemory( GetCurrentProcess(), __wine_process_init, MemoryBasicInformation,
@@ -3959,6 +4232,13 @@ void __wine_process_init(void)
         MESSAGE( "wine: could not load kernel32.dll, status %x\n", status );
         NtTerminateProcess( GetCurrentProcess(), status );
     }
+
+    RtlInitUnicodeString( &nt_name, wow64cpuW );
+    if ((status = load_builtin_dll( NULL, &nt_name, 0, 0, &wow64cpu_wm )) == STATUS_SUCCESS)
+        Wow64Transition = wow64cpu_wm->ldr.DllBase;
+    else
+        WARN( "could not load wow64cpu.dll, status %#x\n", status );
+
     RtlInitAnsiString( &func_name, "__wine_start_process" );
     if ((status = LdrGetProcedureAddress( wm->ldr.DllBase, &func_name,
                                           0, (void **)&kernel32_start_process )) != STATUS_SUCCESS)
@@ -4021,6 +4301,18 @@ void __wine_process_init(void)
     }
 #endif
 
+    hidden_exports_init( wm->ldr.FullDllName.Buffer );
+
+    /* elevate process if necessary */
+    status = RtlQueryInformationActivationContext( 0, NULL, 0, RunlevelInformationInActivationContext,
+                                                   &runlevel, sizeof(runlevel), NULL );
+    if (!status && (runlevel.RunLevel == ACTCTX_RUN_LEVEL_HIGHEST_AVAILABLE ||
+                    runlevel.RunLevel == ACTCTX_RUN_LEVEL_REQUIRE_ADMIN))
+    {
+        TRACE( "Application requested admin rights (run level %d)\n", runlevel.RunLevel );
+        elevate_process();  /* FIXME: the process exists with a wrong token for a short time */
+    }
+
     /* the main exe needs to be the first in the load order list */
     RemoveEntryList( &wm->ldr.InLoadOrderLinks );
     InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderLinks );
@@ -4031,6 +4323,9 @@ void __wine_process_init(void)
     teb->Tib.StackBase = stack.StackBase;
     teb->Tib.StackLimit = stack.StackLimit;
     teb->DeallocationStack = stack.DeallocationStack;
+
+    /* the windows version was not set yet when ntdll and kernel32 were loaded */
+    recompute_hash_map();
 
     unix_funcs->server_init_process_done( kernel32_start_process );
 }

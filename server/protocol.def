@@ -312,6 +312,13 @@ struct hardware_msg_data
             int            y;       /* y coordinate */
             unsigned int   data;    /* mouse data */
         } mouse;
+        struct
+        {
+            int            type;    /* RIM_TYPEHID */
+            obj_handle_t   device;
+            unsigned int   length;  /* HID report length */
+            /* followed by length bytes of HID report data  */
+        } hid;
     } rawinput;
 };
 
@@ -335,7 +342,7 @@ typedef union
     int type;
     struct
     {
-        int            type;    /* INPUT_KEYBOARD */
+        int            type;    /* HW_INPUT_KEYBOARD */
         unsigned short vkey;    /* virtual key code */
         unsigned short scan;    /* scan code */
         unsigned int   flags;   /* event flags */
@@ -344,7 +351,7 @@ typedef union
     } kbd;
     struct
     {
-        int            type;    /* INPUT_MOUSE */
+        int            type;    /* HW_INPUT_MOUSE */
         int            x;       /* coordinates */
         int            y;
         unsigned int   data;    /* mouse data */
@@ -354,11 +361,23 @@ typedef union
     } mouse;
     struct
     {
-        int            type;    /* INPUT_HARDWARE */
+        int            type;    /* HW_INPUT_HARDWARE */
         unsigned int   msg;     /* message code */
         lparam_t       lparam;  /* message param */
     } hw;
+    struct
+    {
+        int            type;    /* HW_INPUT_HID */
+        obj_handle_t   device;
+        unsigned char  usage_page;
+        unsigned char  usage;
+        unsigned int   length;
+    } hid;
 } hw_input_t;
+#define HW_INPUT_MOUSE    0
+#define HW_INPUT_KEYBOARD 1
+#define HW_INPUT_HARDWARE 2
+#define HW_INPUT_HID      3
 
 typedef union
 {
@@ -795,6 +814,7 @@ struct rawinput_device
     unsigned int access;         /* access rights for process object */
     client_cpu_t cpu;            /* CPU that the new process will use */
     data_size_t  info_size;      /* size of startup info */
+    obj_handle_t token;          /* token for the new process */
     VARARG(objattr,object_attributes);   /* object attributes */
     VARARG(info,startup_info,info_size); /* startup information */
     VARARG(env,unicode_str);     /* environment for new process */
@@ -1051,6 +1071,9 @@ struct rawinput_device
     obj_handle_t handle;       /* handle to close */
 @END
 
+/* Close all sockets for the current process */
+@REQ(socket_cleanup)
+@END
 
 /* Set a handle information */
 @REQ(set_handle_info)
@@ -1297,6 +1320,7 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Get the Unix name from a file handle */
 @REQ(get_handle_unix_name)
     obj_handle_t   handle;      /* file handle */
+    int            nofollow;    /* do not follow symlinks (return the link) */
 @REPLY
     data_size_t    name_len;    /* unix name length */
     VARARG(name,string);        /* unix name */
@@ -1410,6 +1434,12 @@ enum server_fd_type
 @END
 
 
+/* Mark a socket to be reused after "closed" */
+@REQ(reuse_socket)
+    obj_handle_t handle;       /* handle to the socket */
+@END
+
+
 /* Set socket event parameters */
 @REQ(set_socket_event)
     obj_handle_t  handle;        /* handle to the socket */
@@ -1440,6 +1470,7 @@ enum server_fd_type
     int family;                 /* family, see socket manpage */
     int type;                   /* type, see socket manpage */
     int protocol;               /* protocol, see socket manpage */
+    timeout_t connect_time;     /* time the socket was connected (relative) */
 @END
 
 
@@ -1609,6 +1640,15 @@ enum server_fd_type
 /* Unmap a memory view from the current process */
 @REQ(unmap_view)
     client_ptr_t base;          /* view base address */
+@END
+
+
+/* Get file for a mapping */
+@REQ(get_mapping_file)
+    obj_handle_t process;       /* process handle */
+    client_ptr_t addr;          /* arbitrary address in view */
+@REPLY
+    obj_handle_t handle;        /* handle to file */
 @END
 
 
@@ -2081,6 +2121,7 @@ enum message_type
     user_handle_t   win;       /* window handle */
     hw_input_t      input;     /* input data */
     unsigned int    flags;     /* flags (see below) */
+    VARARG(data,bytes);        /* hid report data */
 @REPLY
     int             wait;      /* do we need to wait for a reply? */
     int             prev_x;    /* previous cursor position */
@@ -2090,6 +2131,8 @@ enum message_type
     VARARG(keystate,bytes);    /* global state array for all the keys */
 @END
 #define SEND_HWMSG_INJECTED    0x01
+#define SEND_HWMSG_RAWINPUT    0x02
+#define SEND_HWMSG_WINDOW      0x04
 
 
 /* Get a message from the current queue */
@@ -2537,6 +2580,13 @@ enum coords_relative
 @REQ(set_window_region)
     user_handle_t  window;        /* handle to the window */
     int            redraw;        /* redraw the window? */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
+@END
+
+
+/* Set the layer region */
+@REQ(set_layer_region)
+    user_handle_t  window;        /* handle to the window */
     VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
 @END
 
@@ -3185,6 +3235,16 @@ enum caret_state
     obj_handle_t  new_handle; /* duplicated handle */
 @END
 
+@REQ(filter_token)
+    obj_handle_t  handle;          /* handle to the token to duplicate */
+    unsigned int  flags;           /* flags */
+    data_size_t   privileges_size; /* size of privileges */
+    VARARG(privileges,LUID_AND_ATTRIBUTES,privileges_size); /* privileges to remove from new token */
+    VARARG(disable_sids,SID);      /* array of groups to remove from new token */
+@REPLY
+    obj_handle_t  new_handle;      /* filtered handle */
+@END
+
 @REQ(access_check)
     obj_handle_t    handle; /* handle to the token */
     unsigned int    desired_access; /* desired access to the object */
@@ -3206,6 +3266,13 @@ enum caret_state
 @REPLY
     data_size_t     sid_len;      /* length needed to store sid */
     VARARG(sid,SID);              /* the sid specified by which_sid from the token */
+@END
+
+@REQ(get_token_integrity)
+    obj_handle_t    handle;       /* handle to the token */
+@REPLY
+    data_size_t     sid_len;      /* length needed to store sid */
+    VARARG(sid,SID);              /* the integrity sid */
 @END
 
 @REQ(get_token_groups)
@@ -3247,6 +3314,7 @@ struct handle_info
     process_id_t owner;
     obj_handle_t handle;
     unsigned int access;
+    unsigned int type;
 };
 
 /* Return a list of all opened handles */
@@ -3356,6 +3424,16 @@ struct handle_info
 /* Query object type name information */
 @REQ(get_object_type)
     obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    unsigned int   index;         /* type index */
+    data_size_t    total;         /* needed size for type name */
+    VARARG(type,unicode_str);     /* type name */
+@END
+
+
+/* Query object type name information */
+@REQ(get_object_type_by_index)
+    unsigned int   index;         /* index of the type */
 @REPLY
     data_size_t    total;         /* needed size for type name */
     VARARG(type,unicode_str);     /* type name */
@@ -3478,6 +3556,29 @@ struct handle_info
 @END
 
 
+/* Get elevation level of token */
+@REQ(get_token_elevation_type)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    unsigned int   elevation;     /* elevation level */
+@END
+
+
+/* Create a new token */
+@REQ(create_token)
+    unsigned int  admin;        /* admin or limited token */
+@REPLY
+    obj_handle_t  token;        /* handle for new token */
+@END
+
+
+/* Create a new token */
+@REQ(replace_process_token)
+    obj_handle_t  token;        /* new process token */
+@REPLY
+@END
+
+
 /* Create I/O completion port */
 @REQ(create_completion)
     unsigned int access;          /* desired access to a port */
@@ -3567,6 +3668,13 @@ struct handle_info
     int          link;            /* link instead of renaming */
     int          replace;         /* replace an existing file? */
     VARARG(filename,string);      /* new file name */
+@END
+
+
+/* set fd eof information */
+@REQ(set_fd_eof_info)
+    obj_handle_t handle;        /* handle to a file or directory */
+    file_pos_t   eof;           /* offset of eof of file */
 @END
 
 

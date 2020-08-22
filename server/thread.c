@@ -121,6 +121,7 @@ static const struct object_ops thread_apc_ops =
     NULL,                       /* unlink_name */
     no_open_file,               /* open_file */
     no_kernel_obj_list,         /* get_kernel_obj_list */
+    no_alloc_handle,            /* alloc_handle */
     no_close_handle,            /* close_handle */
     thread_apc_destroy          /* destroy */
 };
@@ -157,6 +158,7 @@ static const struct object_ops context_ops =
     NULL,                       /* unlink_name */
     no_open_file,               /* open_file */
     no_kernel_obj_list,         /* get_kernel_obj_list */
+    no_alloc_handle,            /* alloc_handle */
     no_close_handle,            /* close_handle */
     no_destroy                  /* destroy */
 };
@@ -191,6 +193,7 @@ static const struct object_ops thread_ops =
     NULL,                       /* unlink_name */
     no_open_file,               /* open_file */
     thread_get_kernel_obj_list, /* get_kernel_obj_list */
+    no_alloc_handle,            /* alloc_handle */
     no_close_handle,            /* close_handle */
     destroy_thread              /* destroy */
 };
@@ -239,6 +242,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->token           = NULL;
     thread->desc            = NULL;
     thread->desc_len        = 0;
+    thread->exit_poll       = NULL;
 
     thread->creation_time = current_time;
     thread->exit_time     = 0;
@@ -430,6 +434,7 @@ static void destroy_thread( struct object *obj )
     list_remove( &thread->entry );
     cleanup_thread( thread );
     release_object( thread->process );
+    if (thread->exit_poll) remove_timeout_user( thread->exit_poll );
     if (thread->id) free_ptid( thread->id );
     if (thread->token) release_object( thread->token );
 }
@@ -446,15 +451,14 @@ static void dump_thread( struct object *obj, int verbose )
 
 static struct object_type *thread_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'T','h','r','e','a','d'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Thread, sizeof(type_Thread) };
     return get_object_type( &str );
 }
 
 static int thread_signaled( struct object *obj, struct wait_queue_entry *entry )
 {
     struct thread *mythread = (struct thread *)obj;
-    return (mythread->state == TERMINATED);
+    return mythread->state == TERMINATED && !mythread->exit_poll;
 }
 
 static unsigned int thread_map_access( struct object *obj, unsigned int access )
@@ -608,7 +612,10 @@ static void set_thread_info( struct thread *thread,
         if ((req->priority >= min && req->priority <= max) ||
             req->priority == THREAD_PRIORITY_IDLE ||
             req->priority == THREAD_PRIORITY_TIME_CRITICAL)
+        {
             thread->priority = req->priority;
+            set_scheduler_priority( thread );
+        }
         else
             set_error( STATUS_INVALID_PARAMETER );
     }
@@ -1245,6 +1252,26 @@ int thread_get_inflight_fd( struct thread *thread, int client )
     return -1;
 }
 
+static void check_terminated( void *arg )
+{
+    struct thread *thread = arg;
+    assert( thread->obj.ops == &thread_ops );
+    assert( thread->state == TERMINATED );
+
+    /* don't wake up until the thread is really dead, to avoid race conditions */
+    if (thread->unix_tid != -1 && !kill( thread->unix_tid, 0 ))
+    {
+        thread->exit_poll = add_timeout_user( -TICKS_PER_SEC / 1000, check_terminated, thread );
+        return;
+    }
+
+    /* grab reference since object can be destroyed while trying to wake up */
+    grab_object( &thread->obj );
+    thread->exit_poll = NULL;
+    wake_up( &thread->obj, 0 );
+    release_object( &thread->obj );
+}
+
 /* kill a thread on the spot */
 void kill_thread( struct thread *thread, int violent_death )
 {
@@ -1265,8 +1292,12 @@ void kill_thread( struct thread *thread, int violent_death )
     kill_console_processes( thread, 0 );
     debug_exit_thread( thread );
     abandon_mutexes( thread );
-    wake_up( &thread->obj, 0 );
-    if (violent_death) send_thread_signal( thread, SIGQUIT );
+    if (violent_death)
+    {
+        send_thread_signal( thread, SIGQUIT );
+        check_terminated( thread );
+    }
+    else wake_up( &thread->obj, 0 );
     cleanup_thread( thread );
     remove_process_thread( thread->process, thread );
     release_object( thread );

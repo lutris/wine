@@ -18,6 +18,9 @@
 
 #include "config.h"
 
+#include <stdio.h>
+#include <assert.h>
+
 #include <gst/gst.h>
 
 #include "objbase.h"
@@ -49,6 +52,16 @@ static void CALLBACK perform_cb(TP_CALLBACK_INSTANCE *instance, void *user)
 
     if (cbdata->type < GSTDEMUX_MAX)
         perform_cb_gstdemux(cbdata);
+    else if (cbdata->type < MEDIA_SOURCE_MAX)
+        perform_cb_media_source(cbdata);
+    else if (cbdata->type < MF_DECODE_MAX)
+        perform_cb_mf_decode(cbdata);
+    else
+    {
+        fprintf(stderr, "No handler registered for callback\n");
+        assert(0);
+    }
+
 
     pthread_mutex_lock(&cbdata->lock);
     cbdata->finished = 1;
@@ -300,4 +313,180 @@ gboolean query_sink_wrapper(GstPad *pad, GstObject *parent, GstQuery *query)
     call_cb(&cbdata);
 
     return cbdata.u.query_sink_data.ret;
+}
+
+GstFlowReturn pull_from_bytestream_wrapper(GstPad *pad, GstObject *parent, guint64 ofs, guint len,
+        GstBuffer **buf)
+{
+    struct cb_data cbdata = { PULL_FROM_BYTESTREAM };
+
+    cbdata.u.getrange_data.pad = pad;
+    cbdata.u.getrange_data.parent = parent;
+    cbdata.u.getrange_data.ofs = ofs;
+    cbdata.u.getrange_data.len = len;
+    cbdata.u.getrange_data.buf = buf;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.getrange_data.ret;
+}
+
+gboolean query_bytestream_wrapper(GstPad *pad, GstObject *parent, GstQuery *query)
+{
+    struct cb_data cbdata = { QUERY_BYTESTREAM };
+
+    cbdata.u.query_function_data.pad = pad;
+    cbdata.u.query_function_data.parent = parent;
+    cbdata.u.query_function_data.query = query;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.query_function_data.ret;
+}
+
+gboolean activate_bytestream_pad_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate)
+{
+    struct cb_data cbdata = { ACTIVATE_BYTESTREAM_PAD_MODE };
+
+    cbdata.u.activate_mode_data.pad = pad;
+    cbdata.u.activate_mode_data.parent = parent;
+    cbdata.u.activate_mode_data.mode = mode;
+    cbdata.u.activate_mode_data.activate = activate;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.activate_mode_data.ret;
+}
+
+gboolean process_bytestream_pad_event_wrapper(GstPad *pad, GstObject *parent, GstEvent *event)
+{
+    struct cb_data cbdata = { PROCESS_BYTESTREAM_PAD_EVENT };
+
+    cbdata.u.event_src_data.pad = pad;
+    cbdata.u.event_src_data.parent = parent;
+    cbdata.u.event_src_data.event = event;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.event_src_data.ret;
+}
+
+GstBusSyncReply watch_source_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user)
+{
+    struct cb_data cbdata = { WATCH_SOURCE_BUS };
+
+    cbdata.u.watch_bus_data.bus = bus;
+    cbdata.u.watch_bus_data.msg = message;
+    cbdata.u.watch_bus_data.user = user;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.watch_bus_data.ret;
+}
+
+void source_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user)
+{
+    struct cb_data cbdata = { SOURCE_STREAM_ADDED };
+
+    cbdata.u.pad_added_data.element = bin;
+    cbdata.u.pad_added_data.pad = pad;
+    cbdata.u.pad_added_data.user = user;
+
+    call_cb(&cbdata);
+}
+
+void source_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer user)
+{
+    struct cb_data cbdata = { SOURCE_STREAM_REMOVED };
+
+    cbdata.u.pad_removed_data.element = element;
+    cbdata.u.pad_removed_data.pad = pad;
+    cbdata.u.pad_removed_data.user = user;
+
+    call_cb(&cbdata);
+}
+
+void source_all_streams_wrapper(GstElement *element, gpointer user)
+{
+    struct cb_data cbdata = { SOURCE_ALL_STREAMS };
+
+    cbdata.u.no_more_pads_data.element = element;
+    cbdata.u.no_more_pads_data.user = user;
+
+    call_cb(&cbdata);
+}
+
+GstFlowReturn stream_new_sample_wrapper(GstElement *appsink, gpointer user)
+{
+    struct cb_data cbdata = { STREAM_NEW_SAMPLE };
+
+    cbdata.u.new_sample_data.appsink = appsink;
+    cbdata.u.new_sample_data.user = user;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.new_sample_data.ret;
+}
+
+gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate)
+{
+    struct cb_data cbdata = { ACTIVATE_PUSH_MODE };
+
+    cbdata.u.activate_mode_data.pad = pad;
+    cbdata.u.activate_mode_data.parent = parent;
+    cbdata.u.activate_mode_data.mode = mode;
+    cbdata.u.activate_mode_data.activate = activate;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.query_function_data.ret;
+}
+
+gboolean query_input_src_wrapper(GstPad *pad, GstObject *parent, GstQuery *query)
+{
+    struct cb_data cbdata = { QUERY_INPUT_SRC };
+
+    cbdata.u.query_function_data.pad = pad;
+    cbdata.u.query_function_data.parent = parent;
+    cbdata.u.query_function_data.query = query;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.query_function_data.ret;
+}
+
+GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user)
+{
+    struct cb_data cbdata = { WATCH_DECODER_BUS };
+
+    cbdata.u.watch_bus_data.bus = bus;
+    cbdata.u.watch_bus_data.msg = message;
+    cbdata.u.watch_bus_data.user = user;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.watch_bus_data.ret;
+}
+
+void decoder_pad_added_wrapper(GstElement *element, GstPad *pad, gpointer user)
+{
+    struct cb_data cbdata = { DECODER_PAD_ADDED };
+
+    cbdata.u.pad_added_data.element = element;
+    cbdata.u.pad_added_data.pad = pad;
+    cbdata.u.pad_added_data.user = user;
+
+    call_cb(&cbdata);
+}
+
+GstFlowReturn decoder_new_sample_wrapper(GstElement *appsink, gpointer user)
+{
+    struct cb_data cbdata = {DECODER_NEW_SAMPLE};
+
+    cbdata.u.new_sample_data.appsink = appsink;
+    cbdata.u.new_sample_data.user = user;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.new_sample_data.ret;
 }

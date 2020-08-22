@@ -106,6 +106,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(menubuilder);
 #define IS_OPTION_TRUE(ch) \
     ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
 
+/* On linux we create all menu item entries with an absolute path to wine,
+ * in order to allow using multiple wine versions at the same time. */
+#ifdef __linux__
+    static const char wine_path[] = BINDIR "/wine";
+#else
+    static const char wine_path[] = "wine";
+#endif
+
 /* link file formats */
 
 #include "pshpack1.h"
@@ -1466,11 +1474,12 @@ static BOOL write_desktop_entry(const char *unix_link, const char *location, con
     fprintf(file, "[Desktop Entry]\n");
     fprintf(file, "Name=%s\n", linkname);
     if (prefix)
-        fprintf(file, "Exec=env WINEPREFIX=\"%s\" wine %s %s\n", prefix, path, args);
+        fprintf(file, "Exec=env WINEPREFIX=\"%s\" %s %s %s\n", prefix, wine_path, path, args);
     else if (home)
-        fprintf(file, "Exec=env WINEPREFIX=\"%s/.wine\" wine %s %s\n", home, path, args);
+        fprintf(file, "Exec=env WINEPREFIX=\"%s/.wine\" %s %s %s\n", home, wine_path, path, args);
     else
-        fprintf(file, "Exec=wine %s %s\n", path, args);
+        fprintf(file, "Exec=%s %s %s\n", wine_path, path, args);
+
     fprintf(file, "Type=Application\n");
     fprintf(file, "StartupNotify=true\n");
     if (descr && *descr)
@@ -2470,7 +2479,7 @@ static BOOL write_freedesktop_mime_type_entry(const char *packages_dir, const ch
     return ret;
 }
 
-static BOOL is_extension_banned(LPCWSTR extension)
+static BOOL is_extension_banned(const WCHAR *extension)
 {
     /* These are managed through external tools like wine.desktop, to evade malware created file type associations */
     static const WCHAR comW[] = {'.','c','o','m',0};
@@ -2481,6 +2490,42 @@ static BOOL is_extension_banned(LPCWSTR extension)
         !strcmpiW(extension, exeW) ||
         !strcmpiW(extension, msiW))
         return TRUE;
+    return FALSE;
+}
+
+static BOOL is_soft_blacklisted(const WCHAR *extension, const WCHAR *command)
+{
+    static const WCHAR FileOpenBlacklistW[] = {'S','o','f','t','w','a','r','e','\\',
+                                               'W','i','n','e','\\',
+                                               'F','i','l','e','O','p','e','n','B','l','a','c','k','l','i','s','t','\\',0};
+    WCHAR blacklist_key_path[MAX_PATH];
+    HKEY blacklist_key;
+    WCHAR program_name[MAX_PATH], *blacklisted_command;
+    DWORD len = ARRAY_SIZE(program_name);
+    DWORD i = 0;
+
+    if (ARRAY_SIZE(FileOpenBlacklistW) + lstrlenW(extension) > ARRAY_SIZE(blacklist_key_path))
+        return FALSE;
+
+    lstrcpyW(blacklist_key_path, FileOpenBlacklistW);
+    lstrcatW(blacklist_key_path, extension);
+
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, blacklist_key_path, 0, KEY_QUERY_VALUE, &blacklist_key) != ERROR_SUCCESS)
+        return FALSE;
+
+    while (RegEnumValueW(blacklist_key, i, program_name, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
+    {
+        blacklisted_command = reg_get_valW(HKEY_CURRENT_USER, blacklist_key_path, program_name);
+        if (strcmpW(command, blacklisted_command) == 0)
+        {
+            RegCloseKey(blacklist_key);
+            return TRUE;
+        }
+        len = ARRAY_SIZE(program_name);
+        i++;
+    }
+
+    RegCloseKey(blacklist_key);
     return FALSE;
 }
 
@@ -2513,11 +2558,11 @@ static BOOL write_freedesktop_association_entry(const char *desktopPath, const c
         fprintf(desktop, "Name=%s\n", friendlyAppName);
         fprintf(desktop, "MimeType=%s;\n", mimeType);
         if (prefix)
-            fprintf(desktop, "Exec=env WINEPREFIX=\"%s\" wine start /ProgIDOpen %s %%f\n", prefix, progId);
+            fprintf(desktop, "Exec=env WINEPREFIX=\"%s\" %s start /ProgIDOpen %s %%f\n", prefix, wine_path, progId);
         else if (home)
-            fprintf(desktop, "Exec=env WINEPREFIX=\"%s/.wine\" wine start /ProgIDOpen %s %%f\n", home, progId);
+            fprintf(desktop, "Exec=env WINEPREFIX=\"%s/.wine\" %s start /ProgIDOpen %s %%f\n", home, wine_path, progId);
         else
-            fprintf(desktop, "Exec=wine start /ProgIDOpen %s %%f\n", progId);
+            fprintf(desktop, "Exec=%s start /ProgIDOpen %s %%f\n", wine_path, progId);
         fprintf(desktop, "NoDisplay=true\n");
         fprintf(desktop, "StartupNotify=true\n");
         if (openWithIcon)
@@ -2581,6 +2626,15 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
             WCHAR *progIdW = NULL;
             char *progIdA = NULL;
             char *mimeProgId = NULL;
+
+            commandW = assoc_query(ASSOCSTR_COMMAND, extensionW, openW);
+            if (commandW == NULL)
+                /* no command => no application is associated */
+                goto end;
+
+            if (is_soft_blacklisted(extensionW, commandW))
+                /* command is on the blacklist => desktop integration is not desirable */
+                goto end;
 
             extensionA = wchars_to_utf8_chars(strlwrW(extensionW));
             if (extensionA == NULL)
@@ -2649,11 +2703,6 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
                     goto end;
                 }
             }
-
-            commandW = assoc_query(ASSOCSTR_COMMAND, extensionW, openW);
-            if (commandW == NULL)
-                /* no command => no application is associated */
-                goto end;
 
             executableW = assoc_query(ASSOCSTR_EXECUTABLE, extensionW, openW);
             if (executableW)

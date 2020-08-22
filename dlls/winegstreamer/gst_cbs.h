@@ -43,7 +43,23 @@ enum CB_TYPE {
     AUTOPLUG_BLACKLIST,
     UNKNOWN_TYPE,
     QUERY_SINK,
-    GSTDEMUX_MAX
+    GSTDEMUX_MAX,
+    PULL_FROM_BYTESTREAM,
+    QUERY_BYTESTREAM,
+    ACTIVATE_BYTESTREAM_PAD_MODE,
+    PROCESS_BYTESTREAM_PAD_EVENT,
+    WATCH_SOURCE_BUS,
+    SOURCE_STREAM_ADDED,
+    SOURCE_STREAM_REMOVED,
+    SOURCE_ALL_STREAMS,
+    STREAM_NEW_SAMPLE,
+    MEDIA_SOURCE_MAX,
+    ACTIVATE_PUSH_MODE,
+    QUERY_INPUT_SRC,
+    DECODER_NEW_SAMPLE,
+    WATCH_DECODER_BUS,
+    DECODER_PAD_ADDED,
+    MF_DECODE_MAX,
 };
 
 struct cb_data {
@@ -128,6 +144,17 @@ struct cb_data {
             GstQuery *query;
             gboolean ret;
         } query_sink_data;
+        struct new_sample_data {
+            GstElement *appsink;
+            gpointer user;
+            GstFlowReturn ret;
+        } new_sample_data;
+        struct chain_data {
+            GstPad *pad;
+            GstObject *parent;
+            GstBuffer *buffer;
+            GstFlowReturn ret;
+        } chain_data;
     } u;
 
     int finished;
@@ -138,6 +165,8 @@ struct cb_data {
 
 void mark_wine_thread(void) DECLSPEC_HIDDEN;
 void perform_cb_gstdemux(struct cb_data *data) DECLSPEC_HIDDEN;
+void perform_cb_media_source(struct cb_data *data) DECLSPEC_HIDDEN;
+void perform_cb_mf_decode(struct cb_data *data) DECLSPEC_HIDDEN;
 
 GstBusSyncReply watch_bus_wrapper(GstBus *bus, GstMessage *msg, gpointer user) DECLSPEC_HIDDEN;
 void existing_new_pad_wrapper(GstElement *bin, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
@@ -154,5 +183,19 @@ GstAutoplugSelectResult autoplug_blacklist_wrapper(GstElement *bin, GstPad *pad,
 void unknown_type_wrapper(GstElement *bin, GstPad *pad, GstCaps *caps, gpointer user) DECLSPEC_HIDDEN;
 void Gstreamer_transform_pad_added_wrapper(GstElement *filter, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
 gboolean query_sink_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
+GstFlowReturn pull_from_bytestream_wrapper(GstPad *pad, GstObject *parent, guint64 ofs, guint len, GstBuffer **buf) DECLSPEC_HIDDEN;
+gboolean query_bytestream_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
+gboolean activate_bytestream_pad_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate) DECLSPEC_HIDDEN;
+gboolean process_bytestream_pad_event_wrapper(GstPad *pad, GstObject *parent, GstEvent *event) DECLSPEC_HIDDEN;
+GstBusSyncReply watch_source_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user) DECLSPEC_HIDDEN;
+void source_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
+void source_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
+void source_all_streams_wrapper(GstElement *element, gpointer user) DECLSPEC_HIDDEN;
+GstFlowReturn stream_new_sample_wrapper(GstElement *appsink, gpointer user) DECLSPEC_HIDDEN;
+gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate) DECLSPEC_HIDDEN;
+gboolean query_input_src_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
+GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user) DECLSPEC_HIDDEN;
+GstFlowReturn decoder_new_sample_wrapper(GstElement *appsink, gpointer user) DECLSPEC_HIDDEN;
+void decoder_pad_added_wrapper(GstElement *element, GstPad *Pad, gpointer user) DECLSPEC_HIDDEN;
 
 #endif

@@ -13,6 +13,7 @@ WINE_1.0
     wine_exec_wine_binary;
     wine_get_build_id;
     wine_get_version;
+    wine_get_patches;
     wine_init;
     wine_init_argv0_path;
     wine_mmap_add_reserved_area;

@@ -54,3 +54,52 @@ coclass Gstreamer_Splitter {}
     uuid(88753b26-5b24-49bd-b2e7-0c445c78c982)
 ]
 coclass VideoProcessorMFT {}
+
+[
+    helpstring("MP4 Byte Stream Handler"),
+    threading(both),
+    uuid(271c3902-6095-4c45-a22f-20091816ee9e)
+]
+coclass MPEG4ByteStreamHandler {}
+
+[
+    threading(both),
+    uuid(62ce7e72-4c71-4d20-b15d-452831a87d9d)
+]
+coclass CMSH264DecoderMFT { }
+
+[
+    threading(both),
+    uuid(32d186a7-218f-4c75-8876-dd77273a8999)
+]
+coclass CMSAACDecMFT { }
+
+[
+    threading(both),
+    uuid(5686a0d9-fe39-409f-9dff-3fdbc849f9f5)
+]
+coclass CMpeg4sDecMFT { }
+
+[
+    threading(both),
+    uuid(41457294-644c-4298-a28a-BD69F2C0CF3B)
+]
+coclass ASFByteStreamHandler {}
+
+[
+    threading(both),
+    uuid(82d353df-90bd-4382-8bc2-3f6192b76e34)
+]
+coclass CLSID_CWMVDecMediaObject {}
+
+[
+    threading(both),
+    uuid(2eeb4adf-4578-4d10-bca7-bb955f56320a)
+]
+coclass CLSID_CWMADecMediaObject {}
+
+[
+    threading(both),
+    uuid(98230571-0087-4204-b020-3282538e57d3)
+]
+coclass CColorConvertDMO { }

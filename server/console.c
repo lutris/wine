@@ -99,6 +99,7 @@ static const struct object_ops console_input_ops =
     NULL,                             /* unlink_name */
     console_input_open_file,          /* open_file */
     no_kernel_obj_list,               /* get_kernel_obj_list */
+    no_alloc_handle,                  /* alloc_handle */
     no_close_handle,                  /* close_handle */
     console_input_destroy             /* destroy */
 };
@@ -157,6 +158,7 @@ static const struct object_ops console_input_events_ops =
     NULL,                             /* unlink_name */
     console_input_events_open_file,   /* open_file */
     no_kernel_obj_list,               /* get_kernel_obj_list */
+    no_alloc_handle,                  /* alloc_handle */
     no_close_handle,                  /* close_handle */
     console_input_events_destroy      /* destroy */
 };
@@ -237,6 +239,7 @@ static const struct object_ops screen_buffer_ops =
     NULL,                             /* unlink_name */
     screen_buffer_open_file,          /* open_file */
     no_kernel_obj_list,               /* get_kernel_obj_list */
+    no_alloc_handle,                  /* alloc_handle */
     no_close_handle,                  /* close_handle */
     screen_buffer_destroy             /* destroy */
 };
@@ -283,6 +286,7 @@ static const struct object_ops console_device_ops =
     default_unlink_name,              /* unlink_name */
     console_device_open_file,         /* open_file */
     no_kernel_obj_list,               /* get_kernel_obj_list */
+    no_alloc_handle,                  /* alloc_handle */
     no_close_handle,                  /* close_handle */
     no_destroy                        /* destroy */
 };

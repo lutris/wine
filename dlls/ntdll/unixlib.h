@@ -99,6 +99,7 @@ struct unix_funcs
     /* server functions */
     unsigned int  (CDECL *server_call)( void *req_ptr );
     void          (CDECL *server_send_fd)( int fd );
+    void          (CDECL *server_remove_fds_from_cache_by_type)( enum server_fd_type type );
     NTSTATUS      (CDECL *server_fd_to_handle)( int fd, unsigned int access, unsigned int attributes,
                                                 HANDLE *handle );
     NTSTATUS      (CDECL *server_handle_to_fd)( HANDLE handle, unsigned int access, int *unix_fd,

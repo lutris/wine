@@ -41,6 +41,11 @@ struct ThreadWindows
     HWND *handles;
 };
 
+/* Index the order the buttons need to appear to an ID* constant */
+static const int buttonOrder[10] = { IDYES, IDNO, IDOK, IDABORT, IDRETRY,
+                                 IDCANCEL, IDIGNORE, IDTRYAGAIN,
+                                 IDCONTINUE, IDHELP };
+
 static BOOL CALLBACK MSGBOX_EnumProc(HWND hwnd, LPARAM lParam)
 {
     struct ThreadWindows *threadWindows = (struct ThreadWindows *)lParam;
@@ -73,11 +78,6 @@ static void MSGBOX_OnInit(HWND hwnd, LPMSGBOXPARAMSW lpmb)
     LPCWSTR lpszText;
     WCHAR *buffer = NULL;
     const WCHAR *ptr;
-
-    /* Index the order the buttons need to appear to an ID* constant */
-    static const int buttonOrder[10] = { IDYES, IDNO, IDOK, IDABORT, IDRETRY,
-                                         IDCANCEL, IDIGNORE, IDTRYAGAIN,
-                                         IDCONTINUE, IDHELP };
 
     nclm.cbSize = sizeof(nclm);
     SystemParametersInfoW (SPI_GETNONCLIENTMETRICS, 0, &nclm, 0);
@@ -310,12 +310,99 @@ static void MSGBOX_OnInit(HWND hwnd, LPMSGBOXPARAMSW lpmb)
     }
 
     /*handle modal message boxes*/
-    if (((lpmb->dwStyle & MB_TASKMODAL) && (lpmb->hwndOwner==NULL)) || (lpmb->dwStyle & MB_SYSTEMMODAL))
-        SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
+    if (lpmb->dwStyle & MB_SYSTEMMODAL)
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
 
     HeapFree( GetProcessHeap(), 0, buffer );
 }
 
+static void MSGBOX_CopyToClipbaord( HWND hwnd )
+{
+    int i;
+    static const WCHAR line[] = {'-','-','-','-','-','-','-','-','-','-','-','-','-','-','-','-','-','-','-',
+                           '-','-','-','-','-','-','-','-','\r','\n', 0};
+    static const WCHAR carriage[] = {'\r','\n', 0};
+    static const WCHAR spaces[] = {' ',' ',' ', 0};
+    int lenTitle = GetWindowTextLengthW(hwnd) + 1;
+    int lenMsg = GetWindowTextLengthW(GetDlgItem(hwnd, MSGBOX_IDTEXT)) + 1;
+
+    /*
+    ---------------------------
+    Dialog Title
+    ---------------------------
+    Dialog Message
+    ---------------------------
+    Button(s) Text. OK
+    ---------------------------
+    */
+    int len = ((sizeof(carriage) * 3) + (sizeof(line) * 4) + lenTitle + lenMsg) * sizeof(WCHAR);
+    WCHAR *text = heap_alloc(len);
+    if(text)
+    {
+        lstrcpyW(text, line);
+        if (GetWindowTextW(hwnd, text + lstrlenW(text), lenTitle))
+        {
+            HGLOBAL hMem;
+            WCHAR *data;
+
+            lstrcatW(text, carriage);
+            lstrcatW(text, line);
+            GetWindowTextW(GetDlgItem(hwnd, MSGBOX_IDTEXT), text + lstrlenW(text), lenMsg);
+            lstrcatW(text, carriage);
+            lstrcatW(text, line);
+
+            for (i = 0; i < ARRAY_SIZE(buttonOrder); i++)
+            {
+                HWND hItem = GetDlgItem(hwnd, buttonOrder[i]);
+                if (GetWindowLongW(hItem, GWL_STYLE) & WS_VISIBLE)
+                {
+                    WCHAR buffer[1024] = {0};
+                    int j = 0, k = lstrlenW(text);
+                    GetWindowTextW(hItem, buffer, 1024);
+                    while(buffer[j] != 0)
+                    {
+                        if(buffer[j] != '&')
+                            text[k++] = buffer[j];
+                        j++;
+                    }
+                    text[k] = 0;
+                    lstrcatW(text, spaces);
+                }
+            }
+
+            lstrcatW(text, carriage);
+            lstrcatW(text, line);
+
+            hMem = GlobalAlloc(GMEM_MOVEABLE|GMEM_DDESHARE|GMEM_ZEROINIT, (len + 1) * sizeof(WCHAR));
+            data = GlobalLock(hMem);
+            lstrcpyW(data, text);
+            GlobalUnlock(hMem);
+
+            OpenClipboard(hwnd);
+            EmptyClipboard();
+            SetClipboardData(CF_UNICODETEXT, hMem);
+            CloseClipboard();
+        }
+
+        heap_free(text);
+    }
+}
+
+HHOOK msghook_handle;
+
+LRESULT CALLBACK msg_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+    MSG *msg = (MSG *)lParam;
+    if (nCode == MSGF_DIALOGBOX && msg->message == WM_KEYUP)
+    {
+        if ( (msg->wParam == 'C' || msg->wParam == 'c') && (GetKeyState(VK_CONTROL) & 0x8000))
+        {
+            MSGBOX_CopyToClipbaord(GetParent(msg->hwnd));
+        }
+    }
+
+    return CallNextHookEx(msghook_handle, nCode, wParam, lParam);
+}
 
 /**************************************************************************
  *           MSGBOX_DlgProc
@@ -332,8 +419,17 @@ static INT_PTR CALLBACK MSGBOX_DlgProc( HWND hwnd, UINT message,
        SetWindowContextHelpId(hwnd, mbp->dwContextHelpId);
        MSGBOX_OnInit(hwnd, mbp);
        SetPropA(hwnd, "WINE_MSGBOX_HELPCALLBACK", mbp->lpfnMsgBoxCallback);
+       msghook_handle = SetWindowsHookExA(WH_MSGFILTER, msg_hook_proc, NULL, GetCurrentThreadId());
        break;
    }
+   case WM_COPY:
+   {
+        MSGBOX_CopyToClipbaord(hwnd);
+        break;
+   }
+   case WM_DESTROY:
+       UnhookWindowsHookEx(msghook_handle);
+       break;
 
    case WM_COMMAND:
     switch (LOWORD(wParam))
@@ -377,7 +473,6 @@ static INT_PTR CALLBACK MSGBOX_DlgProc( HWND hwnd, UINT message,
   }
   return 0;
 }
-
 
 /**************************************************************************
  *		MessageBoxA (USER32.@)

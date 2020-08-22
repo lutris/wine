@@ -795,6 +795,41 @@ static ULONG_PTR find_pe_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *e
     return find_named_export( module, exports, (char *)name->Name );
 }
 
+static void fixup_syscall_table(const IMAGE_EXPORT_DIRECTORY *ntdll_exports)
+{
+    extern unsigned int syscall_count;
+    extern void *syscall_table[];
+    unsigned int fixup_count;
+    void **pe_syscall_table;
+    unsigned int i;
+
+    pe_syscall_table = (void **)find_named_export( ntdll_module, ntdll_exports, "pe_syscall_table" );
+
+    if (!pe_syscall_table)
+    {
+        ERR( "pe_syscall_table not found\n" );
+        return;
+    }
+
+    fixup_count = 0;
+    for (i = 0; i < syscall_count; ++i)
+    {
+        assert ( (syscall_table[i] == (void *)0xdeadbeef
+                && pe_syscall_table[i] && pe_syscall_table[i] != (void *)0xdeadcafe)
+                || (pe_syscall_table[i] == (void *)0xdeadcafe && syscall_table[i]
+                && syscall_table[i] != (void *)0xdeadbeef) );
+
+        if (syscall_table[i] == (void *)0xdeadbeef)
+        {
+            syscall_table[i] = pe_syscall_table[i];
+            ++fixup_count;
+        }
+    }
+
+    if (!fixup_count)
+        FIXME("No functions to fixup.\n");
+}
+
 static void fixup_ntdll_imports( const IMAGE_NT_HEADERS *nt )
 {
     const IMAGE_EXPORT_DIRECTORY *ntdll_exports = get_export_dir( ntdll_module );
@@ -834,6 +869,8 @@ static void fixup_ntdll_imports( const IMAGE_NT_HEADERS *nt )
         import_list++;
         thunk_list++;
     }
+
+    fixup_syscall_table(ntdll_exports);
 
 #define GET_FUNC(name) \
     if (!(p##name = (void *)find_named_export( ntdll_module, ntdll_exports, #name ))) \
@@ -1412,6 +1449,7 @@ static struct unix_funcs unix_funcs =
     exec_process,
     wine_server_call,
     server_send_fd,
+    server_remove_fds_from_cache_by_type,
     server_fd_to_handle,
     server_handle_to_fd,
     server_release_fd,
@@ -1706,6 +1744,7 @@ void __wine_main( int argc, char *argv[], char *envp[] )
 #endif
 
     virtual_init();
+    signal_init_early();
 
     ntdll_module = load_ntdll();
     fixup_ntdll_imports( &__wine_spec_nt_header );

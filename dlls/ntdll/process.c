@@ -73,6 +73,24 @@ HANDLE CDECL __wine_make_process_system(void)
 }
 
 /***********************************************************************
+ *           __wine_create_default_token   (NTDLL.@)
+ *
+ * Creates a default limited or admin token.
+ */
+HANDLE CDECL __wine_create_default_token( BOOL admin )
+{
+    HANDLE ret = NULL;
+    SERVER_START_REQ( create_token )
+    {
+        req->admin = admin;
+        if (!wine_server_call( req ))
+            ret = wine_server_ptr_handle( reply->token );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
  *           restart_process
  */
 NTSTATUS restart_process( RTL_USER_PROCESS_PARAMETERS *params, NTSTATUS status )

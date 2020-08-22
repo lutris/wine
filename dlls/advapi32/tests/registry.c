@@ -1312,6 +1312,13 @@ static void test_reg_create_key(void)
     RegDeleteKeyA(hkey1, "");
     RegCloseKey(hkey1);
 
+    /* System\CurrentControlSet\Control\Video should be non-volatile */
+    ret = RegCreateKeyExA(HKEY_LOCAL_MACHINE, "System\\CurrentControlSet\\Control\\Video\\Wine",
+                          0, NULL, 0, KEY_NOTIFY, NULL, &hkey1, NULL);
+    ok(ret == ERROR_SUCCESS, "RegCreateKeyExA failed with error %d\n", ret);
+    RegDeleteKeyA(hkey1, "");
+    RegCloseKey(hkey1);
+
     /* WOW64 flags - open an existing key */
     hkey1 = NULL;
     ret = RegCreateKeyExA(HKEY_LOCAL_MACHINE, "Software", 0, NULL, 0, KEY_READ|KEY_WOW64_32KEY, NULL, &hkey1, NULL);
@@ -3270,6 +3277,38 @@ static void test_classesroot_mask(void)
     RegCloseKey( hkey );
 }
 
+static void test_perflib_key(void)
+{
+    DWORD size;
+    LONG ret;
+    HKEY key;
+
+    ret = RegOpenKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Perflib\\009", &key);
+    ok(ret == ERROR_SUCCESS, "RegOpenKeyA failed with error %u\n", ret);
+
+    ret = RegQueryValueExA(key, "Counter", NULL, NULL, NULL, &size);
+    if (ret != ERROR_SUCCESS)
+    {
+        skip("Perflib\\009\\Counter does not exist, skipping perflib test\n");
+        goto done;
+    }
+    ok(ret == ERROR_SUCCESS, "RegQueryValueExA failed with error %u\n", ret);
+
+    /* Windows only compares the first few characters of the value name.
+     * On Windows XP / 2003, it is sufficient to use "Cou", newer versions
+     * require a longer substring. */
+
+    ret = RegQueryValueExA(key, "Counters", NULL, NULL, NULL, &size);
+    ok(ret == ERROR_SUCCESS, "RegQueryValueExA failed with error %u\n", ret);
+    ret = RegQueryValueExA(key, "Counter2", NULL, NULL, NULL, &size);
+    todo_wine ok(ret == ERROR_SUCCESS, "RegQueryValueExA failed with error %u\n", ret);
+    ret = RegQueryValueExA(key, "CounterWine", NULL, NULL, NULL, &size);
+    todo_wine ok(ret == ERROR_SUCCESS, "RegQueryValueExA failed with error %u\n", ret);
+
+done:
+    RegCloseKey(key);
+}
+
 static void test_deleted_key(void)
 {
     HKEY hkey, hkey2;
@@ -4156,6 +4195,7 @@ START_TEST(registry)
     test_classesroot();
     test_classesroot_enum();
     test_classesroot_mask();
+    test_perflib_key();
     test_reg_save_key();
     test_reg_load_key();
     test_reg_unload_key();

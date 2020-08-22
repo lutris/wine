@@ -25,6 +25,9 @@
 #include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>
 #include <gnutls/abstract.h>
+#ifdef SONAME_LIBGCRYPT
+#include <gcrypt.h>
+#endif
 #elif HAVE_COMMONCRYPTO_COMMONCRYPTOR_H
 #include <AvailabilityMacros.h>
 #include <CommonCrypto/CommonCryptor.h>
@@ -243,6 +246,8 @@ struct key
 struct secret
 {
     struct object hdr;
+    UCHAR *data;
+    ULONG len;
 };
 
 NTSTATUS get_alg_property( const struct algorithm *, const WCHAR *, UCHAR *, ULONG, ULONG * ) DECLSPEC_HIDDEN;
@@ -264,6 +269,7 @@ NTSTATUS key_export_dsa_capi( struct key *, UCHAR *, ULONG, ULONG * ) DECLSPEC_H
 NTSTATUS key_export_ecc( struct key *, UCHAR *, ULONG, ULONG * ) DECLSPEC_HIDDEN;
 NTSTATUS key_import_dsa_capi( struct key *, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
 NTSTATUS key_import_ecc( struct key *, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
+NTSTATUS compute_secret_ecc (struct key *pubkey_in, struct key *privkey_in, struct secret *secret) DECLSPEC_HIDDEN;
 
 BOOL is_zero_vector( const UCHAR *, ULONG ) DECLSPEC_HIDDEN;
 BOOL is_equal_vector( const UCHAR *, ULONG, const UCHAR *, ULONG ) DECLSPEC_HIDDEN;

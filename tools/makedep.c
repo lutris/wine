@@ -174,6 +174,7 @@ struct makefile
     struct strarray include_paths;
     struct strarray include_args;
     struct strarray define_args;
+    struct strarray extraincl_args;
     struct strarray programs;
     struct strarray scripts;
     struct strarray imports;
@@ -183,6 +184,7 @@ struct makefile
     struct strarray install_lib;
     struct strarray install_dev;
     struct strarray extra_targets;
+    struct strarray parent_dirs;
     struct strarray extra_imports;
     struct list     sources;
     struct list     includes;
@@ -191,7 +193,6 @@ struct makefile
     const char     *obj_dir;
     const char     *top_src_dir;
     const char     *top_obj_dir;
-    const char     *parent_dir;
     const char     *module;
     const char     *testdll;
     const char     *sharedlib;
@@ -1376,15 +1377,24 @@ static struct file *open_local_file( const struct makefile *make, const char *pa
 {
     char *src_path = root_dir_path( base_dir_path( make, path ));
     struct file *ret = load_file( src_path );
+    unsigned int i;
 
-    /* if not found, try parent dir */
-    if (!ret && make->parent_dir)
+    /* if not found, try parent dirs */
+    for (i = 0; !ret && i < make->parent_dirs.count; i++)
     {
+        char *new_path;
+
         free( src_path );
-        path = strmake( "%s/%s", make->parent_dir, path );
-        src_path = root_dir_path( base_dir_path( make, path ));
+        new_path = strmake( "%s/%s", make->parent_dirs.str[i], path );
+        src_path = root_dir_path( base_dir_path( make, new_path ));
         ret = load_file( src_path );
-        if (ret) ret->flags |= FLAG_PARENTDIR;
+        if (ret)
+        {
+            ret->flags |= FLAG_PARENTDIR;
+            path = new_path;
+        }
+        else
+            free(new_path);
     }
 
     if (ret) *filename = src_dir_path( make, path );
@@ -3109,6 +3119,7 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
             if (source->use_msvcrt) output_filenames( msvcrt_flags );
         }
         output_filenames( extra_cflags );
+        output_filenames( make->extraincl_args );
         output_filenames( cpp_flags );
         output_filename( "$(CFLAGS)" );
         output( "\n" );
@@ -4271,13 +4282,13 @@ static void load_sources( struct makefile *make )
     strarray_set_value( &make->vars, "top_srcdir", top_src_dir_path( make, "" ));
     strarray_set_value( &make->vars, "srcdir", src_dir_path( make, "" ));
 
-    make->parent_dir    = get_expanded_make_variable( make, "PARENTSRC" );
     make->module        = get_expanded_make_variable( make, "MODULE" );
     make->testdll       = get_expanded_make_variable( make, "TESTDLL" );
     make->sharedlib     = get_expanded_make_variable( make, "SHAREDLIB" );
     make->staticlib     = get_expanded_make_variable( make, "STATICLIB" );
     make->importlib     = get_expanded_make_variable( make, "IMPORTLIB" );
 
+    make->parent_dirs   = get_expanded_make_var_array( make, "PARENTSRC" );
     make->programs      = get_expanded_make_var_array( make, "PROGRAMS" );
     make->scripts       = get_expanded_make_var_array( make, "SCRIPTS" );
     make->imports       = get_expanded_make_var_array( make, "IMPORTS" );
@@ -4309,6 +4320,7 @@ static void load_sources( struct makefile *make )
     make->include_paths = empty_strarray;
     make->include_args = empty_strarray;
     make->define_args = empty_strarray;
+    make->extraincl_args = empty_strarray;
     strarray_add( &make->define_args, "-D__WINESRC__" );
 
     value = get_expanded_make_var_array( make, "EXTRAINCL" );
@@ -4316,14 +4328,17 @@ static void load_sources( struct makefile *make )
         if (!strncmp( value.str[i], "-I", 2 ))
             strarray_add_uniq( &make->include_paths, value.str[i] + 2 );
         else
-            strarray_add_uniq( &make->define_args, value.str[i] );
+            strarray_add_uniq( &make->extraincl_args, value.str[i] );
     strarray_addall( &make->define_args, get_expanded_make_var_array( make, "EXTRADEFS" ));
 
     strarray_add( &make->include_args, strmake( "-I%s", obj_dir_path( make, "" )));
     if (make->src_dir)
         strarray_add( &make->include_args, strmake( "-I%s", make->src_dir ));
-    if (make->parent_dir)
-        strarray_add( &make->include_args, strmake( "-I%s", src_dir_path( make, make->parent_dir )));
+    if (make->parent_dirs.count)
+    {
+        for (i = 0; i < make->parent_dirs.count; i++)
+            strarray_add( &make->include_args, strmake( "-I%s", src_dir_path( make, make->parent_dirs.str[i] )));
+    }
     strarray_add( &make->include_args, strmake( "-I%s", top_obj_dir_path( make, "include" )));
     if (make->top_src_dir)
         strarray_add( &make->include_args, strmake( "-I%s", top_src_dir_path( make, "include" )));

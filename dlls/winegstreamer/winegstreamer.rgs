@@ -12,3 +12,47 @@ HKCR
         }
     }
 }
+
+HKLM
+{
+    NoRemove 'Software'
+    {
+        NoRemove 'Microsoft'
+        {
+            NoRemove 'Windows Media Foundation'
+            {
+                NoRemove 'ByteStreamHandlers'
+                {
+                    '.asf'
+                    {
+                        val '{41457294-644C-4298-A28A-BD69F2C0CF3B}' = s 'ASF Byte Stream Handler'
+                    }
+                    '.m4v'
+                    {
+                        val '{271C3902-6095-4c45-A22F-20091816EE9E}' = s 'MPEG4 Byte Stream Handler'
+                    }
+                    '.mp4'
+                    {
+                        val '{271C3902-6095-4c45-A22F-20091816EE9E}' = s 'MPEG4 Byte Stream Handler'
+                    }
+                    '.wma'
+                    {
+                        val '{41457294-644C-4298-A28A-BD69F2C0CF3B}' = s 'ASF Byte Stream Handler'
+                    }
+                    '.wmv'
+                    {
+                        val '{41457294-644C-4298-A28A-BD69F2C0CF3B}' = s 'ASF Byte Stream Handler'
+                    }
+                    'video/m4v'
+                    {
+                        val '{271C3902-6095-4c45-A22F-20091816EE9E}' = s 'MPEG4 Byte Stream Handler'
+                    }
+                    'video/mp4'
+                    {
+                        val '{271C3902-6095-4c45-A22F-20091816EE9E}' = s 'MPEG4 Byte Stream Handler'
+                    }
+                }
+            }
+        }
+    }
+}

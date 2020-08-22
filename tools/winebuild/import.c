@@ -564,7 +564,8 @@ static void check_undefined_exports( DLLSPEC *spec )
                             spec->src_name, odp->lineno, odp->link_name );
                 break;
             default:
-                if (!strcmp( odp->link_name, "__wine_syscall_dispatcher" )) break;
+                if (!strcmp( odp->link_name, "__wine_syscall_dispatcher" )
+                        || !strcmp( odp->link_name, "pe_syscall_table" )) break;
                 error( "%s:%d: external symbol '%s' is not a function\n",
                        spec->src_name, odp->lineno, odp->link_name );
                 break;
@@ -1419,11 +1420,13 @@ void output_syscalls( DLLSPEC *spec )
     const unsigned int invalid_param = 0xc000000d; /* STATUS_INVALID_PARAMETER */
     int i, count;
     ORDDEF **syscalls = NULL;
+    int is_ntdll = spec->dll_name && !strcmp(spec->dll_name, "ntdll");
 
     for (i = count = 0; i < spec->nb_entry_points; i++)
     {
         ORDDEF *odp = &spec->entry_points[i];
-        if (!(odp->flags & FLAG_SYSCALL)) continue;
+        if (!(odp->flags & FLAG_SYSCALL) && (!is_ntdll
+                || (strncmp(odp->link_name, "Nt", 2) && strncmp(odp->link_name, "Zw", 2)))) continue;
         if (!syscalls) syscalls = xmalloc( (spec->nb_entry_points - i) * sizeof(*syscalls) );
         syscalls[count++] = odp;
     }
@@ -1525,6 +1528,7 @@ void output_syscalls( DLLSPEC *spec )
             /* Legends of Runeterra hooks the first system call return instruction, and
              * depends on us returning to it. Adjust the return address accordingly. */
             output( "\tsubq $0xb,0x8(%%rbp)\n" );
+            output( "\tsubq $0xf000,%%rax\n" );
             output( "\tcmpq $%u,%%rax\n", count );
             output( "\tjae 4f\n" );
             output( "\tleaq .Lsyscall_args(%%rip),%%rcx\n" );
@@ -1662,25 +1666,56 @@ void output_syscalls( DLLSPEC *spec )
         }
         output_cfi( ".cfi_endproc" );
         output_function_size( "__wine_syscall_dispatcher" );
-
         output( "\t.data\n" );
+
         output( "\t.align %d\n", get_alignment( get_ptr_size() ) );
+        output( "%s\n", asm_globl("syscall_count") );
+        output( "\t.long %u\n", count );
+
+        output( "\t.align %d\n", get_alignment( get_ptr_size() ) );
+        output( "%s\n", asm_globl("syscall_table") );
         output( ".Lsyscall_table:\n" );
         for (i = 0; i < count; i++)
-            output( "\t%s %s\n", get_asm_ptr_keyword(), asm_name( get_link_name( syscalls[i] )));
+        {
+            if (syscalls[i]->flags & FLAG_SYSCALL)
+                output( "\t%s %s\n", get_asm_ptr_keyword(), asm_name( get_link_name( syscalls[i] )));
+            else
+                output( "\t%s 0xdeadbeef\n", get_asm_ptr_keyword());
+        }
         output( ".Lsyscall_args:\n" );
         for (i = 0; i < count; i++)
             output( "\t.byte %u\n", get_args_size( syscalls[i] ));
         return;
     }
 
+    output( "\t.data\n" );
+    output( "\t.align %d\n", get_alignment( get_ptr_size() ) );
+    output( "%s\n", asm_globl("pe_syscall_table") );
+    output( ".Lpe_syscall_table:\n" );
+
+    for (i = 0; i < count; i++)
+    {
+        if (!(syscalls[i]->flags & FLAG_SYSCALL))
+            output( "\t%s %s\n", get_asm_ptr_keyword(), asm_name( get_link_name( syscalls[i] )));
+        else
+            output( "\t%s 0xdeadcafe\n", get_asm_ptr_keyword());
+    }
+    output( "\t.text\n" );
+
     for (i = 0; i < count; i++)
     {
         ORDDEF *odp = syscalls[i];
         const char *name = get_link_name(odp);
+        char exp_name[256];
+
+        if (odp->flags & FLAG_SYSCALL)
+            strcpy(exp_name, name);
+        else
+            sprintf(exp_name, "_syscall_%s", name);
+
         output( "\t.align %d\n", get_alignment(16) );
-        output( "\t%s\n", func_declaration(name) );
-        output( "%s\n", asm_globl(name) );
+        output( "\t%s\n", func_declaration(exp_name) );
+        output( "%s\n", asm_globl(exp_name) );
         output_cfi( ".cfi_startproc" );
         switch (target_cpu)
         {
@@ -1708,23 +1743,17 @@ void output_syscalls( DLLSPEC *spec )
              * validate that instruction, we can just put a jmp there instead. */
             output( "\t.byte 0x4c,0x8b,0xd1\n" ); /* movq %rcx,%r10 */
             output( "\t.byte 0xb8\n" );           /* movl $i,%eax */
-            output( "\t.long %u\n", i );
+            output( "\t.long %u\n", 0xf000 + i );
             output( "\t.byte 0xf6,0x04,0x25,0x08,0x03,0xfe,0x7f,0x01\n" ); /* testb $1,0x7ffe0308 */
             output( "\t.byte 0x75,0x03\n" );      /* jne 1f */
             output( "\t.byte 0x0f,0x05\n" );      /* syscall */
             output( "\t.byte 0xc3\n" );           /* ret */
             output( "\tjmp 1f\n" );
             output( "\t.byte 0xc3\n" );           /* ret */
-            if (target_platform == PLATFORM_WINDOWS)
-            {
-                output( "1:\t.byte 0xff,0x14,0x25\n" ); /* 2: callq *(__wine_syscall_dispatcher) */
-                output( "\t.long __wine_syscall_dispatcher\n" );
-            }
-            else
-            {
-                output( "\tnop\n" );
-                output( "1:\tcallq *%s(%%rip)\n", asm_name("__wine_syscall_dispatcher") );
-            }
+
+            output( "1:\t.byte 0xff,0x14,0x25\n" ); /* call *(user_shared_data + 0x1000) */
+            output( "\t.long 0x7ffe1000\n" );
+
             output( "\tret\n" );
             break;
         case CPU_ARM:
@@ -1751,7 +1780,7 @@ void output_syscalls( DLLSPEC *spec )
             assert(0);
         }
         output_cfi( ".cfi_endproc" );
-        output_function_size( name );
+        output_function_size( exp_name );
     }
 
     if (target_cpu == CPU_x86 && !UsePIC)
@@ -1759,7 +1788,7 @@ void output_syscalls( DLLSPEC *spec )
         output( "\t.align %d\n", get_alignment(16) );
         output( "\t%s\n", func_declaration("__wine_syscall") );
         output( "%s:\n", asm_name("__wine_syscall") );
-        output( "\tjmp *(%s)\n", asm_name("__wine_syscall_dispatcher") );
+        output( "\tjmp *(0x7ffe1000)\n" );
         output_function_size( "__wine_syscall" );
     }
     output( "\t.data\n" );
