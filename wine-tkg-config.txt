@@ -1,0 +1,29 @@
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Сб 22 авг 2020 22:01:35 MSK :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 5.15.r0.g019fcaa364
+Using wine-staging patchset (version 5.15.2.r0.g8e208995)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Using VKD3D for d3d12 translation
+
+Done applying reverting hotfixes (if any) - list available in prepare.log
+
+FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
+childwindow.patch -- ( Applied child window for vk patch )
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: 
+
+
+
+proton-winevulkan-nofshack.patch -- ( Using Proton winevulkan patches (nofshack) )
+josh-flat-theme.patch -- ( Add Josh's better-theme )
+proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
+
+Applied your own patch ps9999-winealsa_latency.mypatch
+Applied your own patch ps9999-winepulse_latency.mypatch
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

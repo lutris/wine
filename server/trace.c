@@ -1292,6 +1292,7 @@ static void dump_new_process_request( const struct new_process_request *req )
     fprintf( stderr, ", access=%08x", req->access );
     dump_client_cpu( ", cpu=", &req->cpu );
     fprintf( stderr, ", info_size=%u", req->info_size );
+    fprintf( stderr, ", token=%04x", req->token );
     dump_varargs_object_attributes( ", objattr=", cur_size );
     dump_varargs_startup_info( ", info=", min(cur_size,req->info_size) );
     dump_varargs_unicode_str( ", env=", cur_size );
@@ -1567,6 +1568,10 @@ static void dump_get_apc_result_reply( const struct get_apc_result_reply *req )
 static void dump_close_handle_request( const struct close_handle_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_socket_cleanup_request( const struct socket_cleanup_request *req )
+{
 }
 
 static void dump_set_handle_info_request( const struct set_handle_info_request *req )
@@ -1859,6 +1864,7 @@ static void dump_alloc_file_handle_reply( const struct alloc_file_handle_reply *
 static void dump_get_handle_unix_name_request( const struct get_handle_unix_name_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", nofollow=%d", req->nofollow );
 }
 
 static void dump_get_handle_unix_name_reply( const struct get_handle_unix_name_reply *req )
@@ -1978,6 +1984,11 @@ static void dump_accept_into_socket_request( const struct accept_into_socket_req
     fprintf( stderr, ", ahandle=%04x", req->ahandle );
 }
 
+static void dump_reuse_socket_request( const struct reuse_socket_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 static void dump_set_socket_event_request( const struct set_socket_event_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -2012,6 +2023,7 @@ static void dump_get_socket_info_reply( const struct get_socket_info_reply *req 
     fprintf( stderr, " family=%d", req->family );
     fprintf( stderr, ", type=%d", req->type );
     fprintf( stderr, ", protocol=%d", req->protocol );
+    dump_timeout( ", connect_time=", &req->connect_time );
 }
 
 static void dump_enable_socket_event_request( const struct enable_socket_event_request *req )
@@ -2184,6 +2196,17 @@ static void dump_map_view_request( const struct map_view_request *req )
 static void dump_unmap_view_request( const struct unmap_view_request *req )
 {
     dump_uint64( " base=", &req->base );
+}
+
+static void dump_get_mapping_file_request( const struct get_mapping_file_request *req )
+{
+    fprintf( stderr, " process=%04x", req->process );
+    dump_uint64( ", addr=", &req->addr );
+}
+
+static void dump_get_mapping_file_reply( const struct get_mapping_file_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
 }
 
 static void dump_get_mapping_committed_range_request( const struct get_mapping_committed_range_request *req )
@@ -2653,6 +2676,7 @@ static void dump_send_hardware_message_request( const struct send_hardware_messa
     fprintf( stderr, " win=%08x", req->win );
     dump_hw_input( ", input=", &req->input );
     fprintf( stderr, ", flags=%08x", req->flags );
+    dump_varargs_bytes( ", data=", cur_size );
 }
 
 static void dump_send_hardware_message_reply( const struct send_hardware_message_reply *req )
@@ -3131,6 +3155,12 @@ static void dump_set_window_region_request( const struct set_window_region_reque
 {
     fprintf( stderr, " window=%08x", req->window );
     fprintf( stderr, ", redraw=%d", req->redraw );
+    dump_varargs_rectangles( ", region=", cur_size );
+}
+
+static void dump_set_layer_region_request( const struct set_layer_region_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
     dump_varargs_rectangles( ", region=", cur_size );
 }
 
@@ -3837,6 +3867,20 @@ static void dump_duplicate_token_reply( const struct duplicate_token_reply *req 
     fprintf( stderr, " new_handle=%04x", req->new_handle );
 }
 
+static void dump_filter_token_request( const struct filter_token_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", privileges_size=%u", req->privileges_size );
+    dump_varargs_LUID_AND_ATTRIBUTES( ", privileges=", min(cur_size,req->privileges_size) );
+    dump_varargs_SID( ", disable_sids=", cur_size );
+}
+
+static void dump_filter_token_reply( const struct filter_token_reply *req )
+{
+    fprintf( stderr, " new_handle=%04x", req->new_handle );
+}
+
 static void dump_access_check_request( const struct access_check_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -3863,6 +3907,17 @@ static void dump_get_token_sid_request( const struct get_token_sid_request *req 
 }
 
 static void dump_get_token_sid_reply( const struct get_token_sid_reply *req )
+{
+    fprintf( stderr, " sid_len=%u", req->sid_len );
+    dump_varargs_SID( ", sid=", cur_size );
+}
+
+static void dump_get_token_integrity_request( const struct get_token_integrity_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_token_integrity_reply( const struct get_token_integrity_reply *req )
 {
     fprintf( stderr, " sid_len=%u", req->sid_len );
     dump_varargs_SID( ", sid=", cur_size );
@@ -4045,6 +4100,18 @@ static void dump_get_object_type_request( const struct get_object_type_request *
 
 static void dump_get_object_type_reply( const struct get_object_type_reply *req )
 {
+    fprintf( stderr, " index=%08x", req->index );
+    fprintf( stderr, ", total=%u", req->total );
+    dump_varargs_unicode_str( ", type=", cur_size );
+}
+
+static void dump_get_object_type_by_index_request( const struct get_object_type_by_index_request *req )
+{
+    fprintf( stderr, " index=%08x", req->index );
+}
+
+static void dump_get_object_type_by_index_reply( const struct get_object_type_by_index_reply *req )
+{
     fprintf( stderr, " total=%u", req->total );
     dump_varargs_unicode_str( ", type=", cur_size );
 }
@@ -4177,6 +4244,31 @@ static void dump_get_token_statistics_reply( const struct get_token_statistics_r
     fprintf( stderr, ", privilege_count=%d", req->privilege_count );
 }
 
+static void dump_get_token_elevation_type_request( const struct get_token_elevation_type_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_token_elevation_type_reply( const struct get_token_elevation_type_reply *req )
+{
+    fprintf( stderr, " elevation=%08x", req->elevation );
+}
+
+static void dump_create_token_request( const struct create_token_request *req )
+{
+    fprintf( stderr, " admin=%08x", req->admin );
+}
+
+static void dump_create_token_reply( const struct create_token_reply *req )
+{
+    fprintf( stderr, " token=%04x", req->token );
+}
+
+static void dump_replace_process_token_request( const struct replace_process_token_request *req )
+{
+    fprintf( stderr, " token=%04x", req->token );
+}
+
 static void dump_create_completion_request( const struct create_completion_request *req )
 {
     fprintf( stderr, " access=%08x", req->access );
@@ -4269,6 +4361,12 @@ static void dump_set_fd_name_info_request( const struct set_fd_name_info_request
     fprintf( stderr, ", link=%d", req->link );
     fprintf( stderr, ", replace=%d", req->replace );
     dump_varargs_string( ", filename=", cur_size );
+}
+
+static void dump_set_fd_eof_info_request( const struct set_fd_eof_info_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", eof=", &req->eof );
 }
 
 static void dump_get_window_layered_info_request( const struct get_window_layered_info_request *req )
@@ -4456,6 +4554,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_queue_apc_request,
     (dump_func)dump_get_apc_result_request,
     (dump_func)dump_close_handle_request,
+    (dump_func)dump_socket_cleanup_request,
     (dump_func)dump_set_handle_info_request,
     (dump_func)dump_dup_handle_request,
     (dump_func)dump_make_temporary_request,
@@ -4490,6 +4589,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_create_socket_request,
     (dump_func)dump_accept_socket_request,
     (dump_func)dump_accept_into_socket_request,
+    (dump_func)dump_reuse_socket_request,
     (dump_func)dump_set_socket_event_request,
     (dump_func)dump_get_socket_event_request,
     (dump_func)dump_get_socket_info_request,
@@ -4511,6 +4611,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_mapping_info_request,
     (dump_func)dump_map_view_request,
     (dump_func)dump_unmap_view_request,
+    (dump_func)dump_get_mapping_file_request,
     (dump_func)dump_get_mapping_committed_range_request,
     (dump_func)dump_add_mapping_committed_range_request,
     (dump_func)dump_is_same_mapping_request,
@@ -4597,6 +4698,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_surface_region_request,
     (dump_func)dump_get_window_region_request,
     (dump_func)dump_set_window_region_request,
+    (dump_func)dump_set_layer_region_request,
     (dump_func)dump_get_update_region_request,
     (dump_func)dump_update_window_zorder_request,
     (dump_func)dump_redraw_window_request,
@@ -4657,8 +4759,10 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_token_privileges_request,
     (dump_func)dump_check_token_privileges_request,
     (dump_func)dump_duplicate_token_request,
+    (dump_func)dump_filter_token_request,
     (dump_func)dump_access_check_request,
     (dump_func)dump_get_token_sid_request,
+    (dump_func)dump_get_token_integrity_request,
     (dump_func)dump_get_token_groups_request,
     (dump_func)dump_get_token_default_dacl_request,
     (dump_func)dump_set_token_default_dacl_request,
@@ -4675,6 +4779,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_symlink_request,
     (dump_func)dump_get_object_info_request,
     (dump_func)dump_get_object_type_request,
+    (dump_func)dump_get_object_type_by_index_request,
     (dump_func)dump_get_token_impersonation_level_request,
     (dump_func)dump_allocate_locally_unique_id_request,
     (dump_func)dump_create_device_manager_request,
@@ -4688,6 +4793,9 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_kernel_object_handle_request,
     (dump_func)dump_make_process_system_request,
     (dump_func)dump_get_token_statistics_request,
+    (dump_func)dump_get_token_elevation_type_request,
+    (dump_func)dump_create_token_request,
+    (dump_func)dump_replace_process_token_request,
     (dump_func)dump_create_completion_request,
     (dump_func)dump_open_completion_request,
     (dump_func)dump_add_completion_request,
@@ -4698,6 +4806,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_fd_completion_mode_request,
     (dump_func)dump_set_fd_disp_info_request,
     (dump_func)dump_set_fd_name_info_request,
+    (dump_func)dump_set_fd_eof_info_request,
     (dump_func)dump_get_window_layered_info_request,
     (dump_func)dump_set_window_layered_info_request,
     (dump_func)dump_alloc_user_handle_request,
@@ -4742,6 +4851,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_queue_apc_reply,
     (dump_func)dump_get_apc_result_reply,
     NULL,
+    NULL,
     (dump_func)dump_set_handle_info_reply,
     (dump_func)dump_dup_handle_reply,
     NULL,
@@ -4777,6 +4887,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_accept_socket_reply,
     NULL,
     NULL,
+    NULL,
     (dump_func)dump_get_socket_event_reply,
     (dump_func)dump_get_socket_info_reply,
     NULL,
@@ -4797,6 +4908,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_mapping_info_reply,
     NULL,
     NULL,
+    (dump_func)dump_get_mapping_file_reply,
     (dump_func)dump_get_mapping_committed_range_reply,
     NULL,
     NULL,
@@ -4883,6 +4995,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_surface_region_reply,
     (dump_func)dump_get_window_region_reply,
     NULL,
+    NULL,
     (dump_func)dump_get_update_region_reply,
     NULL,
     NULL,
@@ -4943,8 +5056,10 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_token_privileges_reply,
     (dump_func)dump_check_token_privileges_reply,
     (dump_func)dump_duplicate_token_reply,
+    (dump_func)dump_filter_token_reply,
     (dump_func)dump_access_check_reply,
     (dump_func)dump_get_token_sid_reply,
+    (dump_func)dump_get_token_integrity_reply,
     (dump_func)dump_get_token_groups_reply,
     (dump_func)dump_get_token_default_dacl_reply,
     NULL,
@@ -4961,6 +5076,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_symlink_reply,
     (dump_func)dump_get_object_info_reply,
     (dump_func)dump_get_object_type_reply,
+    (dump_func)dump_get_object_type_by_index_reply,
     (dump_func)dump_get_token_impersonation_level_reply,
     (dump_func)dump_allocate_locally_unique_id_reply,
     (dump_func)dump_create_device_manager_reply,
@@ -4974,11 +5090,15 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_kernel_object_handle_reply,
     (dump_func)dump_make_process_system_reply,
     (dump_func)dump_get_token_statistics_reply,
+    (dump_func)dump_get_token_elevation_type_reply,
+    (dump_func)dump_create_token_reply,
+    NULL,
     (dump_func)dump_create_completion_reply,
     (dump_func)dump_open_completion_reply,
     NULL,
     (dump_func)dump_remove_completion_reply,
     (dump_func)dump_query_completion_reply,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -5028,6 +5148,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "queue_apc",
     "get_apc_result",
     "close_handle",
+    "socket_cleanup",
     "set_handle_info",
     "dup_handle",
     "make_temporary",
@@ -5062,6 +5183,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "create_socket",
     "accept_socket",
     "accept_into_socket",
+    "reuse_socket",
     "set_socket_event",
     "get_socket_event",
     "get_socket_info",
@@ -5083,6 +5205,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_mapping_info",
     "map_view",
     "unmap_view",
+    "get_mapping_file",
     "get_mapping_committed_range",
     "add_mapping_committed_range",
     "is_same_mapping",
@@ -5169,6 +5292,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_surface_region",
     "get_window_region",
     "set_window_region",
+    "set_layer_region",
     "get_update_region",
     "update_window_zorder",
     "redraw_window",
@@ -5229,8 +5353,10 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_token_privileges",
     "check_token_privileges",
     "duplicate_token",
+    "filter_token",
     "access_check",
     "get_token_sid",
+    "get_token_integrity",
     "get_token_groups",
     "get_token_default_dacl",
     "set_token_default_dacl",
@@ -5247,6 +5373,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "query_symlink",
     "get_object_info",
     "get_object_type",
+    "get_object_type_by_index",
     "get_token_impersonation_level",
     "allocate_locally_unique_id",
     "create_device_manager",
@@ -5260,6 +5387,9 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_kernel_object_handle",
     "make_process_system",
     "get_token_statistics",
+    "get_token_elevation_type",
+    "create_token",
+    "replace_process_token",
     "create_completion",
     "open_completion",
     "add_completion",
@@ -5270,6 +5400,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_fd_completion_mode",
     "set_fd_disp_info",
     "set_fd_name_info",
+    "set_fd_eof_info",
     "get_window_layered_info",
     "set_window_layered_info",
     "alloc_user_handle",
@@ -5304,6 +5435,7 @@ static const struct
     { "ALIAS_EXISTS",                STATUS_ALIAS_EXISTS },
     { "BAD_DEVICE_TYPE",             STATUS_BAD_DEVICE_TYPE },
     { "BAD_IMPERSONATION_LEVEL",     STATUS_BAD_IMPERSONATION_LEVEL },
+    { "BAD_TOKEN_TYPE",              STATUS_BAD_TOKEN_TYPE },
     { "BUFFER_OVERFLOW",             STATUS_BUFFER_OVERFLOW },
     { "BUFFER_TOO_SMALL",            STATUS_BUFFER_TOO_SMALL },
     { "CANCELLED",                   STATUS_CANCELLED },

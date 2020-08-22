@@ -762,6 +762,7 @@ wine_patch_data[] =
     { "Erich E. Hoover", "ws2_32: Add support for TF_REUSE_SOCKET to TransmitFile.", 1 },
     { "Erich Hoover", "pdh: Support the 'Processor' object string.", 1 },
     { "Felix Yan", "winex11.drv: Update a candidate window's position with over-the-spot style.", 2 },
+    { "Firerat", "winecfg: Toggle upstream CSMT implementation.", 1},
     { "Gabriel Ivăncescu", "ntdll/server: Mark drive_c as case-insensitive when created.", 1 },
     { "Gabriel Ivăncescu", "shell32/iconcache: Generate icons from available icons if some icon sizes failed to load.", 1 },
     { "Gabriel Ivăncescu", "user32/focus: Prevent a recursive loop with the activation messages.", 1 },

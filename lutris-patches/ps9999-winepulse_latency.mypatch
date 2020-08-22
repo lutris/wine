@@ -1,0 +1,120 @@
+diff --git a/dlls/winepulse.drv/mmdevdrv.c b/dlls/winepulse.drv/mmdevdrv.c
+index 463d3d5a71..0598d5c1d2 100644
+--- a/dlls/winepulse.drv/mmdevdrv.c
++++ b/dlls/winepulse.drv/mmdevdrv.c
+@@ -68,8 +68,8 @@ enum DriverPriority {
+     Priority_Preferred
+ };
+
+-static const REFERENCE_TIME MinimumPeriod = 30000;
+-static const REFERENCE_TIME DefaultPeriod = 100000;
++static const REFERENCE_TIME MinimumPeriod = 1000;
++static const REFERENCE_TIME DefaultPeriod = 2000;
+
+ static pa_context *pulse_ctx;
+ static pa_mainloop *pulse_ml;
+@@ -471,10 +471,29 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
+     ss.format = PA_SAMPLE_FLOAT32LE;
+     ss.channels = map.channels;
+
+     attr.maxlength = -1;
+-    attr.tlength = -1;
+-    attr.minreq = attr.fragsize = pa_frame_size(&ss);
+-    attr.prebuf = 0;
++    if (getenv("DEFAULT_MINREQ")) {
++        attr.minreq = attr.fragsize = pa_frame_size(&ss);
++    } else {
++        attr.minreq = -1;
++    }
++    const char* tenv = getenv("PULSE_TLENGTH");
++    if (tenv) {
++        int val = atoi(tenv);
++        if (val > 0) {
++            attr.tlength = attr.fragsize = pa_usec_to_bytes(val, &ss);
++        } else {
++            attr.tlength = -1;
++        }
++    } else {
++        attr.tlength = attr.fragsize = pa_usec_to_bytes(1000, &ss);
++    }
++    const char* pbenv = getenv("PULSE_PREBUF");
++    if (pbenv) {
++        attr.prebuf = atoi(pbenv);
++    } else {
++        attr.prebuf = -1;
++    }
+
+     stream = pa_stream_new(ctx, "format test stream", &ss, &map);
+     if (stream)
+@@ -510,11 +530,13 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
+     if (length)
+         pulse_def_period[!render] = pulse_min_period[!render] = pa_bytes_to_usec(10 * length, &ss);
+
+-    if (pulse_min_period[!render] < MinimumPeriod)
+-        pulse_min_period[!render] = MinimumPeriod;
++    if (!getenv("PULSE_OVERRIDE_MIN")) {
++        if (pulse_min_period[!render] < MinimumPeriod)
++            pulse_min_period[!render] = MinimumPeriod;
+
+-    if (pulse_def_period[!render] < DefaultPeriod)
+-        pulse_def_period[!render] = DefaultPeriod;
++        if (pulse_def_period[!render] < DefaultPeriod)
++            pulse_def_period[!render] = DefaultPeriod;
++    }
+
+     wfx->wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+     wfx->cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+@@ -1458,10 +1458,30 @@ static HRESULT pulse_stream_connect(ACImpl *This, UINT32 period_bytes) {
+     pa_stream_set_moved_callback(This->stream, pulse_attr_update, This);
+ 
+     /* PulseAudio will fill in correct values */
+-    attr.minreq = attr.fragsize = period_bytes;
+-    attr.tlength = period_bytes * 3;
+-    attr.maxlength = This->bufsize_frames * pa_frame_size(&This->ss);
+-    attr.prebuf = pa_frame_size(&This->ss);
++
++    attr.maxlength = -1;
++    if (getenv("DEFAULT_MINREQ")) {
++        attr.minreq = attr.fragsize = pa_frame_size(&This->ss);
++    } else {
++        attr.minreq = -1;
++    }
++    const char* tenv = getenv("PULSE_TLENGTH");
++    if (tenv) {
++        int val = atoi(tenv);
++        if (val > 0) {
++            attr.tlength = attr.fragsize = pa_usec_to_bytes(val, &This->ss);
++        } else {
++            attr.tlength = -1;
++        }
++    } else {
++        attr.tlength = attr.fragsize = pa_usec_to_bytes(1000, &This->ss);
++    }
++    const char* pbenv = getenv("PULSE_PREBUF");
++    if (pbenv) {
++        attr.prebuf = atoi(pbenv);
++    } else {
++        attr.prebuf = -1;
++    }
+     dump_attr(&attr);
+ 
+     /* If device name is given use exactly the specified device */
+@@ -1635,6 +1626,19 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
+     period = pulse_def_period[This->dataflow == eCapture];
+     if (duration < 3 * period)
+         duration = 3 * period;
++
++    const char *duration_env = getenv("STAGING_AUDIO_DURATION");
++    if(duration_env) {
++        int val = atoi(duration_env);
++        duration = val;
++        printf("Staging audio duration set to %d.\n", duration);
++    }
++    const char *period_env = getenv("STAGING_AUDIO_PERIOD");
++    if(period_env) {
++        int val = atoi(period_env);
++        period = val;
++        printf("Staging audio period set to %d.\n", period);
++    }
+
+     This->period_bytes = pa_frame_size(&This->ss) * MulDiv(period, This->ss.rate, 10000000);
