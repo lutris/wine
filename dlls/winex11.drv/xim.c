@@ -32,6 +32,7 @@
 #include "x11drv.h"
 #include "imm.h"
 #include "wine/debug.h"
+#include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xim);
 
@@ -458,6 +459,48 @@ static BOOL X11DRV_DestroyIC(XIC xic, XPointer p, XPointer data)
     return TRUE;
 }
 
+/***********************************************************************
+ *           X11DRV_UpdateCandidatePos
+ */
+void X11DRV_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect )
+{
+    if (ximStyle & XIMPreeditPosition)
+    {
+        struct x11drv_win_data *data;
+        HWND parent;
+
+        for (parent = hwnd; parent && parent != GetDesktopWindow(); parent = GetAncestor( parent, GA_PARENT ))
+        {
+            if (!(data = get_win_data( parent ))) continue;
+            if (data->xic)
+            {
+                XVaNestedList preedit;
+                XPoint xpoint;
+                POINT pt;
+
+                pt.x = caret_rect->left;
+                pt.y = caret_rect->bottom;
+
+                if (hwnd != data->hwnd)
+                    MapWindowPoints( hwnd, data->hwnd, &pt, 1 );
+
+                if (GetWindowLongW( data->hwnd, GWL_EXSTYLE ) & WS_EX_LAYOUTRTL)
+                    pt.x = data->client_rect.right - data->client_rect.left - 1 - pt.x;
+
+                xpoint.x = pt.x + data->client_rect.left - data->whole_rect.left;
+                xpoint.y = pt.y + data->client_rect.top - data->whole_rect.top;
+
+                preedit = XVaCreateNestedList( 0, XNSpotLocation, &xpoint, NULL );
+                if (preedit)
+                {
+                    XSetICValues( data->xic, XNPreeditAttributes, preedit, NULL );
+                    XFree( preedit );
+                }
+            }
+            release_win_data( data );
+        }
+    }
+}
 
 XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data)
 {
@@ -485,7 +528,7 @@ XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data)
                         XNDestroyCallback, &destroy,
                         NULL);
         data->xic = xic;
-        return xic;
+        goto return_xic;
     }
 
     /* create callbacks */
@@ -582,6 +625,33 @@ XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data)
         XFree(preedit);
     if (status != NULL)
         XFree(status);
+
+return_xic:
+    if (xic != NULL && (ximStyle & XIMPreeditPosition))
+    {
+        SERVER_START_REQ( set_caret_info )
+        {
+            req->flags  = 0;  /* don't set anything */
+            req->handle = 0;
+            req->x      = 0;
+            req->y      = 0;
+            req->hide   = 0;
+            req->state  = 0;
+            if (!wine_server_call_err( req ))
+            {
+                HWND hwnd;
+                RECT r;
+
+                hwnd      = wine_server_ptr_handle( reply->full_handle );
+                r.left    = reply->old_rect.left;
+                r.top     = reply->old_rect.top;
+                r.right   = reply->old_rect.right;
+                r.bottom  = reply->old_rect.bottom;
+                X11DRV_UpdateCandidatePos( hwnd, &r );
+            }
+        }
+        SERVER_END_REQ;
+    }
 
     return xic;
 }

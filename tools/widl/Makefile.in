@@ -14,7 +14,8 @@ C_SRCS = \
 	typetree.c \
 	utils.c \
 	widl.c \
-	write_msft.c
+	write_msft.c \
+	write_sltg.c
 
 LEX_SRCS   = parser.l
 BISON_SRCS = parser.y

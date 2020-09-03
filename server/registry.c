@@ -49,10 +49,17 @@
 
 #include "winternl.h"
 
+struct notify_event
+{
+    struct list      entry;     /* entry in list of events */
+    struct event    *event;     /* event to set */
+};
+
 struct notify
 {
+    unsigned int      refcount; /* number of references */
     struct list       entry;    /* entry in list of notifications */
-    struct event     *event;    /* event to set when changing this key */
+    struct list       events;   /* list of events to set when changing this key */
     int               subtree;  /* true if subtree notification */
     unsigned int      filter;   /* which events to notify on */
     obj_handle_t      hkey;     /* hkey associated with this notification */
@@ -159,6 +166,7 @@ static const struct object_ops key_ops =
     no_add_queue,            /* add_queue */
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
+    NULL,                    /* get_esync_fd */
     NULL,                    /* satisfied */
     no_signal,               /* signal */
     no_get_fd,               /* get_fd */
@@ -170,6 +178,7 @@ static const struct object_ops key_ops =
     NULL,                    /* unlink_name */
     no_open_file,            /* open_file */
     no_kernel_obj_list,      /* get_kernel_obj_list */
+    no_alloc_handle,         /* alloc_handle */
     key_close_handle,        /* close_handle */
     key_destroy              /* destroy */
 };
@@ -304,25 +313,35 @@ static void key_dump( struct object *obj, int verbose )
 
 static struct object_type *key_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'K','e','y'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Key, sizeof(type_Key) };
     return get_object_type( &str );
 }
 
 /* notify waiter and maybe delete the notification */
 static void do_notification( struct key *key, struct notify *notify, int del )
 {
-    if (notify->event)
-    {
-        set_event( notify->event );
-        release_object( notify->event );
-        notify->event = NULL;
-    }
+    void *ptr;
+
     if (del)
-    {
         list_remove( &notify->entry );
-        free( notify );
+    else
+    {
+        assert( notify->refcount < INT_MAX );
+        notify->refcount++;
     }
+
+    while ((ptr = list_head( &notify->events )))
+    {
+        struct notify_event *notify_event = LIST_ENTRY( ptr, struct notify_event, entry );
+        list_remove( &notify_event->entry );
+        set_event( notify_event->event );
+        release_object( notify_event->event );
+        free( notify_event );
+    }
+
+    assert( notify->refcount );
+    if (!--notify->refcount)
+        free( notify );
 }
 
 static inline struct notify *find_notify( struct key *key, struct process *process, obj_handle_t hkey )
@@ -2266,6 +2285,7 @@ DECL_HANDLER(set_registry_notification)
     struct key *key;
     struct event *event;
     struct notify *notify;
+    struct notify_event *notify_event;
 
     key = get_hkey_obj( req->hkey, KEY_NOTIFY );
     if (key)
@@ -2274,29 +2294,21 @@ DECL_HANDLER(set_registry_notification)
         if (event)
         {
             notify = find_notify( key, current->process, req->hkey );
-            if (notify)
+            if (!notify && (notify = mem_alloc( sizeof(*notify) )))
             {
-                if (notify->event)
-                    release_object( notify->event );
-                grab_object( event );
-                notify->event = event;
+                notify->refcount = 1;
+                list_init( &notify->events );
+                notify->subtree = req->subtree;
+                notify->filter  = req->filter;
+                notify->hkey    = req->hkey;
+                notify->process = current->process;
+                list_add_head( &key->notify_list, &notify->entry );
             }
-            else
+            if (notify && (notify_event = mem_alloc( sizeof(*notify_event) )))
             {
-                notify = mem_alloc( sizeof(*notify) );
-                if (notify)
-                {
-                    grab_object( event );
-                    notify->event   = event;
-                    notify->subtree = req->subtree;
-                    notify->filter  = req->filter;
-                    notify->hkey    = req->hkey;
-                    notify->process = current->process;
-                    list_add_head( &key->notify_list, &notify->entry );
-                }
-            }
-            if (notify)
-            {
+                grab_object(event);
+                notify_event->event = event;
+                list_add_tail( &notify->events, &notify_event->entry );
                 reset_event( event );
                 set_error( STATUS_PENDING );
             }

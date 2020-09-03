@@ -1,0 +1,5 @@
+TESTDLL   = dxva2.dll
+IMPORTS   = d3d9 user32 ole32
+
+C_SRCS = \
+	dxva2.c
