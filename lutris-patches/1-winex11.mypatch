@@ -1,0 +1,1339 @@
+--- b/dlls/winex11.drv/settings.c
++++ a/dlls/winex11.drv/settings.c
+@@ -319,9 +319,8 @@
+                                            HWND hwnd, DWORD flags, LPVOID lpvoid )
+ {
+     char bpp_buffer[16], freq_buffer[18];
++    DWORD i;
+-    DWORD i, mode;
+ 
+-    mode = ENUM_CURRENT_SETTINGS;
+     for (i = 0; i < dd_mode_count; i++)
+     {
+         if (devmode->dmFields & DM_BITSPERPEL)
+@@ -339,49 +338,32 @@
+             if (devmode->dmPelsHeight != dd_modes[i].height)
+                 continue;
+         }
++        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) && (dd_modes[i].refresh_rate != 0) &&
+-        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) &&
+             devmode->dmDisplayFrequency != 0)
+         {
++            if (devmode->dmDisplayFrequency != dd_modes[i].refresh_rate)
+-            if (dd_modes[i].refresh_rate != 0 &&
+-                devmode->dmDisplayFrequency != dd_modes[i].refresh_rate)
+                 continue;
+         }
++        /* we have a valid mode */
++        TRACE("Requested display settings match mode %d (%s)\n", i, handler_name);
++
++        if (flags & CDS_UPDATEREGISTRY)
++            write_registry_settings(devmode);
+-        else if (default_display_frequency != 0)
+-        {
+-            if (dd_modes[i].refresh_rate != 0 &&
+-                default_display_frequency == dd_modes[i].refresh_rate)
+-            {
+-                TRACE("Found display mode %d with default frequency (%s)\n", i, handler_name);
+-                mode = i;
+-                break;
+-            }
+-        }
+ 
++        if (!(flags & (CDS_TEST | CDS_NORESET)))
++            return pSetCurrentMode(i);
+-        if (mode == ENUM_CURRENT_SETTINGS)
+-            mode = i;
+-    }
+ 
++        return DISP_CHANGE_SUCCESSFUL;
+-    if (mode == ENUM_CURRENT_SETTINGS)
+-    {
+-        /* no valid modes found, only print the fields we were trying to matching against */
+-        bpp_buffer[0] = freq_buffer[0] = 0;
+-        if (devmode->dmFields & DM_BITSPERPEL)
+-            sprintf(bpp_buffer, "bpp=%u ",  devmode->dmBitsPerPel);
+-        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) && (devmode->dmDisplayFrequency != 0))
+-            sprintf(freq_buffer, "freq=%u ", devmode->dmDisplayFrequency);
+-        ERR("No matching mode found: width=%d height=%d %s%s(%s)\n",
+-            devmode->dmPelsWidth, devmode->dmPelsHeight, bpp_buffer, freq_buffer, handler_name);
+-        return DISP_CHANGE_BADMODE;
+     }
+ 
++    /* no valid modes found, only print the fields we were trying to matching against */
++    bpp_buffer[0] = freq_buffer[0] = 0;
++    if (devmode->dmFields & DM_BITSPERPEL)
++        sprintf(bpp_buffer, "bpp=%u ",  devmode->dmBitsPerPel);
++    if ((devmode->dmFields & DM_DISPLAYFREQUENCY) && (devmode->dmDisplayFrequency != 0))
++        sprintf(freq_buffer, "freq=%u ", devmode->dmDisplayFrequency);
++    ERR("No matching mode found: width=%d height=%d %s%s(%s)\n",
++        devmode->dmPelsWidth, devmode->dmPelsHeight, bpp_buffer, freq_buffer, handler_name);
+-    /* we have a valid mode */
+-    TRACE("Requested display settings match mode %d (%s)\n", mode, handler_name);
+-
+-    if (flags & CDS_UPDATEREGISTRY)
+-        write_registry_settings(devmode);
+-
+-    if (!(flags & (CDS_TEST | CDS_NORESET)))
+-        return pSetCurrentMode(mode);
+ 
++    return DISP_CHANGE_BADMODE;
+-    return DISP_CHANGE_SUCCESSFUL;
+ }
+--- b/dlls/winex11.drv/x11drv.h
++++ a/dlls/winex11.drv/x11drv.h
+@@ -404,7 +404,6 @@
+ extern int primary_monitor DECLSPEC_HIDDEN;
+ extern int copy_default_colors DECLSPEC_HIDDEN;
+ extern int alloc_system_colors DECLSPEC_HIDDEN;
+-extern int default_display_frequency DECLSPEC_HIDDEN;
+ extern int xrender_error_base DECLSPEC_HIDDEN;
+ extern HMODULE x11drv_module DECLSPEC_HIDDEN;
+ extern char *process_name DECLSPEC_HIDDEN;
+--- b/dlls/winex11.drv/x11drv_main.c
++++ a/dlls/winex11.drv/x11drv_main.c
+@@ -86,7 +86,6 @@
+ BOOL shape_layered_windows = TRUE;
+ int copy_default_colors = 128;
+ int alloc_system_colors = 256;
+-int default_display_frequency = 0;
+ DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
+ int xrender_error_base = 0;
+ HMODULE x11drv_module = 0;
+@@ -437,9 +436,6 @@
+     if (!get_config_key( hkey, appkey, "AllocSystemColors", buffer, sizeof(buffer) ))
+         alloc_system_colors = atoi(buffer);
+ 
+-    if (!get_config_key( hkey, appkey, "DefaultDisplayFrequency", buffer, sizeof(buffer) ))
+-        default_display_frequency = atoi(buffer);
+-
+     get_config_key( hkey, appkey, "InputStyle", input_style, sizeof(input_style) );
+ 
+     if (appkey) RegCloseKey( appkey );
+From 8a4ec0addba76bf3b34a9782556364ab4161dc22 Mon Sep 17 00:00:00 2001
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Date: Tue, 26 May 2020 16:35:09 +0800
+Subject: [PATCH] user32: Handle NULL device and mode parameters in
+ ChangeDisplaySettingsExW().
+
+NULL device and mode parameters mean to restore all adapters to their
+registry settings. Since all user graphics drivers only support a
+primary adapter now, it's okay to restore only the primary adapter.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/user32/sysparams.c     |  3 +++
+ dlls/winemac.drv/display.c  | 35 +++++++++++++++++++++++++++++++++++
+ dlls/winex11.drv/settings.c | 36 ++++++++++++++++++++++++++++++++++++
+ dlls/winex11.drv/x11drv.h   |  1 +
+ 4 files changed, 75 insertions(+)
+
+diff --git a/dlls/user32/sysparams.c b/dlls/user32/sysparams.c
+index 10f17bb4c3e..e6f33006dbf 100644
+--- a/dlls/user32/sysparams.c
++++ b/dlls/user32/sysparams.c
+@@ -3300,6 +3300,9 @@ LONG WINAPI ChangeDisplaySettingsExW( LPCWSTR devname, LPDEVMODEW devmode, HWND
+     TRACE("%s %p %p %#x %p\n", debugstr_w(devname), devmode, hwnd, flags, lparam);
+     TRACE("flags=%s\n", _CDS_flags(flags));
+ 
++    if (!devname && !devmode)
++        return USER_Driver->pChangeDisplaySettingsEx(NULL, NULL, hwnd, flags, lparam);
++
+     if (!devname && devmode)
+     {
+         if (!get_primary_adapter(primary_adapter))
+diff --git a/dlls/winemac.drv/display.c b/dlls/winemac.drv/display.c
+index 851d549d5fa..968b9277bba 100644
+--- a/dlls/winemac.drv/display.c
++++ b/dlls/winemac.drv/display.c
+@@ -747,6 +747,23 @@ void check_retina_status(void)
+     }
+ }
+ 
++static BOOL get_primary_adapter(WCHAR *name)
++{
++    DISPLAY_DEVICEW dd;
++    DWORD i;
++
++    dd.cb = sizeof(dd);
++    for (i = 0; EnumDisplayDevicesW(NULL, i, &dd, 0); ++i)
++    {
++        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
++        {
++            lstrcpyW(name, dd.DeviceName);
++            return TRUE;
++        }
++    }
++
++    return FALSE;
++}
+ 
+ /***********************************************************************
+  *              ChangeDisplaySettingsEx  (MACDRV.@)
+@@ -755,7 +772,9 @@ void check_retina_status(void)
+ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
+                                           HWND hwnd, DWORD flags, LPVOID lpvoid)
+ {
++    WCHAR primary_adapter[CCHDEVICENAME];
+     LONG ret = DISP_CHANGE_BADMODE;
++    DEVMODEW default_mode;
+     int bpp;
+     struct macdrv_display *displays;
+     int num_displays;
+@@ -770,6 +789,22 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
+ 
+     init_original_display_mode();
+ 
++    if (!get_primary_adapter(primary_adapter))
++        return DISP_CHANGE_FAILED;
++
++    if (!devname && !devmode)
++    {
++        default_mode.dmSize = sizeof(default_mode);
++        if (!EnumDisplaySettingsExW(primary_adapter, ENUM_REGISTRY_SETTINGS, &default_mode, 0))
++        {
++            ERR("Default mode not found for %s!\n", wine_dbgstr_w(primary_adapter));
++            return DISP_CHANGE_BADMODE;
++        }
++
++        devname = primary_adapter;
++        devmode = &default_mode;
++    }
++
+     if (macdrv_get_displays(&displays, &num_displays))
+         return DISP_CHANGE_FAILED;
+ 
+diff --git a/dlls/winex11.drv/settings.c b/dlls/winex11.drv/settings.c
+index 24644db6203..3e7a5960f02 100644
+--- a/dlls/winex11.drv/settings.c
++++ b/dlls/winex11.drv/settings.c
+@@ -252,6 +252,24 @@ static BOOL write_registry_settings(const DEVMODEW *dm)
+     return ret;
+ }
+ 
++BOOL get_primary_adapter(WCHAR *name)
++{
++    DISPLAY_DEVICEW dd;
++    DWORD i;
++
++    dd.cb = sizeof(dd);
++    for (i = 0; EnumDisplayDevicesW(NULL, i, &dd, 0); ++i)
++    {
++        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
++        {
++            lstrcpyW(name, dd.DeviceName);
++            return TRUE;
++        }
++    }
++
++    return FALSE;
++}
++
+ /***********************************************************************
+  *		EnumDisplaySettingsEx  (X11DRV.@)
+  *
+@@ -318,9 +336,27 @@ BOOL CDECL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmo
+ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+                                            HWND hwnd, DWORD flags, LPVOID lpvoid )
+ {
++    WCHAR primary_adapter[CCHDEVICENAME];
+     char bpp_buffer[16], freq_buffer[18];
++    DEVMODEW default_mode;
+     DWORD i;
+ 
++    if (!get_primary_adapter(primary_adapter))
++        return DISP_CHANGE_FAILED;
++
++    if (!devname && !devmode)
++    {
++        default_mode.dmSize = sizeof(default_mode);
++        if (!EnumDisplaySettingsExW(primary_adapter, ENUM_REGISTRY_SETTINGS, &default_mode, 0))
++        {
++            ERR("Default mode not found for %s!\n", wine_dbgstr_w(primary_adapter));
++            return DISP_CHANGE_BADMODE;
++        }
++
++        devname = primary_adapter;
++        devmode = &default_mode;
++    }
++
+     for (i = 0; i < dd_mode_count; i++)
+     {
+         if (devmode->dmFields & DM_BITSPERPEL)
+diff --git a/dlls/winex11.drv/x11drv.h b/dlls/winex11.drv/x11drv.h
+index ff0aeb7dab2..52057e875d5 100644
+--- a/dlls/winex11.drv/x11drv.h
++++ b/dlls/winex11.drv/x11drv.h
+@@ -661,6 +661,7 @@ extern void X11DRV_resize_desktop(BOOL) DECLSPEC_HIDDEN;
+ extern BOOL is_virtual_desktop(void) DECLSPEC_HIDDEN;
+ extern BOOL is_desktop_fullscreen(void) DECLSPEC_HIDDEN;
+ extern BOOL create_desktop_win_data( Window win ) DECLSPEC_HIDDEN;
++extern BOOL get_primary_adapter(WCHAR *) DECLSPEC_HIDDEN;
+ extern void X11DRV_Settings_AddDepthModes(void) DECLSPEC_HIDDEN;
+ extern void X11DRV_Settings_AddOneMode(unsigned int width, unsigned int height, unsigned int bpp, unsigned int freq) DECLSPEC_HIDDEN;
+ unsigned int X11DRV_Settings_GetModeCount(void) DECLSPEC_HIDDEN;
+From ae4804d502fecab835146043010f53377bf1b65a Mon Sep 17 00:00:00 2001
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Date: Tue, 26 May 2020 16:35:17 +0800
+Subject: [PATCH] winex11.drv: Fake success for changing non-primary adapter
+ settings.
+
+Changing non-primary adapter settings is currently unsupported. Return
+success for non-primary adapter settings changes so that the primary
+adapter settings don't get changed unintentionally.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winex11.drv/settings.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/dlls/winex11.drv/settings.c b/dlls/winex11.drv/settings.c
+index 3e7a5960f02..5609e2b43f8 100644
+--- a/dlls/winex11.drv/settings.c
++++ b/dlls/winex11.drv/settings.c
+@@ -357,6 +357,13 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+         devmode = &default_mode;
+     }
+ 
++    if (lstrcmpiW(primary_adapter, devname))
++    {
++        FIXME("Changing non-primary adapter %s settings is currently unsupported.\n",
++              wine_dbgstr_w(devname));
++        return DISP_CHANGE_SUCCESSFUL;
++    }
++
+     for (i = 0; i < dd_mode_count; i++)
+     {
+         if (devmode->dmFields & DM_BITSPERPEL)
+From f1e7d5bbd6e8817f7266c7144b747115a52893da Mon Sep 17 00:00:00 2001
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Date: Tue, 26 May 2020 16:35:39 +0800
+Subject: [PATCH] user32: Fake success for detaching adapters.
+
+It is currently unsupported. This helps later patches so that
+settings handlers using a new interface can be introduced without
+detaching adapter support, making patches smaller.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/user32/sysparams.c     | 12 +++++++++++-
+ dlls/winemac.drv/display.c  | 15 +++++++++++++++
+ dlls/winex11.drv/settings.c | 15 +++++++++++++++
+ dlls/winex11.drv/x11drv.h   |  1 +
+ 4 files changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/user32/sysparams.c b/dlls/user32/sysparams.c
+index e6f33006dbf..82ed8513646 100644
+--- a/dlls/user32/sysparams.c
++++ b/dlls/user32/sysparams.c
+@@ -3287,6 +3287,15 @@ static void trace_devmode(const DEVMODEW *devmode)
+     TRACE("\n");
+ }
+ 
++static BOOL is_detached_mode(const DEVMODEW *mode)
++{
++    return mode->dmFields & DM_POSITION &&
++           mode->dmFields & DM_PELSWIDTH &&
++           mode->dmFields & DM_PELSHEIGHT &&
++           mode->dmPelsWidth == 0 &&
++           mode->dmPelsHeight == 0;
++}
++
+ /***********************************************************************
+  *		ChangeDisplaySettingsExW (USER32.@)
+  */
+@@ -3318,7 +3327,8 @@ LONG WINAPI ChangeDisplaySettingsExW( LPCWSTR devname, LPDEVMODEW devmode, HWND
+         if (devmode->dmSize < FIELD_OFFSET(DEVMODEW, dmICMMethod))
+             return DISP_CHANGE_BADMODE;
+ 
+-        if (((devmode->dmFields & DM_BITSPERPEL) && devmode->dmBitsPerPel) ||
++        if (is_detached_mode(devmode) ||
++            ((devmode->dmFields & DM_BITSPERPEL) && devmode->dmBitsPerPel) ||
+             ((devmode->dmFields & DM_PELSWIDTH) && devmode->dmPelsWidth) ||
+             ((devmode->dmFields & DM_PELSHEIGHT) && devmode->dmPelsHeight) ||
+             ((devmode->dmFields & DM_DISPLAYFREQUENCY) && devmode->dmDisplayFrequency))
+diff --git a/dlls/winemac.drv/display.c b/dlls/winemac.drv/display.c
+index 402f54982a5..7d9ff2d7c60 100644
+--- a/dlls/winemac.drv/display.c
++++ b/dlls/winemac.drv/display.c
+@@ -765,6 +765,15 @@ static BOOL get_primary_adapter(WCHAR *name)
+     return FALSE;
+ }
+ 
++static BOOL is_detached_mode(const DEVMODEW *mode)
++{
++    return mode->dmFields & DM_POSITION &&
++           mode->dmFields & DM_PELSWIDTH &&
++           mode->dmFields & DM_PELSHEIGHT &&
++           mode->dmPelsWidth == 0 &&
++           mode->dmPelsHeight == 0;
++}
++
+ /***********************************************************************
+  *              ChangeDisplaySettingsEx  (MACDRV.@)
+  *
+@@ -811,6 +820,12 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
+         return DISP_CHANGE_SUCCESSFUL;
+     }
+ 
++    if (is_detached_mode(devmode))
++    {
++        FIXME("Detaching adapters is currently unsupported.\n");
++        return DISP_CHANGE_SUCCESSFUL;
++    }
++
+     if (macdrv_get_displays(&displays, &num_displays))
+         return DISP_CHANGE_FAILED;
+ 
+diff --git a/dlls/winex11.drv/settings.c b/dlls/winex11.drv/settings.c
+index 5609e2b43f8..70ce35361b6 100644
+--- a/dlls/winex11.drv/settings.c
++++ b/dlls/winex11.drv/settings.c
+@@ -329,6 +329,15 @@ BOOL CDECL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmo
+     return FALSE;
+ }
+ 
++BOOL is_detached_mode(const DEVMODEW *mode)
++{
++    return mode->dmFields & DM_POSITION &&
++           mode->dmFields & DM_PELSWIDTH &&
++           mode->dmFields & DM_PELSHEIGHT &&
++           mode->dmPelsWidth == 0 &&
++           mode->dmPelsHeight == 0;
++}
++
+ /***********************************************************************
+  *		ChangeDisplaySettingsEx  (X11DRV.@)
+  *
+@@ -364,6 +373,12 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+         return DISP_CHANGE_SUCCESSFUL;
+     }
+ 
++    if (is_detached_mode(devmode))
++    {
++        FIXME("Detaching adapters is currently unsupported.\n");
++        return DISP_CHANGE_SUCCESSFUL;
++    }
++
+     for (i = 0; i < dd_mode_count; i++)
+     {
+         if (devmode->dmFields & DM_BITSPERPEL)
+diff --git a/dlls/winex11.drv/x11drv.h b/dlls/winex11.drv/x11drv.h
+index 52057e875d5..5021c71a415 100644
+--- a/dlls/winex11.drv/x11drv.h
++++ b/dlls/winex11.drv/x11drv.h
+@@ -660,6 +660,7 @@ extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int he
+ extern void X11DRV_resize_desktop(BOOL) DECLSPEC_HIDDEN;
+ extern BOOL is_virtual_desktop(void) DECLSPEC_HIDDEN;
+ extern BOOL is_desktop_fullscreen(void) DECLSPEC_HIDDEN;
++extern BOOL is_detached_mode(const DEVMODEW *) DECLSPEC_HIDDEN;
+ extern BOOL create_desktop_win_data( Window win ) DECLSPEC_HIDDEN;
+ extern BOOL get_primary_adapter(WCHAR *) DECLSPEC_HIDDEN;
+ extern void X11DRV_Settings_AddDepthModes(void) DECLSPEC_HIDDEN;
+From 8cd6245b7633abccd68f73928544ae4de6f76d52 Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Thu, 28 May 2020 18:09:16 +0800
+Subject: [PATCH] winex11.drv: Set GPU LUID property for monitors.
+
+Signed-off-by: Brendan Shanks <bshanks@codeweavers.com>
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winex11.drv/display.c | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/dlls/winex11.drv/display.c b/dlls/winex11.drv/display.c
+index daea434dabf..55533255f36 100644
+--- a/dlls/winex11.drv/display.c
++++ b/dlls/winex11.drv/display.c
+@@ -40,6 +40,7 @@
+ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
+ 
+ DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
++DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_GPU_LUID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 1);
+ 
+ /* Wine specific monitor properties */
+ DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_STATEFLAGS, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 2);
+@@ -317,9 +318,10 @@ void X11DRV_DisplayDevices_Update(BOOL send_display_change)
+     EnumWindows(update_windows_on_display_change, (LPARAM)mask);
+ }
+ 
+-/* Initialize a GPU instance and return its GUID string in guid_string and driver value in driver parameter */
++/* Initialize a GPU instance.
++ * Return its GUID string in guid_string, driver value in driver parameter and LUID in gpu_luid */
+ static BOOL X11DRV_InitGpu(HDEVINFO devinfo, const struct x11drv_gpu *gpu, INT gpu_index, WCHAR *guid_string,
+-                           WCHAR *driver)
++                           WCHAR *driver, LUID *gpu_luid)
+ {
+     static const BOOL present = TRUE;
+     SP_DEVINFO_DATA device_data = {sizeof(device_data)};
+@@ -365,6 +367,7 @@ static BOOL X11DRV_InitGpu(HDEVINFO devinfo, const struct x11drv_gpu *gpu, INT g
+                                        DEVPROP_TYPE_UINT64, (const BYTE *)&luid, sizeof(luid), 0))
+             goto done;
+     }
++    *gpu_luid = luid;
+     TRACE("GPU id:0x%s name:%s LUID:%08x:%08x.\n", wine_dbgstr_longlong(gpu->id),
+           wine_dbgstr_w(gpu->name), luid.HighPart, luid.LowPart);
+ 
+@@ -480,7 +483,7 @@ static BOOL X11DRV_InitAdapter(HKEY video_hkey, INT video_index, INT gpu_index,
+ }
+ 
+ static BOOL X11DRV_InitMonitor(HDEVINFO devinfo, const struct x11drv_monitor *monitor, int monitor_index,
+-                               int video_index)
++                               int video_index, const LUID *gpu_luid)
+ {
+     SP_DEVINFO_DATA device_data = {sizeof(SP_DEVINFO_DATA)};
+     WCHAR bufferW[MAX_PATH];
+@@ -498,6 +501,11 @@ static BOOL X11DRV_InitMonitor(HDEVINFO devinfo, const struct x11drv_monitor *mo
+                                            (const BYTE *)monitor_hardware_idW, sizeof(monitor_hardware_idW)))
+         goto done;
+ 
++    /* Write DEVPROPKEY_MONITOR_GPU_LUID */
++    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_GPU_LUID,
++                                   DEVPROP_TYPE_INT64, (const BYTE *)gpu_luid, sizeof(*gpu_luid), 0))
++        goto done;
++
+     /* Create driver key */
+     hkey = SetupDiCreateDevRegKeyW(devinfo, &device_data, DICS_FLAG_GLOBAL, 0, DIREG_DRV, NULL, NULL);
+     RegCloseKey(hkey);
+@@ -599,6 +607,7 @@ void X11DRV_DisplayDevices_Init(BOOL force)
+     DWORD disposition = 0;
+     WCHAR guidW[40];
+     WCHAR driverW[1024];
++    LUID gpu_luid;
+ 
+     mutex = get_display_device_init_mutex();
+ 
+@@ -627,7 +636,7 @@ void X11DRV_DisplayDevices_Init(BOOL force)
+ 
+     for (gpu = 0; gpu < gpu_count; gpu++)
+     {
+-        if (!X11DRV_InitGpu(gpu_devinfo, &gpus[gpu], gpu, guidW, driverW))
++        if (!X11DRV_InitGpu(gpu_devinfo, &gpus[gpu], gpu, guidW, driverW, &gpu_luid))
+             goto done;
+ 
+         /* Initialize adapters */
+@@ -649,7 +658,7 @@ void X11DRV_DisplayDevices_Init(BOOL force)
+             for (monitor = 0; monitor < monitor_count; monitor++)
+             {
+                 TRACE("monitor: %#x %s\n", monitor, wine_dbgstr_w(monitors[monitor].name));
+-                if (!X11DRV_InitMonitor(monitor_devinfo, &monitors[monitor], monitor, video_index))
++                if (!X11DRV_InitMonitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid))
+                     goto done;
+             }
+ 
+From 707fcb99a60015fcbb20c83e9031bc5be7a58618 Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Thu, 28 May 2020 18:09:30 +0800
+Subject: [PATCH] winex11.drv: Set output id property for monitors.
+
+Signed-off-by: Brendan Shanks <bshanks@codeweavers.com>
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winex11.drv/display.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/dlls/winex11.drv/display.c b/dlls/winex11.drv/display.c
+index 55533255f36..cf661f9f06f 100644
+--- a/dlls/winex11.drv/display.c
++++ b/dlls/winex11.drv/display.c
+@@ -41,6 +41,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
+ 
+ DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
+ DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_GPU_LUID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 1);
++DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_OUTPUT_ID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 2);
+ 
+ /* Wine specific monitor properties */
+ DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_STATEFLAGS, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 2);
+@@ -506,6 +507,11 @@ static BOOL X11DRV_InitMonitor(HDEVINFO devinfo, const struct x11drv_monitor *mo
+                                    DEVPROP_TYPE_INT64, (const BYTE *)gpu_luid, sizeof(*gpu_luid), 0))
+         goto done;
+ 
++    /* Write DEVPROPKEY_MONITOR_OUTPUT_ID */
++    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_OUTPUT_ID,
++                                   DEVPROP_TYPE_UINT32, (const BYTE *)&video_index, sizeof(video_index), 0))
++        goto done;
++
+     /* Create driver key */
+     hkey = SetupDiCreateDevRegKeyW(devinfo, &device_data, DICS_FLAG_GLOBAL, 0, DIREG_DRV, NULL, NULL);
+     RegCloseKey(hkey);
+From e3eb89d5ebb759e975698b97ed8b547a9de3853f Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Tue, 2 Jun 2020 17:45:25 -0700
+Subject: [PATCH] winex11.drv: Ensure output IDs are unique for mirrored
+ displays.
+
+Signed-off-by: Brendan Shanks <bshanks@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winex11.drv/display.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/winex11.drv/display.c b/dlls/winex11.drv/display.c
+index cf661f9f06f..4acd7299624 100644
+--- a/dlls/winex11.drv/display.c
++++ b/dlls/winex11.drv/display.c
+@@ -484,7 +484,7 @@ static BOOL X11DRV_InitAdapter(HKEY video_hkey, INT video_index, INT gpu_index,
+ }
+ 
+ static BOOL X11DRV_InitMonitor(HDEVINFO devinfo, const struct x11drv_monitor *monitor, int monitor_index,
+-                               int video_index, const LUID *gpu_luid)
++                               int video_index, const LUID *gpu_luid, UINT output_id)
+ {
+     SP_DEVINFO_DATA device_data = {sizeof(SP_DEVINFO_DATA)};
+     WCHAR bufferW[MAX_PATH];
+@@ -509,7 +509,7 @@ static BOOL X11DRV_InitMonitor(HDEVINFO devinfo, const struct x11drv_monitor *mo
+ 
+     /* Write DEVPROPKEY_MONITOR_OUTPUT_ID */
+     if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_OUTPUT_ID,
+-                                   DEVPROP_TYPE_UINT32, (const BYTE *)&video_index, sizeof(video_index), 0))
++                                   DEVPROP_TYPE_UINT32, (const BYTE *)&output_id, sizeof(output_id), 0))
+         goto done;
+ 
+     /* Create driver key */
+@@ -614,6 +614,7 @@ void X11DRV_DisplayDevices_Init(BOOL force)
+     WCHAR guidW[40];
+     WCHAR driverW[1024];
+     LUID gpu_luid;
++    UINT output_id = 0;
+ 
+     mutex = get_display_device_init_mutex();
+ 
+@@ -664,7 +665,7 @@ void X11DRV_DisplayDevices_Init(BOOL force)
+             for (monitor = 0; monitor < monitor_count; monitor++)
+             {
+                 TRACE("monitor: %#x %s\n", monitor, wine_dbgstr_w(monitors[monitor].name));
+-                if (!X11DRV_InitMonitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid))
++                if (!X11DRV_InitMonitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid, output_id++))
+                     goto done;
+             }
+ 
+From 3db619d46e70a398a06001573fb42b0a32d81209 Mon Sep 17 00:00:00 2001
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Date: Thu, 11 Jun 2020 17:22:09 +0800
+Subject: [PATCH] winex11.drv: Support multiple adapter display settings in
+ registry.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winex11.drv/display.c  |   4 +-
+ dlls/winex11.drv/settings.c | 101 +++++++++++++++++++++++-------------
+ dlls/winex11.drv/x11drv.h   |   2 +
+ 3 files changed, 70 insertions(+), 37 deletions(-)
+
+diff --git a/dlls/winex11.drv/display.c b/dlls/winex11.drv/display.c
+index 4acd7299624..1dedf32a52f 100644
+--- a/dlls/winex11.drv/display.c
++++ b/dlls/winex11.drv/display.c
+@@ -124,7 +124,7 @@ static CRITICAL_SECTION_DEBUG screen_critsect_debug =
+ };
+ static CRITICAL_SECTION screen_section = {&screen_critsect_debug, -1, 0, 0, 0, 0};
+ 
+-static HANDLE get_display_device_init_mutex(void)
++HANDLE get_display_device_init_mutex(void)
+ {
+     static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
+     HANDLE mutex = CreateMutexW(NULL, FALSE, init_mutexW);
+@@ -133,7 +133,7 @@ static HANDLE get_display_device_init_mutex(void)
+     return mutex;
+ }
+ 
+-static void release_display_device_init_mutex(HANDLE mutex)
++void release_display_device_init_mutex(HANDLE mutex)
+ {
+     ReleaseMutex(mutex);
+     CloseHandle(mutex);
+diff --git a/dlls/winex11.drv/settings.c b/dlls/winex11.drv/settings.c
+index bc9f7aa1dca..c3f31d0430d 100644
+--- a/dlls/winex11.drv/settings.c
++++ b/dlls/winex11.drv/settings.c
+@@ -19,9 +19,6 @@
+  */
+ 
+ #include "config.h"
+-#include <string.h>
+-#include <stdio.h>
+-#include <assert.h>
+ 
+ #define NONAMELESSUNION
+ #define NONAMELESSSTRUCT
+@@ -32,6 +29,7 @@
+ #include "winreg.h"
+ #include "wingdi.h"
+ #include "wine/debug.h"
++#include "wine/unicode.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(x11settings);
+ 
+@@ -154,43 +152,63 @@ void X11DRV_Settings_Init(void)
+     X11DRV_Settings_AddOneMode( primary.right - primary.left, primary.bottom - primary.top, 0, 60);
+ }
+ 
+-static BOOL get_display_device_reg_key(char *key, unsigned len)
++static BOOL get_display_device_reg_key(const WCHAR *device_name, WCHAR *key, unsigned len)
+ {
+-    static const char display_device_guid_prop[] = "__wine_display_device_guid";
+-    static const char video_path[] = "System\\CurrentControlSet\\Control\\Video\\{";
+-    static const char display0[] = "}\\0000";
+-    ATOM guid_atom;
+-
+-    assert(len >= sizeof(video_path) + sizeof(display0) + 40);
+-
+-    guid_atom = HandleToULong(GetPropA(GetDesktopWindow(), display_device_guid_prop));
+-    if (!guid_atom) return FALSE;
++    static const WCHAR display[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
++    static const WCHAR video_value_fmt[] = {'\\','D','e','v','i','c','e','\\',
++                                            'V','i','d','e','o','%','d',0};
++    static const WCHAR video_key[] = {'H','A','R','D','W','A','R','E','\\',
++                                      'D','E','V','I','C','E','M','A','P','\\',
++                                      'V','I','D','E','O','\\',0};
++    WCHAR value_name[MAX_PATH], buffer[MAX_PATH], *end_ptr;
++    DWORD adapter_index, size;
++
++    /* Device name has to be \\.\DISPLAY%d */
++    if (strncmpiW(device_name, display, ARRAY_SIZE(display)))
++        return FALSE;
+ 
+-    memcpy(key, video_path, sizeof(video_path));
++    /* Parse \\.\DISPLAY* */
++    adapter_index = strtolW(device_name + ARRAY_SIZE(display), &end_ptr, 10) - 1;
++    if (*end_ptr)
++        return FALSE;
+ 
+-    if (!GlobalGetAtomNameA(guid_atom, key + strlen(key), 40))
++    /* Open \Device\Video* in HKLM\HARDWARE\DEVICEMAP\VIDEO\ */
++    sprintfW(value_name, video_value_fmt, adapter_index);
++    size = sizeof(buffer);
++    if (RegGetValueW(HKEY_LOCAL_MACHINE, video_key, value_name, RRF_RT_REG_SZ, NULL, buffer, &size))
+         return FALSE;
+ 
+-    strcat(key, display0);
++    if (len < lstrlenW(buffer + 18) + 1)
++        return FALSE;
+ 
+-    TRACE("display device key %s\n", wine_dbgstr_a(key));
++    /* Skip \Registry\Machine\ prefix */
++    lstrcpyW(key, buffer + 18);
++    TRACE("display device %s registry settings key %s.\n", wine_dbgstr_w(device_name), wine_dbgstr_w(key));
+     return TRUE;
+ }
+ 
+-static BOOL read_registry_settings(DEVMODEW *dm)
++static BOOL read_registry_settings(const WCHAR *device_name, DEVMODEW *dm)
+ {
+-    char wine_x11_reg_key[128];
++    WCHAR wine_x11_reg_key[MAX_PATH];
++    HANDLE mutex;
+     HKEY hkey;
+     DWORD type, size;
+     BOOL ret = TRUE;
+ 
+     dm->dmFields = 0;
+ 
+-    if (!get_display_device_reg_key(wine_x11_reg_key, sizeof(wine_x11_reg_key)))
++    mutex = get_display_device_init_mutex();
++    if (!get_display_device_reg_key(device_name, wine_x11_reg_key, ARRAY_SIZE(wine_x11_reg_key)))
++    {
++        release_display_device_init_mutex(mutex);
+         return FALSE;
++    }
+ 
+-    if (RegOpenKeyExA(HKEY_CURRENT_CONFIG, wine_x11_reg_key, 0, KEY_READ, &hkey))
++    if (RegOpenKeyExW(HKEY_CURRENT_CONFIG, wine_x11_reg_key, 0, KEY_READ, &hkey))
++    {
++        release_display_device_init_mutex(mutex);
+         return FALSE;
++    }
+ 
+ #define query_value(name, data) \
+     size = sizeof(DWORD); \
+@@ -218,21 +236,30 @@ static BOOL read_registry_settings(DEVMODEW *dm)
+ #undef query_value
+ 
+     RegCloseKey(hkey);
++    release_display_device_init_mutex(mutex);
+     return ret;
+ }
+ 
+-static BOOL write_registry_settings(const DEVMODEW *dm)
++static BOOL write_registry_settings(const WCHAR *device_name, const DEVMODEW *dm)
+ {
+-    char wine_x11_reg_key[128];
++    WCHAR wine_x11_reg_key[MAX_PATH];
++    HANDLE mutex;
+     HKEY hkey;
+     BOOL ret = TRUE;
+ 
+-    if (!get_display_device_reg_key(wine_x11_reg_key, sizeof(wine_x11_reg_key)))
++    mutex = get_display_device_init_mutex();
++    if (!get_display_device_reg_key(device_name, wine_x11_reg_key, ARRAY_SIZE(wine_x11_reg_key)))
++    {
++        release_display_device_init_mutex(mutex);
+         return FALSE;
++    }
+ 
+-    if (RegCreateKeyExA(HKEY_CURRENT_CONFIG, wine_x11_reg_key, 0, NULL,
++    if (RegCreateKeyExW(HKEY_CURRENT_CONFIG, wine_x11_reg_key, 0, NULL,
+                         REG_OPTION_VOLATILE, KEY_WRITE, NULL, &hkey, NULL))
++    {
++        release_display_device_init_mutex(mutex);
+         return FALSE;
++    }
+ 
+ #define set_value(name, data) \
+     if (RegSetValueExA(hkey, name, 0, REG_DWORD, (const BYTE*)(data), sizeof(DWORD))) \
+@@ -251,6 +278,7 @@ static BOOL write_registry_settings(const DEVMODEW *dm)
+ #undef set_value
+ 
+     RegCloseKey(hkey);
++    release_display_device_init_mutex(mutex);
+     return ret;
+ }
+ 
+@@ -301,7 +329,7 @@ BOOL CDECL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmo
+     if (n == ENUM_REGISTRY_SETTINGS)
+     {
+         TRACE("mode %d (registry) -- getting default mode (%s)\n", n, handler_name);
+-        return read_registry_settings(devmode);
++        return read_registry_settings(name, devmode);
+     }
+     if (n < dd_mode_count)
+     {
+@@ -368,13 +396,6 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+         devmode = &default_mode;
+     }
+ 
+-    if (lstrcmpiW(primary_adapter, devname))
+-    {
+-        FIXME("Changing non-primary adapter %s settings is currently unsupported.\n",
+-              wine_dbgstr_w(devname));
+-        return DISP_CHANGE_SUCCESSFUL;
+-    }
+-
+     if (is_detached_mode(devmode))
+     {
+         FIXME("Detaching adapters is currently unsupported.\n");
+@@ -407,8 +428,18 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+         /* we have a valid mode */
+         TRACE("Requested display settings match mode %d (%s)\n", i, handler_name);
+ 
+-        if (flags & CDS_UPDATEREGISTRY)
+-            write_registry_settings(devmode);
++        if (flags & CDS_UPDATEREGISTRY && !write_registry_settings(devname, devmode))
++        {
++            ERR("Failed to write %s display settings to registry.\n", wine_dbgstr_w(devname));
++            return DISP_CHANGE_NOTUPDATED;
++        }
++
++        if (lstrcmpiW(primary_adapter, devname))
++        {
++            FIXME("Changing non-primary adapter %s settings is currently unsupported.\n",
++                  wine_dbgstr_w(devname));
++            return DISP_CHANGE_SUCCESSFUL;
++        }
+ 
+         if (!(flags & (CDS_TEST | CDS_NORESET)))
+             return pSetCurrentMode(i);
+diff --git a/dlls/winex11.drv/x11drv.h b/dlls/winex11.drv/x11drv.h
+index 5021c71a415..a9eaed20cab 100644
+--- a/dlls/winex11.drv/x11drv.h
++++ b/dlls/winex11.drv/x11drv.h
+@@ -754,6 +754,8 @@ struct x11drv_display_device_handler
+     void (*register_event_handlers)(void);
+ };
+ 
++extern HANDLE get_display_device_init_mutex(void) DECLSPEC_HIDDEN;
++extern void release_display_device_init_mutex(HANDLE) DECLSPEC_HIDDEN;
+ extern void X11DRV_DisplayDevices_SetHandler(const struct x11drv_display_device_handler *handler) DECLSPEC_HIDDEN;
+ extern void X11DRV_DisplayDevices_Init(BOOL force) DECLSPEC_HIDDEN;
+ extern void X11DRV_DisplayDevices_RegisterEventHandlers(void) DECLSPEC_HIDDEN;
+From c4a01d0a65905f33cbfe90f150b2d23a02c4e793 Mon Sep 17 00:00:00 2001
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Date: Fri, 12 Jun 2020 15:29:33 +0800
+Subject: [PATCH] winex11.drv: Use the default frequency in
+ ChangeDisplaySettingsExW() if dmDisplayFrequency is 1.
+
+0 or 1 in dmDisplayFrequency means to use the default frequency.
+
+Fix Disgaea PC and Ostriv failing to launch in exclusive fullscreen mode.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/user32/tests/monitor.c | 1 -
+ dlls/winex11.drv/settings.c | 2 +-
+ 2 files changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/dlls/winex11.drv/settings.c b/dlls/winex11.drv/settings.c
+index c3f31d0430d..bbbb6fdf0a3 100644
+--- a/dlls/winex11.drv/settings.c
++++ b/dlls/winex11.drv/settings.c
+@@ -420,7 +420,7 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+                 continue;
+         }
+         if ((devmode->dmFields & DM_DISPLAYFREQUENCY) && (dd_modes[i].refresh_rate != 0) &&
+-            devmode->dmDisplayFrequency != 0)
++            devmode->dmDisplayFrequency != 0 && devmode->dmDisplayFrequency != 1)
+         {
+             if (devmode->dmDisplayFrequency != dd_modes[i].refresh_rate)
+                 continue;
+From 145cfce1135a7e59cc4c89cd05b572403f188161 Mon Sep 17 00:00:00 2001
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Date: Wed, 17 Jun 2020 20:02:04 +0800
+Subject: [PATCH] winex11.drv: Add a Vulkan UUID property for GPUs.
+
+A Vulkan UUID property is used to find the corresponding GPU in SetupAPI.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winex11.drv/display.c | 15 ++++--
+ dlls/winex11.drv/x11drv.h  |  2 +
+ dlls/winex11.drv/xrandr.c  | 99 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 113 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/winex11.drv/display.c b/dlls/winex11.drv/display.c
+index 1dedf32a52f..a6fe23ea68a 100644
+--- a/dlls/winex11.drv/display.c
++++ b/dlls/winex11.drv/display.c
+@@ -43,7 +43,8 @@ DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0
+ DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_GPU_LUID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 1);
+ DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_OUTPUT_ID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 2);
+ 
+-/* Wine specific monitor properties */
++/* Wine specific properties */
++DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_GPU_VULKAN_UUID, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5c, 2);
+ DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_STATEFLAGS, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 2);
+ DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_RCMONITOR, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 3);
+ DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_RCWORK, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 4);
+@@ -337,6 +338,8 @@ static BOOL X11DRV_InitGpu(HDEVINFO devinfo, const struct x11drv_gpu *gpu, INT g
+     BOOL ret = FALSE;
+     FILETIME filetime;
+ 
++    TRACE("GPU id:0x%s name:%s.\n", wine_dbgstr_longlong(gpu->id), wine_dbgstr_w(gpu->name));
++
+     sprintfW(instanceW, gpu_instance_fmtW, gpu->vendor_id, gpu->device_id, gpu->subsys_id, gpu->revision_id, gpu_index);
+     if (!SetupDiOpenDeviceInfoW(devinfo, instanceW, NULL, 0, &device_data))
+     {
+@@ -369,8 +372,14 @@ static BOOL X11DRV_InitGpu(HDEVINFO devinfo, const struct x11drv_gpu *gpu, INT g
+             goto done;
+     }
+     *gpu_luid = luid;
+-    TRACE("GPU id:0x%s name:%s LUID:%08x:%08x.\n", wine_dbgstr_longlong(gpu->id),
+-          wine_dbgstr_w(gpu->name), luid.HighPart, luid.LowPart);
++    TRACE("LUID:%08x:%08x.\n", luid.HighPart, luid.LowPart);
++
++    /* Write WINE_DEVPROPKEY_GPU_VULKAN_UUID property */
++    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &WINE_DEVPROPKEY_GPU_VULKAN_UUID,
++                                   DEVPROP_TYPE_GUID, (const BYTE *)&gpu->vulkan_uuid,
++                                   sizeof(gpu->vulkan_uuid), 0))
++        goto done;
++    TRACE("Vulkan UUID:%s.\n", wine_dbgstr_guid(&gpu->vulkan_uuid));
+ 
+     /* Open driver key.
+      * This is where HKLM\System\CurrentControlSet\Control\Video\{GPU GUID}\{Adapter Index} links to */
+diff --git a/dlls/winex11.drv/x11drv.h b/dlls/winex11.drv/x11drv.h
+index a9eaed20cab..cfce09bf11d 100644
+--- a/dlls/winex11.drv/x11drv.h
++++ b/dlls/winex11.drv/x11drv.h
+@@ -690,6 +690,8 @@ struct x11drv_gpu
+     UINT device_id;
+     UINT subsys_id;
+     UINT revision_id;
++    /* Vulkan device UUID */
++    GUID vulkan_uuid;
+ };
+ 
+ /* Represent an adapter in EnumDisplayDevices context */
+diff --git a/dlls/winex11.drv/xrandr.c b/dlls/winex11.drv/xrandr.c
+index 76e76806c55..f61a5b190e9 100644
+--- a/dlls/winex11.drv/xrandr.c
++++ b/dlls/winex11.drv/xrandr.c
+@@ -35,8 +35,13 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
+ #include <X11/extensions/Xrandr.h>
+ #include "x11drv.h"
+ 
++#define VK_NO_PROTOTYPES
++#define WINE_VK_HOST
++
+ #include "wine/heap.h"
+ #include "wine/unicode.h"
++#include "wine/vulkan.h"
++#include "wine/vulkan_driver.h"
+ 
+ static void *xrandr_handle;
+ 
+@@ -680,6 +685,99 @@ static BOOL is_crtc_primary( RECT primary, const XRRCrtcInfo *crtc )
+            crtc->y + crtc->height == primary.bottom;
+ }
+ 
++VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkDisplayKHR)
++
++static void get_vulkan_device_uuid( GUID *uuid, const XRRProviderInfo *provider_info )
++{
++    static const char *extensions[] =
++    {
++        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
++        "VK_EXT_acquire_xlib_display",
++        "VK_EXT_direct_mode_display",
++    };
++    const struct vulkan_funcs *vulkan_funcs = get_vulkan_driver( WINE_VULKAN_DRIVER_VERSION );
++    VkResult (*pvkGetRandROutputDisplayEXT)( VkPhysicalDevice, Display *, RROutput, VkDisplayKHR * );
++    PFN_vkGetPhysicalDeviceProperties2 pvkGetPhysicalDeviceProperties2;
++    PFN_vkEnumeratePhysicalDevices pvkEnumeratePhysicalDevices;
++    uint32_t device_count, device_idx, output_idx;
++    VkPhysicalDevice *vk_physical_devices = NULL;
++    VkPhysicalDeviceProperties2 properties2;
++    VkInstanceCreateInfo create_info;
++    VkPhysicalDeviceIDProperties id;
++    VkInstance vk_instance = NULL;
++    VkDisplayKHR vk_display;
++    VkResult vr;
++
++    if (!vulkan_funcs)
++        goto done;
++
++    memset( &create_info, 0, sizeof(create_info) );
++    create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
++    create_info.enabledExtensionCount = ARRAY_SIZE(extensions);
++    create_info.ppEnabledExtensionNames = extensions;
++
++    vr = vulkan_funcs->p_vkCreateInstance( &create_info, NULL, &vk_instance );
++    if (vr != VK_SUCCESS)
++    {
++        WARN("Failed to create a Vulkan instance, vr %d.\n", vr);
++        goto done;
++    }
++
++#define LOAD_VK_FUNC(f)                                                             \
++    if (!(p##f = (void *)vulkan_funcs->p_vkGetInstanceProcAddr( vk_instance, #f ))) \
++    {                                                                               \
++        WARN("Failed to load " #f ".\n");                                           \
++        goto done;                                                                  \
++    }
++
++    LOAD_VK_FUNC(vkEnumeratePhysicalDevices)
++    LOAD_VK_FUNC(vkGetPhysicalDeviceProperties2)
++    LOAD_VK_FUNC(vkGetRandROutputDisplayEXT)
++#undef LOAD_VK_FUNC
++
++    vr = pvkEnumeratePhysicalDevices( vk_instance, &device_count, NULL );
++    if (vr != VK_SUCCESS || !device_count)
++    {
++        WARN("No Vulkan device found, vr %d, device_count %d.\n", vr, device_count);
++        goto done;
++    }
++
++    if (!(vk_physical_devices = heap_calloc( device_count, sizeof(*vk_physical_devices) )))
++        goto done;
++
++    vr = pvkEnumeratePhysicalDevices( vk_instance, &device_count, vk_physical_devices );
++    if (vr != VK_SUCCESS)
++    {
++        WARN("vkEnumeratePhysicalDevices failed, vr %d.\n", vr);
++        goto done;
++    }
++
++    for (device_idx = 0; device_idx < device_count; ++device_idx)
++    {
++        for (output_idx = 0; output_idx < provider_info->noutputs; ++output_idx)
++        {
++            vr = pvkGetRandROutputDisplayEXT( vk_physical_devices[device_idx], gdi_display,
++                                              provider_info->outputs[output_idx], &vk_display );
++            if (vr != VK_SUCCESS || vk_display == VK_NULL_HANDLE)
++                continue;
++
++            memset( &id, 0, sizeof(id) );
++            id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
++            properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
++            properties2.pNext = &id;
++
++            pvkGetPhysicalDeviceProperties2( vk_physical_devices[device_idx], &properties2 );
++            memcpy( uuid, id.deviceUUID, sizeof(id.deviceUUID) );
++            goto done;
++        }
++    }
++
++done:
++    heap_free( vk_physical_devices );
++    if (vk_instance)
++        vulkan_funcs->p_vkDestroyInstance( vk_instance, NULL );
++}
++
+ static BOOL xrandr14_get_gpus( struct x11drv_gpu **new_gpus, int *count )
+ {
+     static const WCHAR wine_adapterW[] = {'W','i','n','e',' ','A','d','a','p','t','e','r',0};
+@@ -742,6 +840,7 @@ static BOOL xrandr14_get_gpus( struct x11drv_gpu **new_gpus, int *count )
+         }
+ 
+         gpus[i].id = provider_resources->providers[i];
++        get_vulkan_device_uuid( &gpus[i].vulkan_uuid, provider_info );
+         MultiByteToWideChar( CP_UTF8, 0, provider_info->name, -1, gpus[i].name, ARRAY_SIZE(gpus[i].name) );
+         /* PCI IDs are all zero because there is currently no portable way to get it via XRandR. Some AMD drivers report
+          * their PCI address in the name but many others don't */
+From 6f9d20806e821ab07c8adf81ae6630fae94b00ef Mon Sep 17 00:00:00 2001
+From: Paul Gofman <pgofman@codeweavers.com>
+Date: Thu, 18 Jun 2020 17:28:50 +0300
+Subject: [PATCH] winex11.drv: Handle X error from
+ vkGetRandROutputDisplayEXT().
+
+Nvidia implementation of vkGetRandROutputDisplayEXT() generates X exception
+when rrOutput is from different provider (or if rrOutput is just
+invalid). That can happen on certain multiple GPU configurations, on which
+Wine is currently unable to initialize display driver and thus create
+any window.
+
+According to Vulkan spec, vkGetRandROutputDisplayEXT is supposed to just
+return VK_NULL_HANDLE if there is no corresponding VkDisplayKHR. But it is
+probably better to workaround the problem to avoid long standing regression.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=49407
+Signed-off-by: Paul Gofman <pgofman@codeweavers.com>
+Signed-off-by: Liam Middlebrook <lmiddlebrook@nvidia.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winex11.drv/xrandr.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winex11.drv/xrandr.c b/dlls/winex11.drv/xrandr.c
+index f61a5b190e9..b1a43e48eab 100644
+--- a/dlls/winex11.drv/xrandr.c
++++ b/dlls/winex11.drv/xrandr.c
+@@ -756,9 +756,11 @@ static void get_vulkan_device_uuid( GUID *uuid, const XRRProviderInfo *provider_
+     {
+         for (output_idx = 0; output_idx < provider_info->noutputs; ++output_idx)
+         {
++            X11DRV_expect_error( gdi_display, XRandRErrorHandler, NULL );
+             vr = pvkGetRandROutputDisplayEXT( vk_physical_devices[device_idx], gdi_display,
+                                               provider_info->outputs[output_idx], &vk_display );
+-            if (vr != VK_SUCCESS || vk_display == VK_NULL_HANDLE)
++            XSync( gdi_display, FALSE );
++            if (X11DRV_check_error() || vr != VK_SUCCESS || vk_display == VK_NULL_HANDLE)
+                 continue;
+ 
+             memset( &id, 0, sizeof(id) );
+From 3a3c7cbd209e23cc6ee88299b3ba877ab20a767f Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Mon, 6 Jul 2020 10:46:18 -0700
+Subject: [PATCH] winex11.drv: Retrieve PCI IDs and device name from Vulkan.
+
+Signed-off-by: Brendan Shanks <bshanks@codeweavers.com>
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winex11.drv/xrandr.c | 21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/dlls/winex11.drv/xrandr.c b/dlls/winex11.drv/xrandr.c
+index 14574e198f5..141c2ca17f6 100644
+--- a/dlls/winex11.drv/xrandr.c
++++ b/dlls/winex11.drv/xrandr.c
+@@ -687,7 +687,7 @@ static BOOL is_crtc_primary( RECT primary, const XRRCrtcInfo *crtc )
+ 
+ VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkDisplayKHR)
+ 
+-static void get_vulkan_device_uuid( GUID *uuid, const XRRProviderInfo *provider_info )
++static BOOL get_gpu_properties_from_vulkan( struct x11drv_gpu *gpu, const XRRProviderInfo *provider_info )
+ {
+     static const char *extensions[] =
+     {
+@@ -706,6 +706,7 @@ static void get_vulkan_device_uuid( GUID *uuid, const XRRProviderInfo *provider_
+     VkPhysicalDeviceIDProperties id;
+     VkInstance vk_instance = NULL;
+     VkDisplayKHR vk_display;
++    BOOL ret = FALSE;
+     VkResult vr;
+ 
+     if (!vulkan_funcs)
+@@ -769,7 +770,15 @@ static void get_vulkan_device_uuid( GUID *uuid, const XRRProviderInfo *provider_
+             properties2.pNext = &id;
+ 
+             pvkGetPhysicalDeviceProperties2( vk_physical_devices[device_idx], &properties2 );
+-            memcpy( uuid, id.deviceUUID, sizeof(id.deviceUUID) );
++            memcpy( &gpu->vulkan_uuid, id.deviceUUID, sizeof(id.deviceUUID) );
++            /* Ignore Khronos vendor IDs */
++            if (properties2.properties.vendorID < 0x10000)
++            {
++                gpu->vendor_id = properties2.properties.vendorID;
++                gpu->device_id = properties2.properties.deviceID;
++            }
++            MultiByteToWideChar( CP_UTF8, 0, properties2.properties.deviceName, -1, gpu->name, ARRAY_SIZE(gpu->name) );
++            ret = TRUE;
+             goto done;
+         }
+     }
+@@ -778,6 +787,7 @@ static void get_vulkan_device_uuid( GUID *uuid, const XRRProviderInfo *provider_
+     heap_free( vk_physical_devices );
+     if (vk_instance)
+         vulkan_funcs->p_vkDestroyInstance( vk_instance, NULL );
++    return ret;
+ }
+ 
+ static BOOL xrandr14_get_gpus( struct x11drv_gpu **new_gpus, int *count )
+@@ -842,10 +852,9 @@ static BOOL xrandr14_get_gpus( struct x11drv_gpu **new_gpus, int *count )
+         }
+ 
+         gpus[i].id = provider_resources->providers[i];
+-        get_vulkan_device_uuid( &gpus[i].vulkan_uuid, provider_info );
+-        MultiByteToWideChar( CP_UTF8, 0, provider_info->name, -1, gpus[i].name, ARRAY_SIZE(gpus[i].name) );
+-        /* PCI IDs are all zero because there is currently no portable way to get it via XRandR. Some AMD drivers report
+-         * their PCI address in the name but many others don't */
++        if (!get_gpu_properties_from_vulkan( &gpus[i], provider_info ))
++            MultiByteToWideChar( CP_UTF8, 0, provider_info->name, -1, gpus[i].name, ARRAY_SIZE(gpus[i].name) );
++        /* FIXME: Add an alternate method of getting PCI IDs, for systems that don't support Vulkan */
+         pXRRFreeProviderInfo( provider_info );
+     }
+ 
+From 6de6fba2c1135044da2a9958df07772f00784de5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michael=20M=C3=BCller?= <michael@fds-team.de>
+Date: Thu, 5 Nov 2015 14:33:48 +0100
+Subject: [PATCH] winex11.drv: Allow to select default display frequency in
+ registry key.
+
+When an application doesn't request a specific display frequency, Wine
+currently just picks the first one. Most of the time this is fine, but
+there is no way to switch to a different frequency. This patch adds a
+registry key (of type STRING) to select the default display frequency:
+
+HKCU\Software\Wine\X11 Driver\DefaultDisplayFrequency
+---
+ dlls/winex11.drv/settings.c    | 54 ++++++++++++++++++++++++----------
+ dlls/winex11.drv/x11drv.h      |  1 +
+ dlls/winex11.drv/x11drv_main.c |  4 +++
+ 3 files changed, 44 insertions(+), 15 deletions(-)
+
+diff --git a/dlls/winex11.drv/settings.c b/dlls/winex11.drv/settings.c
+index bbbb6fdf0a3..82120cdbc2a 100644
+--- a/dlls/winex11.drv/settings.c
++++ b/dlls/winex11.drv/settings.c
+@@ -378,7 +378,7 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+     WCHAR primary_adapter[CCHDEVICENAME];
+     char bpp_buffer[16], freq_buffer[18];
+     DEVMODEW default_mode;
+-    DWORD i;
++    DWORD i, mode;
+ 
+     if (!get_primary_adapter(primary_adapter))
+         return DISP_CHANGE_FAILED;
+@@ -402,6 +402,7 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+         return DISP_CHANGE_SUCCESSFUL;
+     }
+ 
++    mode = ENUM_CURRENT_SETTINGS;
+     for (i = 0; i < dd_mode_count; i++)
+     {
+         if (devmode->dmFields & DM_BITSPERPEL)
+@@ -419,12 +420,24 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+             if (devmode->dmPelsHeight != dd_modes[i].height)
+                 continue;
+         }
+-        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) && (dd_modes[i].refresh_rate != 0) &&
++        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) &&
+             devmode->dmDisplayFrequency != 0 && devmode->dmDisplayFrequency != 1)
+         {
+-            if (devmode->dmDisplayFrequency != dd_modes[i].refresh_rate)
++            if (dd_modes[i].refresh_rate != 0 &&
++                devmode->dmDisplayFrequency != dd_modes[i].refresh_rate)
+                 continue;
+         }
++        else if (default_display_frequency != 0)
++        {
++            if (dd_modes[i].refresh_rate != 0 &&
++                default_display_frequency == dd_modes[i].refresh_rate)
++            {
++                TRACE("Found display mode %d with default frequency (%s)\n", i, handler_name);
++                mode = i;
++                break;
++            }
++        }
++
+         /* we have a valid mode */
+         TRACE("Requested display settings match mode %d (%s)\n", i, handler_name);
+ 
+@@ -441,20 +454,31 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+             return DISP_CHANGE_SUCCESSFUL;
+         }
+ 
+-        if (!(flags & (CDS_TEST | CDS_NORESET)))
+-            return pSetCurrentMode(i);
++        if (mode == ENUM_CURRENT_SETTINGS)
++            mode = i;
++    }
+ 
+-        return DISP_CHANGE_SUCCESSFUL;
++    if (mode == ENUM_CURRENT_SETTINGS)
++    {
++        /* no valid modes found, only print the fields we were trying to matching against */
++        bpp_buffer[0] = freq_buffer[0] = 0;
++        if (devmode->dmFields & DM_BITSPERPEL)
++            sprintf(bpp_buffer, "bpp=%u ",  devmode->dmBitsPerPel);
++        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) && (devmode->dmDisplayFrequency != 0))
++            sprintf(freq_buffer, "freq=%u ", devmode->dmDisplayFrequency);
++        ERR("No matching mode found: width=%d height=%d %s%s(%s)\n",
++            devmode->dmPelsWidth, devmode->dmPelsHeight, bpp_buffer, freq_buffer, handler_name);
++        return DISP_CHANGE_BADMODE;
+     }
+ 
+-    /* no valid modes found, only print the fields we were trying to matching against */
+-    bpp_buffer[0] = freq_buffer[0] = 0;
+-    if (devmode->dmFields & DM_BITSPERPEL)
+-        sprintf(bpp_buffer, "bpp=%u ",  devmode->dmBitsPerPel);
+-    if ((devmode->dmFields & DM_DISPLAYFREQUENCY) && (devmode->dmDisplayFrequency != 0))
+-        sprintf(freq_buffer, "freq=%u ", devmode->dmDisplayFrequency);
+-    ERR("No matching mode found: width=%d height=%d %s%s(%s)\n",
+-        devmode->dmPelsWidth, devmode->dmPelsHeight, bpp_buffer, freq_buffer, handler_name);
++    /* we have a valid mode */
++    TRACE("Requested display settings match mode %d (%s)\n", mode, handler_name);
++
++    if (flags & CDS_UPDATEREGISTRY)
++        write_registry_settings(devname, devmode);
++
++    if (!(flags & (CDS_TEST | CDS_NORESET)))
++        return pSetCurrentMode(mode);
+ 
+-    return DISP_CHANGE_BADMODE;
++    return DISP_CHANGE_SUCCESSFUL;
+ }
+diff --git a/dlls/winex11.drv/x11drv.h b/dlls/winex11.drv/x11drv.h
+index a9eaed20cab..76e1344a616 100644
+--- a/dlls/winex11.drv/x11drv.h
++++ b/dlls/winex11.drv/x11drv.h
+@@ -404,6 +404,7 @@ extern BOOL private_color_map DECLSPEC_HIDDEN;
+ extern int primary_monitor DECLSPEC_HIDDEN;
+ extern int copy_default_colors DECLSPEC_HIDDEN;
+ extern int alloc_system_colors DECLSPEC_HIDDEN;
++extern int default_display_frequency DECLSPEC_HIDDEN;
+ extern int xrender_error_base DECLSPEC_HIDDEN;
+ extern HMODULE x11drv_module DECLSPEC_HIDDEN;
+ extern char *process_name DECLSPEC_HIDDEN;
+diff --git a/dlls/winex11.drv/x11drv_main.c b/dlls/winex11.drv/x11drv_main.c
+index e6e61e801e1..6b82784c5f9 100644
+--- a/dlls/winex11.drv/x11drv_main.c
++++ b/dlls/winex11.drv/x11drv_main.c
+@@ -85,6 +85,7 @@ BOOL client_side_with_render = TRUE;
+ BOOL shape_layered_windows = TRUE;
+ int copy_default_colors = 128;
+ int alloc_system_colors = 256;
++int default_display_frequency = 0;
+ DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
+ int xrender_error_base = 0;
+ HMODULE x11drv_module = 0;
+@@ -435,6 +436,9 @@ static void setup_options(void)
+     if (!get_config_key( hkey, appkey, "AllocSystemColors", buffer, sizeof(buffer) ))
+         alloc_system_colors = atoi(buffer);
+ 
++    if (!get_config_key( hkey, appkey, "DefaultDisplayFrequency", buffer, sizeof(buffer) ))
++        default_display_frequency = atoi(buffer);
++
+     get_config_key( hkey, appkey, "InputStyle", input_style, sizeof(input_style) );
+ 
+     if (appkey) RegCloseKey( appkey );
+-- 
+2.27.0
+

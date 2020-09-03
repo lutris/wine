@@ -1,0 +1,80 @@
+From e537baff7d7c8ed905af69be52b8f93299db9931 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Emilio=20Cobos=20=C3=81lvarez?= <emilio@crisal.io>
+Date: Fri, 15 May 2020 19:48:27 +0200
+Subject: [PATCH] api-ms-win-crt-private-l1-1-0: Implement _o__fileno,
+ _o__setmode, _o__wfopen.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Emilio Cobos Álvarez <emilio@crisal.io>
+Signed-off-by: Piotr Caban <piotr@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+(cherry picked from commit 950dac9104fe5620520c090ecf441041a445dae6)
+---
+ .../api-ms-win-crt-private-l1-1-0.spec                      | 6 +++---
+ dlls/ucrtbase/ucrtbase.spec                                 | 6 +++---
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/dlls/api-ms-win-crt-private-l1-1-0/api-ms-win-crt-private-l1-1-0.spec b/dlls/api-ms-win-crt-private-l1-1-0/api-ms-win-crt-private-l1-1-0.spec
+index 8d6ff5e89f5..8e00661c8cb 100644
+--- a/dlls/api-ms-win-crt-private-l1-1-0/api-ms-win-crt-private-l1-1-0.spec
++++ b/dlls/api-ms-win-crt-private-l1-1-0/api-ms-win-crt-private-l1-1-0.spec
+@@ -270,7 +270,7 @@
+ @ stub _o__fgetwchar
+ @ stub _o__filelength
+ @ stub _o__filelengthi64
+-@ stub _o__fileno
++@ cdecl _o__fileno(ptr) ucrtbase._o__fileno
+ @ stub _o__findclose
+ @ stub _o__findfirst32
+ @ stub _o__findfirst32i64
+@@ -673,7 +673,7 @@
+ @ stub _o__set_thread_local_invalid_parameter_handler
+ @ stub _o__seterrormode
+ @ stub _o__setmbcp
+-@ stub _o__setmode
++@ cdecl _o__setmode(long long) ucrtbase._o__setmode
+ @ stub _o__setsystime
+ @ stub _o__sleep
+ @ stub _o__sopen
+@@ -832,7 +832,7 @@
+ @ stub _o__wfindnext32i64
+ @ stub _o__wfindnext64
+ @ stub _o__wfindnext64i32
+-@ stub _o__wfopen
++@ cdecl _o__wfopen(wstr wstr) ucrtbase._o__wfopen
+ @ stub _o__wfopen_s
+ @ stub _o__wfreopen
+ @ stub _o__wfreopen_s
+diff --git a/dlls/ucrtbase/ucrtbase.spec b/dlls/ucrtbase/ucrtbase.spec
+index 1703176745d..d25d086c108 100644
+--- a/dlls/ucrtbase/ucrtbase.spec
++++ b/dlls/ucrtbase/ucrtbase.spec
+@@ -934,7 +934,7 @@
+ @ stub _o__fgetwchar
+ @ stub _o__filelength
+ @ stub _o__filelengthi64
+-@ stub _o__fileno
++@ cdecl _o__fileno(ptr) MSVCRT__fileno
+ @ stub _o__findclose
+ @ stub _o__findfirst32
+ @ stub _o__findfirst32i64
+@@ -1337,7 +1337,7 @@
+ @ stub _o__set_thread_local_invalid_parameter_handler
+ @ stub _o__seterrormode
+ @ stub _o__setmbcp
+-@ stub _o__setmode
++@ cdecl _o__setmode(long long) MSVCRT__setmode
+ @ stub _o__setsystime
+ @ stub _o__sleep
+ @ stub _o__sopen
+@@ -1496,7 +1496,7 @@
+ @ stub _o__wfindnext32i64
+ @ stub _o__wfindnext64
+ @ stub _o__wfindnext64i32
+-@ stub _o__wfopen
++@ cdecl _o__wfopen(wstr wstr) MSVCRT__wfopen
+ @ stub _o__wfopen_s
+ @ stub _o__wfreopen
+ @ stub _o__wfreopen_s

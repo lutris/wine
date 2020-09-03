@@ -1,0 +1,117 @@
+--- b/dlls/ntdll/loader.c
++++ a/dlls/ntdll/loader.c
+@@ -4490,7 +4490,6 @@
+     return TRUE;
+ }
+ 
+-void *Wow64Transition;
+ 
+ /***********************************************************************
+  *           __wine_process_init
+@@ -4501,13 +4500,12 @@
+     static const WCHAR ntdllW[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
+                                    's','y','s','t','e','m','3','2','\\',
+                                    'n','t','d','l','l','.','d','l','l',0};
+-    static const WCHAR wow64cpuW[] = {'w','o','w','6','4','c','p','u','.','d','l','l',0};
+     static const WCHAR kernel32W[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
+                                       's','y','s','t','e','m','3','2','\\',
+                                       'k','e','r','n','e','l','3','2','.','d','l','l',0};
+     RTL_USER_PROCESS_PARAMETERS *params;
+     ACTIVATION_CONTEXT_RUN_LEVEL_INFORMATION runlevel;
++    WINE_MODREF *wm;
+-    WINE_MODREF *wm, *wow64cpu_wm;
+     NTSTATUS status;
+     ANSI_STRING func_name;
+     UNICODE_STRING nt_name;
+@@ -4553,13 +4551,6 @@
+         MESSAGE( "wine: could not load kernel32.dll, status %x\n", status );
+         exit(1);
+     }
+-
+-    RtlInitUnicodeString( &nt_name, wow64cpuW );
+-    if ((status = load_builtin_dll( NULL, &nt_name, 0, 0, &wow64cpu_wm )) == STATUS_SUCCESS)
+-        Wow64Transition = wow64cpu_wm->ldr.DllBase;
+-    else
+-        WARN( "could not load wow64cpu.dll, status %#x\n", status );
+-
+     RtlInitAnsiString( &func_name, "__wine_start_process" );
+     if ((status = LdrGetProcedureAddress( wm->ldr.DllBase, &func_name,
+                                           0, (void **)&kernel32_start_process )) != STATUS_SUCCESS)
+--- b/dlls/ntdll/ntdll.spec
++++ a/dlls/ntdll/ntdll.spec
+@@ -1100,7 +1100,6 @@
+ @ stdcall WinSqmIsOptedIn()
+ @ stdcall WinSqmSetDWORD(ptr long long)
+ @ stdcall WinSqmStartSession(ptr long long)
+-@ extern Wow64Transition
+ @ stdcall -private ZwAcceptConnectPort(ptr long ptr long ptr ptr) NtAcceptConnectPort
+ @ stdcall -private ZwAccessCheck(ptr long long ptr ptr ptr ptr ptr) NtAccessCheck
+ @ stdcall -private ZwAccessCheckAndAuditAlarm(ptr long ptr ptr ptr long ptr long ptr ptr ptr) NtAccessCheckAndAuditAlarm
+
+From 384a965d9dd8ad2d946682e45c409795bba292a2 Mon Sep 17 00:00:00 2001
+From: Zebediah Figura <z.figura12@gmail.com>
+Date: Wed, 8 Aug 2018 20:00:15 -0500
+Subject: [PATCH] ntdll: Add a stub implementation of Wow64Transition.
+
+---
+ dlls/ntdll/loader.c   | 13 ++++++++++++-
+ dlls/ntdll/ntdll.spec |  1 +
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index 42b681e4cd3..c8cdf4f5436 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -4324,6 +4324,7 @@ NTSTATUS WINAPI NtLoadDriver( const UNICODE_STRING *DriverServiceName )
+     return STATUS_NOT_IMPLEMENTED;
+ }
+ 
++void *Wow64Transition;
+ 
+ /***********************************************************************
+  *           NtUnloadDriver   (NTDLL.@)
+@@ -4769,12 +4769,15 @@
+     static const WCHAR ntdllW[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
+                                    's','y','s','t','e','m','3','2','\\',
+                                    'n','t','d','l','l','.','d','l','l',0};
++    static const WCHAR wow64cpuW[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
++                                      's','y','s','t','e','m','3','2','\\',
+++                                     'w','o','w','6','4','c','p','u','.','d','l','l',0};
+     static const WCHAR kernel32W[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
+                                       's','y','s','t','e','m','3','2','\\',
+                                       'k','e','r','n','e','l','3','2','.','d','l','l',0};
+     RTL_USER_PROCESS_PARAMETERS *params;
+     ACTIVATION_CONTEXT_RUN_LEVEL_INFORMATION runlevel;
+-    WINE_MODREF *wm;
++    WINE_MODREF *wm, *wow64cpu_wm;
+     NTSTATUS status;
+     ANSI_STRING func_name;
+     UNICODE_STRING nt_name;
+@@ -4431,6 +4435,13 @@ void __wine_process_init(void)
+         MESSAGE( "wine: could not load kernel32.dll, status %x\n", status );
+         exit(1);
+     }
++
++    RtlInitUnicodeString( &nt_name, wow64cpuW );
++    if ((status = load_builtin_dll( NULL, &nt_name, 0, 0, &wow64cpu_wm )) == STATUS_SUCCESS)
++        Wow64Transition = wow64cpu_wm->ldr.DllBase;
++    else
++        WARN( "could not load wow64cpu.dll, status %#x\n", status );
++
+     RtlInitAnsiString( &func_name, "__wine_start_process" );
+     if ((status = LdrGetProcedureAddress( wm->ldr.DllBase, &func_name,
+                                           0, (void **)&kernel32_start_process )) != STATUS_SUCCESS)
+diff --git a/dlls/ntdll/ntdll.spec b/dlls/ntdll/ntdll.spec
+index e313d5807b3..b20ded3d108 100644
+--- a/dlls/ntdll/ntdll.spec
++++ b/dlls/ntdll/ntdll.spec
+@@ -1112,6 +1112,7 @@
+ @ stdcall WinSqmIsOptedIn()
+ @ stdcall WinSqmSetDWORD(ptr long long)
+ @ stdcall WinSqmStartSession(ptr long long)
++@ extern Wow64Transition
+ @ stdcall -private ZwAcceptConnectPort(ptr long ptr long ptr ptr) NtAcceptConnectPort
+ @ stdcall -private ZwAccessCheck(ptr long long ptr ptr ptr ptr ptr) NtAccessCheck
+ @ stdcall -private ZwAccessCheckAndAuditAlarm(ptr long ptr ptr ptr long ptr long ptr ptr ptr) NtAccessCheckAndAuditAlarm
+-- 
+2.26.2

@@ -42,6 +42,8 @@
 #include "wine/exception.h"
 #include "wine/debug.h"
 
+#include "wine/heap.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(file);
 
 /* info structure for FindFirstFile handle */
@@ -418,6 +420,106 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFile2( LPCWSTR name, DWORD access, DWORD s
     return CreateFileW( name, access, sharing, sa, creation, attributes, template );
 }
 
+#define MAX_BLACKLISTED_FILENAMES 32
+
+static struct
+{
+    const WCHAR *name;
+    size_t name_len;
+}
+blacklist_filenames[MAX_BLACKLISTED_FILENAMES];
+
+static unsigned int blacklist_filename_count;
+
+static BOOL CALLBACK init_file_blacklist(PINIT_ONCE init_once, PVOID parameter, PVOID *context)
+{
+    static WCHAR origin_blacklist[] = L"kernel32.dll;user32.dll";
+
+    const WCHAR separators[] = L",; ";
+    WCHAR *buffer, *token;
+    DWORD size;
+
+    if ((size = GetEnvironmentVariableW(L"WINE_BLACKLIST_FILES", NULL, 0)))
+    {
+        if (!(buffer = heap_alloc(sizeof(*buffer) * size)))
+        {
+            ERR("No memory.\n");
+            return FALSE;
+        }
+
+        if (GetEnvironmentVariableW(L"WINE_BLACKLIST_FILES", buffer, size) != size - 1)
+        {
+            ERR("Error getting WINE_BLACKLIST_FILES env variable.\n");
+            return FALSE;
+        }
+    }
+    else
+    {
+        static const WCHAR *origin_names[] = {
+            L"igoproxy64.exe",
+            L"igoproxy.exe",
+            L"origin.exe",
+            L"easteamproxy.exe"
+        };
+
+        WCHAR cur_exe[MAX_PATH];
+        DWORD cur_exe_len, i;
+
+        if (!(cur_exe_len = GetModuleFileNameW(NULL, cur_exe, ARRAY_SIZE(cur_exe))))
+            return TRUE;
+
+        buffer = NULL;
+
+        for (i = 0; i < ARRAY_SIZE(origin_names); ++i)
+        {
+            DWORD origin_name_len = wcslen(origin_names[i]);
+            if (cur_exe_len >= origin_name_len &&
+                    wcsicmp(cur_exe + cur_exe_len - origin_name_len, origin_names[i]) == 0)
+            {
+                FIXME("using origin file blacklist for %s\n", debugstr_w(cur_exe));
+                buffer = origin_blacklist;
+                break;
+            }
+        }
+
+        if (!buffer)
+            return TRUE;
+    }
+
+    blacklist_filename_count = 0;
+    token = wcstok(buffer, separators);
+    while (token && blacklist_filename_count < MAX_BLACKLISTED_FILENAMES)
+    {
+        FIXME("Blacklisting %s file.\n", debugstr_w(token));
+        blacklist_filenames[blacklist_filename_count].name = token;
+        blacklist_filenames[blacklist_filename_count++].name_len = wcslen(token);
+        token = wcstok(NULL, separators);
+    }
+
+    if (token && blacklist_filename_count == MAX_BLACKLISTED_FILENAMES)
+        ERR("File black list is too long.\n");
+
+    return TRUE;
+}
+
+static BOOL is_file_blacklisted(LPCWSTR filename)
+{
+    static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
+    unsigned int i;
+    size_t len;
+
+    if (!InitOnceExecuteOnce(&init_once, init_file_blacklist, NULL, NULL))
+        return FALSE;
+
+    len = wcslen(filename);
+
+    for (i = 0; i < blacklist_filename_count; ++i)
+        if (blacklist_filenames[i].name_len <= len
+                && !wcsicmp(blacklist_filenames[i].name, filename + len - blacklist_filenames[i].name_len))
+            return TRUE;
+
+    return FALSE;
+}
 
 /*************************************************************************
  *	CreateFileA   (kernelbase.@)
@@ -479,7 +581,6 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
         FILE_OVERWRITE      /* TRUNCATE_EXISTING */
     };
 
-
     /* sanity checks */
 
     if (!filename || !filename[0])
@@ -497,6 +598,13 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
            (sharing & FILE_SHARE_WRITE) ? "FILE_SHARE_WRITE " : "",
            (sharing & FILE_SHARE_DELETE) ? "FILE_SHARE_DELETE " : "",
            creation, attributes);
+
+    if (is_file_blacklisted(filename))
+    {
+        FIXME("\"%s\" is blacklisted.\n", debugstr_w(filename));
+        SetLastError( ERROR_FILE_NOT_FOUND );
+        return INVALID_HANDLE_VALUE;
+    }
 
     /* Open a console for CONIN$ or CONOUT$ */
 
