@@ -25,6 +25,9 @@
 #include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>
 #include <gnutls/abstract.h>
+#ifdef SONAME_LIBGCRYPT
+#include <gcrypt.h>
+#endif
 #elif HAVE_COMMONCRYPTO_COMMONCRYPTOR_H
 #include <AvailabilityMacros.h>
 #include <CommonCrypto/CommonCryptor.h>
@@ -157,6 +160,12 @@ struct algorithm
     ULONG         flags;
 };
 
+struct secret
+{
+    UCHAR *data;
+    ULONG len;
+};
+
 #if defined(HAVE_GNUTLS_CIPHER_INIT)
 struct key_symmetric
 {
@@ -251,11 +260,15 @@ NTSTATUS key_destroy( struct key * ) DECLSPEC_HIDDEN;
 BOOL key_is_symmetric( struct key * ) DECLSPEC_HIDDEN;
 NTSTATUS key_export_ecc( struct key *, UCHAR *, ULONG, ULONG * ) DECLSPEC_HIDDEN;
 NTSTATUS key_import_ecc( struct key *, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
+NTSTATUS compute_secret_ecc (struct key *pubkey_in, struct key *privkey_in, struct secret *secret) DECLSPEC_HIDDEN;
 
 BOOL is_zero_vector( const UCHAR *, ULONG ) DECLSPEC_HIDDEN;
 BOOL is_equal_vector( const UCHAR *, ULONG, const UCHAR *, ULONG ) DECLSPEC_HIDDEN;
 
 BOOL gnutls_initialize(void) DECLSPEC_HIDDEN;
 void gnutls_uninitialize(void) DECLSPEC_HIDDEN;
+
+BOOL gcrypt_initialize(void) DECLSPEC_HIDDEN;
+void gcrypt_uninitialize(void) DECLSPEC_HIDDEN;
 
 #endif /* __BCRYPT_INTERNAL_H */

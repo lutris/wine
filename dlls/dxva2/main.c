@@ -19,8 +19,11 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
+
+#define INITGUID
 #include "d3d9.h"
 #include "dxva2api.h"
+#include "dxva2_private.h"
 #include "physicalmonitorenumerationapi.h"
 #include "lowlevelmonitorconfigurationapi.h"
 #include "highlevelmonitorconfigurationapi.h"
@@ -28,6 +31,10 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxva2);
+
+BOOL config_vaapi_enabled = FALSE;
+BOOL config_vaapi_drm = FALSE;
+char config_vaapi_drm_path[MAX_PATH] = "";
 
 BOOL WINAPI CapabilitiesRequestAndCapabilitiesReply( HMONITOR monitor, LPSTR buffer, DWORD length )
 {
@@ -39,16 +46,16 @@ BOOL WINAPI CapabilitiesRequestAndCapabilitiesReply( HMONITOR monitor, LPSTR buf
 
 HRESULT WINAPI DXVA2CreateDirect3DDeviceManager9( UINT *resetToken, IDirect3DDeviceManager9 **dxvManager )
 {
-    FIXME("(%p, %p): stub\n", resetToken, dxvManager);
+    TRACE("(%p, %p)\n", resetToken, dxvManager);
 
-    return E_NOTIMPL;
+    return devicemanager_create( resetToken, (void **)dxvManager );
 }
 
 HRESULT WINAPI DXVA2CreateVideoService( IDirect3DDevice9 *device, REFIID riid, void **ppv )
 {
-    FIXME("(%p, %s, %p): stub\n", device, debugstr_guid(riid), ppv);
+    TRACE("(%p, %s, %p)\n", device, debugstr_guid(riid), ppv);
 
-    return E_NOTIMPL;
+    return videoservice_create( device, riid, ppv );
 }
 
 BOOL WINAPI DegaussMonitor( HMONITOR monitor )
@@ -319,15 +326,81 @@ BOOL WINAPI SetVCPFeature( HMONITOR monitor, BYTE vcpCode, DWORD value )
     return FALSE;
 }
 
-BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+static BOOL get_app_key( HKEY *defkey, HKEY *appkey )
+{
+    char buffer[MAX_PATH+16];
+    DWORD len;
+
+    *appkey = 0;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\DXVA2 */
+    if (RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\DXVA2", defkey))
+        *defkey = 0;
+
+    len = GetModuleFileNameA(0, buffer, MAX_PATH);
+    if (len && len < MAX_PATH)
+    {
+        HKEY tmpkey;
+
+        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\DXVA2 */
+        if (!RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey))
+        {
+            char *p, *appname = buffer;
+            if ((p = strrchr(appname, '/'))) appname = p + 1;
+            if ((p = strrchr(appname, '\\'))) appname = p + 1;
+            strcat(appname, "\\DXVA2");
+
+            if (RegOpenKeyA(tmpkey, appname, appkey)) *appkey = 0;
+            RegCloseKey(tmpkey);
+        }
+    }
+
+    return *defkey || *appkey;
+}
+
+static BOOL get_config_key( HKEY defkey, HKEY appkey, const char *name, char *buffer, DWORD size )
+{
+    if (appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE)buffer, &size ))
+        return TRUE;
+
+    if (defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE)buffer, &size ))
+        return TRUE;
+
+    return FALSE;
+}
+
+static void dxva2_init( void )
+{
+    HKEY defkey, appkey;
+    char buffer[MAX_PATH];
+
+    if (!get_app_key(&defkey, &appkey))
+        return;
+
+    if (get_config_key(defkey, appkey, "backend", buffer, sizeof(buffer)))
+        config_vaapi_enabled = !strcmp(buffer, "va");
+
+    if (get_config_key(defkey, appkey, "va_mode", buffer, sizeof(buffer)))
+        config_vaapi_drm = !strcmp(buffer, "drm");
+
+    if (!get_config_key(defkey, appkey, "va_drm_device", config_vaapi_drm_path, sizeof(config_vaapi_drm_path)))
+        strcpy(config_vaapi_drm_path, "/dev/dri/card0");
+
+    if (defkey) RegCloseKey(defkey);
+    if (appkey) RegCloseKey(appkey);
+}
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     TRACE("%p,%x,%p\n", hinstDLL, fdwReason, lpvReserved);
 
-    switch (fdwReason) {
-        case DLL_WINE_PREATTACH:
-            return FALSE;  /* prefer native version */
+    switch (fdwReason)
+    {
         case DLL_PROCESS_ATTACH:
+            dxva2_init();
             DisableThreadLibraryCalls(hinstDLL);
+            break;
+        case DLL_PROCESS_DETACH:
             break;
     }
 

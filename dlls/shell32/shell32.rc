@@ -99,6 +99,7 @@ BEGIN
 	  MENUITEM SEPARATOR
 	  MENUITEM "C&ut",		FCIDM_SHVIEW_CUT
 	  MENUITEM "&Copy",		FCIDM_SHVIEW_COPY
+	  MENUITEM "&Paste",		FCIDM_SHVIEW_INSERT
 	  MENUITEM SEPARATOR
 	  MENUITEM "Create &Link",	FCIDM_SHVIEW_CREATELINK
 	  MENUITEM "&Delete",		FCIDM_SHVIEW_DELETE
@@ -184,6 +185,13 @@ If the files in the destination folder have the same names as files in the\n\
 selected folder they will be replaced. Do you still want to move or copy\n\
 the folder?"
 
+        IDS_FILEOP_COPYING   "Copying"
+        IDS_FILEOP_MOVING    "Moving"
+        IDS_FILEOP_DELETING  "Deleting"
+        IDS_FILEOP_FROM_TO   "From %1 to %2"
+        IDS_FILEOP_FROM      "From %1"
+        IDS_FILEOP_PREFLIGHT "Preflight"
+
         /* message box strings */
         IDS_RESTART_TITLE       "Restart"
         IDS_RESTART_PROMPT      "Do you want to simulate a Windows reboot?"
@@ -196,6 +204,33 @@ the folder?"
         IDS_RUNDLG_BROWSE_CAPTION  "Browse"
         IDS_RUNDLG_BROWSE_FILTER_EXE "Executable files (*.exe)"
         IDS_RUNDLG_BROWSE_FILTER_ALL "All files (*.*)"
+
+        /* Security dialog - General */
+        IDS_SECURITY_ALL_ACCESS "Full Control"
+        IDS_SECURITY_MODIFY     "Modify"
+        IDS_SECURITY_READ_EXEC  "Read & Execute"
+        IDS_SECURITY_READ       "Read"
+        IDS_SECURITY_WRITE      "Write"
+        IDS_SECURITY_DIR_LIST   "List Folder Contents"
+
+        /* Security dialog - Advanced */
+        IDS_SECURITY_TRAVERSE      "Traverse Folder"
+        IDS_SECURITY_EXECUTE       "Execute File"
+        IDS_SECURITY_LIST_FOLDER   "List Folder"
+        IDS_SECURITY_READ_DATA     "Read Data"
+        IDS_SECURITY_READ_ATTR     "Read Attributes"
+        IDS_SECURITY_READ_EX_ATTR  "Read Extended Attributes"
+        IDS_SECURITY_CREATE_FILES  "Create Files"
+        IDS_SECURITY_WRITE_DATA    "Write Data"
+        IDS_SEUCRITY_CREATE_FOLDER "Create Folders"
+        IDS_SECURITY_APPEND_DATA   "Append Data"
+        IDS_SECURITY_WRITE_ATTR    "Write Attributes"
+        IDS_SECURITY_WRITE_EX_ATTR "Write Extended Attributes"
+        IDS_SECURITY_DELETE_CHILD  "Delete Subfolders and Files"
+        IDS_SECURITY_DELETE        "Delete"
+        IDS_SECURITY_READ_PERM     "Read Permissions"
+        IDS_SECURITY_CHANGE_PERM   "Change Permissions"
+        IDS_SECURITY_CHANGE_OWNER  "Take Ownership"
 
         /* shell folder path default values */
 	/* FIXME: Some will be unused until desktop.ini support is implemented */
@@ -1081,6 +1116,14 @@ IDB_TB_SMALL_LIGHT BITMAP resources/idb_tb_small.bmp
 
 /* @makedep: resources/idb_tb_small.bmp */
 IDB_TB_SMALL_DARK BITMAP resources/idb_tb_small.bmp
+
+/* @makedep: resources/ietoolbar.bmp */
+204 BITMAP resources/ietoolbar.bmp
+205 BITMAP resources/ietoolbar.bmp
+
+/* @makedep: resources/ietoolbar_small.bmp */
+206 BITMAP resources/ietoolbar_small.bmp
+207 BITMAP resources/ietoolbar_small.bmp
 
 /* @makedep: resources/searching.avi */
 IDR_AVI_SEARCHING AVI resources/searching.avi
