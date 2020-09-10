@@ -1,0 +1,22 @@
+From 93758fc3ef16eed6cf1639aa6c31f6ab7fdccd72 Mon Sep 17 00:00:00 2001
+From: Hans Leidekker <hans@codeweavers.com>
+Date: Mon, 11 May 2020 18:11:01 +0200
+Subject: wbemprox: Fix allocation size.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=49128
+Signed-off-by: Hans Leidekker <hans@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+
+diff --git a/dlls/wbemprox/builtin.c b/dlls/wbemprox/builtin.c
+index 5d39984d4c..5af47a0ddc 100644
+--- a/dlls/wbemprox/builtin.c
++++ b/dlls/wbemprox/builtin.c
+@@ -3761,7 +3761,7 @@ static enum fill_status fill_systemenclosure( struct table *table, const struct
+ 
+ static WCHAR *get_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
+ {
+-    static const WCHAR *fmtW = L"PCI\\VEN_%04X&DEV_%04X&SUBSYS_%08X&REV_%02X\\0&DEADBEEF&0&DEAD";
++    static const WCHAR fmtW[] = L"PCI\\VEN_%04X&DEV_%04X&SUBSYS_%08X&REV_%02X\\0&DEADBEEF&0&DEAD";
+     UINT len = sizeof(fmtW) + 2;
+     WCHAR *ret;
+ 

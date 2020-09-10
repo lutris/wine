@@ -443,7 +443,7 @@ AC_CHECK_HEADERS(\
 	IOKit/IOKitLib.h \
 	IOKit/hid/IOHIDLib.h \
 	OpenAL/al.h \
-	OpenCL/opencl.h \
+	CL/opencl.h \
 	QuickTime/ImageCompression.h \
 	Security/Security.h \
 	SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h \
@@ -1815,7 +1815,7 @@ WINE_NOTICE_WITH(sdl,[test "x$ac_cv_lib_soname_SDL2" = "x"],
 dnl **** Check for FAudio ****
 if test "x$with_faudio" != "xno"
 then
-    WINE_PACKAGE_FLAGS(FAUDIO,[faudio],[-lFAudio],,,
+    WINE_PACKAGE_FLAGS(FAUDIO,[faudio],[-lFAudio -lavcodec -lavutil -lswresample],,,
         [AC_CHECK_HEADERS([FAudio.h],
             [WINE_CHECK_SONAME(FAudio,FAudioCreate,,,[$FAUDIO_LIBS],[[libFAudio*]])])
              WINE_CHECK_LIB_FUNCS([FAudio_CommitOperationSet \
@@ -2910,6 +2910,7 @@ WINE_CONFIG_MAKEFILE(dlls/advapi32)
 WINE_CONFIG_MAKEFILE(dlls/advapi32/tests)
 WINE_CONFIG_MAKEFILE(dlls/advpack)
 WINE_CONFIG_MAKEFILE(dlls/advpack/tests)
+WINE_CONFIG_MAKEFILE(dlls/amd_ags_x64)
 WINE_CONFIG_MAKEFILE(dlls/amsi)
 WINE_CONFIG_MAKEFILE(dlls/amstream)
 WINE_CONFIG_MAKEFILE(dlls/amstream/tests)
@@ -3897,6 +3898,8 @@ WINE_CONFIG_MAKEFILE(dlls/win32s16.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/win87em.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/winaspi.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/windebug.dll16,enable_win16)
+WINE_CONFIG_MAKEFILE(dlls/windows.gaming.input.dll)
+WINE_CONFIG_MAKEFILE(dlls/windows.networking.connectivity.dll)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs/tests)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecsext)

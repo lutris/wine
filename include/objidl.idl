@@ -38,6 +38,15 @@ typedef struct _COSERVERINFO {
 /******************** Fundamentals ********************/
 
 [
+    local,
+    object,
+    uuid(94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90)
+]
+interface IAgileObject : IUnknown
+{
+}
+
+[
   local,
   object,
   uuid(00000003-0000-0000-C000-000000000046)

@@ -58,6 +58,7 @@
 #include "wine/exception.h"
 #include "wine/rbtree.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(virtual);
@@ -84,6 +85,7 @@ struct file_view
 #define VPROT_GUARD      0x10
 #define VPROT_COMMITTED  0x20
 #define VPROT_WRITEWATCH 0x40
+#define VPROT_COPIED     0x80
 /* per-mapping protection flags */
 #define VPROT_SYSTEM     0x0200  /* system view (underlying mmap not under our control) */
 
@@ -317,7 +319,8 @@ static const char *VIRTUAL_GetProtStr( BYTE prot )
     buffer[0] = (prot & VPROT_COMMITTED) ? 'c' : '-';
     buffer[1] = (prot & VPROT_GUARD) ? 'g' : ((prot & VPROT_WRITEWATCH) ? 'H' : '-');
     buffer[2] = (prot & VPROT_READ) ? 'r' : '-';
-    buffer[3] = (prot & VPROT_WRITECOPY) ? 'W' : ((prot & VPROT_WRITE) ? 'w' : '-');
+    buffer[3] = (prot & VPROT_WRITECOPY) ? (prot & VPROT_COPIED ? 'w' : 'W')
+        : ((prot & VPROT_WRITE) ? 'w' : '-');
     buffer[4] = (prot & VPROT_EXEC) ? 'x' : '-';
     buffer[5] = 0;
     return buffer;
@@ -918,7 +921,11 @@ static NTSTATUS create_view( struct file_view **view_ret, void *base, size_t siz
  */
 static DWORD VIRTUAL_GetWin32Prot( BYTE vprot, unsigned int map_prot )
 {
-    DWORD ret = VIRTUAL_Win32Flags[vprot & 0x0f];
+    DWORD ret;
+
+    if ((vprot & (VPROT_COPIED | VPROT_WRITECOPY)) == (VPROT_COPIED | VPROT_WRITECOPY))
+        vprot = (vprot & ~VPROT_WRITECOPY) | VPROT_WRITE;
+    ret = VIRTUAL_Win32Flags[vprot & 0x0f];
     if (vprot & VPROT_GUARD) ret |= PAGE_GUARD;
     if (map_prot & SEC_NOCACHE) ret |= PAGE_NOCACHE;
     return ret;
@@ -2778,11 +2785,12 @@ void virtual_release_address_space(void)
  *
  * Enable use of a large address space when allowed by the application.
  */
-void virtual_set_large_address_space(void)
+void virtual_set_large_address_space(BOOL force_large_address)
 {
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( NtCurrentTeb()->Peb->ImageBaseAddress );
 
-    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)) return;
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) && !force_large_address) return;
+
     /* no large address space on win9x */
     if (NtCurrentTeb()->Peb->OSPlatformId != VER_PLATFORM_WIN32_NT) return;
 
@@ -3096,6 +3104,24 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH NtProtectVirtualMemory( HANDLE process, PVOID 
         {
             old = VIRTUAL_GetWin32Prot( vprot, view->protect );
             status = set_protection( view, base, size, new_prot );
+
+            /* GTA5 HACK: Mark first page as copied. */
+            if (status == STATUS_SUCCESS && (view->protect & SEC_IMAGE) &&
+                    base == (void*)NtCurrentTeb()->Peb->ImageBaseAddress)
+            {
+                const WCHAR gta5W[] = { 'g','t','a','5','.','e','x','e',0 };
+                WCHAR *name, *p;
+
+                name = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+                p = strrchrW(name, '\\');
+                p = p ? p+1 : name;
+
+                if(!strcmpiW(p, gta5W))
+                {
+                    FIXME("HACK: changing GTA5.exe vprot\n");
+                    set_page_vprot_bits(base, page_size, VPROT_COPIED, 0);
+                }
+            }
         }
         else status = STATUS_NOT_COMMITTED;
     }
