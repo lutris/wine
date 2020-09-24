@@ -128,8 +128,7 @@ static void semaphore_dump( struct object *obj, int verbose )
 
 static struct object_type *semaphore_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'S','e','m','a','p','h','o','r','e'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Semaphore, sizeof(type_Semaphore) };
     return get_object_type( &str );
 }
 

@@ -769,6 +769,7 @@ static int enum_handles( struct process *process, void *user )
     struct handle_table *table = process->handles;
     struct handle_entry *entry;
     struct handle_info *handle;
+    struct object_type *type;
     unsigned int i;
 
     if (!table)
@@ -787,6 +788,15 @@ static int enum_handles( struct process *process, void *user )
         handle->owner  = process->id;
         handle->handle = index_to_handle(i);
         handle->access = entry->access & ~RESERVED_ALL;
+
+        if ((type = entry->ptr->ops->get_type(entry->ptr)))
+        {
+            handle->type = type_get_index(type);
+            release_object(type);
+        }
+        else
+            handle->type = 0;
+
         info->count--;
     }
 

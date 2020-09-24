@@ -915,8 +915,7 @@ static void mapping_dump( struct object *obj, int verbose )
 
 static struct object_type *mapping_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'S','e','c','t','i','o','n'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Section, sizeof(type_Section) };
     return get_object_type( &str );
 }
 

@@ -192,8 +192,7 @@ static void timer_dump( struct object *obj, int verbose )
 
 static struct object_type *timer_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'T','i','m','e','r'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Timer, sizeof(type_Timer) };
     return get_object_type( &str );
 }
 

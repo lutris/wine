@@ -218,8 +218,7 @@ static struct job *get_job_obj( struct process *process, obj_handle_t handle, un
 
 static struct object_type *job_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'J','o','b'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Job, sizeof(type_Job) };
     return get_object_type( &str );
 };
 
@@ -577,7 +576,7 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
                                        : alloc_handle_table( process, 0 );
         /* Note: for security reasons, starting a new process does not attempt
          * to use the current impersonation token for the new process */
-        process->token = token_duplicate( parent->token, TRUE, 0, NULL );
+        process->token = token_duplicate( parent->token, TRUE, 0, NULL, NULL, 0, NULL, 0 );
         process->affinity = parent->affinity;
     }
     if (!process->handles || !process->token) goto error;
@@ -649,8 +648,7 @@ static void process_dump( struct object *obj, int verbose )
 
 static struct object_type *process_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'P','r','o','c','e','s','s'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Process, sizeof(type_Process) };
     return get_object_type( &str );
 }
 

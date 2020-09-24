@@ -87,8 +87,7 @@ static void symlink_dump( struct object *obj, int verbose )
 
 static struct object_type *symlink_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'S','y','m','b','o','l','i','c','L','i','n','k'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_SymbolicLink, sizeof(type_SymbolicLink) };
     return get_object_type( &str );
 }
 

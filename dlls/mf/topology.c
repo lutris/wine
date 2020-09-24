@@ -1933,246 +1933,420 @@ static ULONG WINAPI topology_loader_Release(IMFTopoLoader *iface)
     return refcount;
 }
 
-struct topoloader_context
+static void topology_loader_add_branch(struct topology *topology, IMFTopologyNode *first, IMFTopologyNode *last)
 {
-    IMFTopology *input_topology;
-    IMFTopology *output_topology;
-    unsigned int marker;
-    GUID key;
+    IMFTopology *full_topo = &topology->IMFTopology_iface;
+    IMFTopologyNode *in, *out;
+    DWORD index;
+
+    in = first;
+    IMFTopology_AddNode(full_topo, in);
+    while (SUCCEEDED(IMFTopologyNode_GetOutput(in, 0, &out, &index)))
+    {
+        IMFTopology_AddNode(full_topo, out);
+        in = out;
+    }
+}
+
+struct available_output_type
+{
+    IMFMediaType *type;
+    IMFTransform *transform;
 };
 
-static IMFTopologyNode *topology_loader_get_node_for_marker(struct topoloader_context *context, TOPOID *id)
+static HRESULT topology_loader_enumerate_output_types(GUID *category, IMFMediaType *input_type, HRESULT (*new_type)(struct available_output_type *, void *), void *context)
 {
-    IMFTopologyNode *node;
-    unsigned short i = 0;
-    unsigned int value;
-
-    while (SUCCEEDED(IMFTopology_GetNode(context->output_topology, i++, &node)))
-    {
-        if (SUCCEEDED(IMFTopologyNode_GetUINT32(node, &context->key, &value)) && value == context->marker)
-        {
-            IMFTopologyNode_GetTopoNodeID(node, id);
-            return node;
-        }
-        IMFTopologyNode_Release(node);
-    }
-
-    *id = 0;
-    return NULL;
-}
-
-static HRESULT topology_loader_clone_node(struct topoloader_context *context, IMFTopologyNode *node,
-        IMFTopologyNode **ret, unsigned int marker)
-{
-    IMFTopologyNode *cloned_node;
-    MF_TOPOLOGY_TYPE node_type;
+    MFT_REGISTER_TYPE_INFO mft_typeinfo;
+    GUID major_type, subtype;
+    IMFActivate **activates;
+    UINT32 num_activates;
     HRESULT hr;
 
-    if (ret) *ret = NULL;
-
-    IMFTopologyNode_GetNodeType(node, &node_type);
-
-    if (FAILED(hr = MFCreateTopologyNode(node_type, &cloned_node)))
+    if (FAILED(hr = IMFMediaType_GetMajorType(input_type, &major_type)))
         return hr;
 
-    if (SUCCEEDED(hr = IMFTopologyNode_CloneFrom(cloned_node, node)))
-        hr = IMFTopologyNode_SetUINT32(cloned_node, &context->key, marker);
+    if (FAILED(hr = IMFMediaType_GetGUID(input_type, &MF_MT_SUBTYPE, &subtype)))
+        return hr;
 
-    if (SUCCEEDED(hr))
-        hr = IMFTopology_AddNode(context->output_topology, cloned_node);
+    mft_typeinfo.guidMajorType = major_type;
+    mft_typeinfo.guidSubtype = subtype;
 
-    if (SUCCEEDED(hr) && ret)
+    if (FAILED(hr = MFTEnumEx(*category, MFT_ENUM_FLAG_ALL, &mft_typeinfo, NULL, &activates, &num_activates)))
+        return hr;
+
+    hr = E_FAIL;
+
+    for (unsigned int i = 0; i < num_activates; i++)
     {
-        *ret = cloned_node;
-        IMFTopologyNode_AddRef(*ret);
-    }
+        IMFTransform *mft;
 
-    IMFTopologyNode_Release(cloned_node);
+        IMFActivate_ActivateObject(activates[i], &IID_IMFTransform, (void**) &mft);
 
-    return hr;
-}
-
-typedef HRESULT (*p_topology_loader_connect_func)(struct topoloader_context *context, IMFTopologyNode *upstream_node,
-        unsigned int output_index, IMFTopologyNode *downstream_node, unsigned int input_index);
-
-static HRESULT topology_loader_connect_source_node(struct topoloader_context *context, IMFTopologyNode *upstream_node,
-        unsigned int output_index, IMFTopologyNode *downstream_node, unsigned int input_index)
-{
-    FIXME("Unimplemented.\n");
-
-    return E_NOTIMPL;
-}
-
-static HRESULT topology_loader_resolve_branch(struct topoloader_context *context, IMFTopologyNode *upstream_node,
-        unsigned int output_index, IMFTopologyNode *downstream_node, unsigned input_index)
-{
-    static const p_topology_loader_connect_func connectors[MF_TOPOLOGY_TEE_NODE+1][MF_TOPOLOGY_TEE_NODE+1] =
-    {
-          /* OUTPUT */ { NULL },
-    /* SOURCESTREAM */ { topology_loader_connect_source_node, NULL, NULL, NULL },
-       /* TRANSFORM */ { NULL },
-             /* TEE */ { NULL },
-    };
-    MF_TOPOLOGY_TYPE u_type, d_type;
-    IMFTopologyNode *node;
-    TOPOID id;
-
-    /* Downstream node might have already been cloned. */
-    IMFTopologyNode_GetTopoNodeID(downstream_node, &id);
-    if (FAILED(IMFTopology_GetNodeByID(context->output_topology, id, &node)))
-        topology_loader_clone_node(context, downstream_node, &node, context->marker + 1);
-
-    IMFTopologyNode_ConnectOutput(upstream_node, output_index, node, input_index);
-
-    IMFTopologyNode_GetNodeType(upstream_node, &u_type);
-    IMFTopologyNode_GetNodeType(downstream_node, &d_type);
-
-    if (!connectors[u_type][d_type])
-    {
-        WARN("Unsupported branch kind %d -> %d.\n", u_type, d_type);
-        return E_FAIL;
-    }
-
-    return connectors[u_type][d_type](context, upstream_node, output_index, downstream_node, input_index);
-}
-
-static HRESULT topology_loader_resolve_nodes(struct topoloader_context *context, unsigned int *layer_size)
-{
-    IMFTopologyNode *downstream_node, *node, *orig_node;
-    unsigned int input_index, size = 0;
-    MF_TOPOLOGY_TYPE node_type;
-    HRESULT hr = S_OK;
-    TOPOID id;
-
-    while ((node = topology_loader_get_node_for_marker(context, &id)))
-    {
-        ++size;
-
-        IMFTopology_GetNodeByID(context->input_topology, id, &orig_node);
-
-        IMFTopologyNode_GetNodeType(node, &node_type);
-        switch (node_type)
+        if (SUCCEEDED(hr = IMFTransform_SetInputType(mft, 0, input_type, 0)))
         {
-            case MF_TOPOLOGY_SOURCESTREAM_NODE:
-                if (FAILED(IMFTopologyNode_GetOutput(orig_node, 0, &downstream_node, &input_index)))
-                {
-                    IMFTopology_RemoveNode(context->output_topology, node);
-                    continue;
-                }
+            struct available_output_type avail = {.transform = mft};
+            unsigned int output_count = 0;
 
-                hr = topology_loader_resolve_branch(context, node, 0, downstream_node, input_index);
-                break;
-            case MF_TOPOLOGY_TRANSFORM_NODE:
-            case MF_TOPOLOGY_TEE_NODE:
-                FIXME("Unsupported node type %d.\n", node_type);
-                break;
-            default:
-                WARN("Unexpected node type %d.\n", node_type);
+            while (SUCCEEDED(IMFTransform_GetOutputAvailableType(mft, 0, output_count++, &avail.type)))
+            {
+                if (SUCCEEDED(hr = new_type(&avail, context)))
+                {
+                    IMFActivate_ShutdownObject(activates[i]);
+                    return hr;
+                }
+            }
         }
 
-        IMFTopologyNode_DeleteItem(node, &context->key);
-
-        if (FAILED(hr))
-            break;
+        IMFActivate_ShutdownObject(activates[i]);
     }
 
-    *layer_size = size;
-
     return hr;
+}
+
+struct connect_to_sink_context
+{
+    IMFTopologyNode *src, *sink;
+    IMFMediaTypeHandler *sink_mth;
+};
+
+HRESULT connect_to_sink(struct available_output_type *type, void *context)
+{
+    IMFTopologyNode *node;
+    struct connect_to_sink_context *ctx = context;
+
+    if (SUCCEEDED(IMFMediaTypeHandler_IsMediaTypeSupported(ctx->sink_mth, type->type, NULL)))
+    {
+        MFCreateTopologyNode(MF_TOPOLOGY_TRANSFORM_NODE, &node);
+        IMFTopologyNode_SetObject(node, (IUnknown *) type->transform);
+        IMFTopologyNode_ConnectOutput(ctx->src, 0, node, 0);
+        IMFTopologyNode_ConnectOutput(node, 0, ctx->sink, 0);
+
+        IMFMediaTypeHandler_SetCurrentMediaType(ctx->sink_mth, type->type);
+        IMFTransform_SetOutputType(type->transform, 0, type->type, 0);
+
+        return S_OK;
+    }
+    return E_FAIL;
+}
+
+struct connect_to_converter_context
+{
+    struct connect_to_sink_context sink_ctx;
+    GUID *converter_category;
+};
+
+HRESULT connect_to_converter(struct available_output_type *type, void *context)
+{
+    struct connect_to_converter_context *ctx = context;
+    struct connect_to_sink_context sink_ctx;
+    IMFTopologyNode *node;
+
+    MFCreateTopologyNode(MF_TOPOLOGY_TRANSFORM_NODE, &node);
+    IMFTopologyNode_SetObject(node, (IUnknown *) type->transform);
+
+    sink_ctx = ctx->sink_ctx;
+    sink_ctx.src = node;
+    if (SUCCEEDED(topology_loader_enumerate_output_types(ctx->converter_category, type->type, connect_to_sink, &sink_ctx)))
+    {
+        IMFTopologyNode_ConnectOutput(ctx->sink_ctx.src, 0, node, 0);
+
+        IMFTransform_SetOutputType(type->transform, 0, type->type, 0);
+
+        return S_OK;
+    }
+    IMFTopologyNode_Release(node);
+    return E_FAIL;
+}
+
+static HRESULT topology_loader_resolve_branch(IMFTopologyNode *src, IMFMediaType *mediatype, IMFTopologyNode *sink, MF_CONNECT_METHOD method)
+{
+    struct connect_to_converter_context convert_ctx;
+    struct connect_to_sink_context sink_ctx;
+    GUID major_type, decode_cat, convert_cat;
+    IMFStreamSink *streamsink;
+    IMFMediaTypeHandler *mth;
+    HRESULT hr;
+
+    TRACE("method %u\n", method);
+
+    IMFTopologyNode_GetObject(sink, (IUnknown **)&streamsink);
+    IMFStreamSink_GetMediaTypeHandler(streamsink, &mth);
+
+    if (SUCCEEDED(hr = IMFMediaTypeHandler_IsMediaTypeSupported(mth, mediatype, NULL)))
+    {
+        IMFMediaTypeHandler_SetCurrentMediaType(mth, mediatype);
+        return IMFTopologyNode_ConnectOutput(src, 0, sink, 0);
+    }
+
+    if (FAILED(hr = IMFMediaType_GetMajorType(mediatype, &major_type)))
+        return hr;
+
+    if (IsEqualGUID(&major_type, &MFMediaType_Audio))
+    {
+        decode_cat = MFT_CATEGORY_AUDIO_DECODER;
+        convert_cat = MFT_CATEGORY_AUDIO_EFFECT;
+    }
+    else if (IsEqualGUID(&major_type, &MFMediaType_Video))
+    {
+        decode_cat = MFT_CATEGORY_VIDEO_DECODER;
+        convert_cat = MFT_CATEGORY_VIDEO_EFFECT;
+    }
+    else
+        return E_FAIL;
+
+    sink_ctx.src = src;
+    sink_ctx.sink = sink;
+    sink_ctx.sink_mth = mth;
+
+    convert_ctx.sink_ctx = sink_ctx;
+    convert_ctx.converter_category = &convert_cat;
+
+    hr = E_FAIL;
+
+    if (method & MF_CONNECT_ALLOW_CONVERTER)
+    {
+        if (SUCCEEDED(hr = topology_loader_enumerate_output_types(&convert_cat, mediatype, connect_to_sink, &sink_ctx)))
+            goto done;
+    }
+
+    /* 2 = decoder flag */
+    if (method & 2)
+    {
+        if (method & MF_CONNECT_ALLOW_CONVERTER)
+        {
+            if (SUCCEEDED(hr = topology_loader_enumerate_output_types(&decode_cat, mediatype, connect_to_converter, &convert_ctx)))
+                goto done;
+        }
+        else
+        {
+            if (SUCCEEDED(hr = topology_loader_enumerate_output_types(&decode_cat, mediatype, connect_to_sink, &sink_ctx)))
+                goto done;
+        }
+    }
+
+    done:
+    IMFMediaTypeHandler_Release(mth);
+    IMFStreamSink_Release(streamsink);
+    return hr;
+}
+
+static HRESULT topology_loader_resolve_partial_topology(struct topology_node *src, struct topology_node *sink, struct topology *topology, struct topology **full_topology)
+{
+    UINT32 method, src_method, sink_method, enum_src_types, streamid;
+    IMFMediaTypeHandler *mth_src, *mth_sink;
+    IMFTopologyNode *clone_src, *clone_sink;
+    IMFMediaType **src_mediatypes;
+    IMFStreamDescriptor *desc;
+    IMFAttributes *attrs_sink;
+    IMFAttributes *attrs_src;
+    IMFStreamSink *strm_sink;
+    IMFMediaType *mtype_src;
+    DWORD num_media_types;
+    HRESULT hr;
+    int i;
+
+    attrs_sink = sink->attributes;
+    attrs_src = src->attributes;
+    if (FAILED(hr = IMFAttributes_GetUnknown(attrs_src, &MF_TOPONODE_STREAM_DESCRIPTOR, &IID_IMFStreamDescriptor, (void **)&desc)))
+        return hr;
+    strm_sink = (IMFStreamSink *)sink->object;
+
+    if (FAILED(hr = IMFStreamDescriptor_GetMediaTypeHandler(desc, &mth_src)))
+    {
+        IMFStreamDescriptor_Release(desc);
+        return hr;
+    }
+    if (FAILED(hr = IMFStreamSink_GetMediaTypeHandler(strm_sink, &mth_sink)))
+    {
+        IMFStreamDescriptor_Release(desc);
+        IMFMediaTypeHandler_Release(mth_src);
+        return hr;
+    }
+
+    hr = IMFTopology_GetUINT32(&topology->IMFTopology_iface, &MF_TOPOLOGY_ENUMERATE_SOURCE_TYPES, &enum_src_types);
+
+    mtype_src = NULL;
+    if (FAILED(hr) || !enum_src_types)
+    {
+        num_media_types = 1;
+        enum_src_types = 0;
+        if (FAILED(hr = IMFMediaTypeHandler_GetCurrentMediaType(mth_src, &mtype_src)))
+            if (FAILED(hr = IMFMediaTypeHandler_GetMediaTypeByIndex(mth_src, 0, &mtype_src)))
+            {
+                IMFMediaTypeHandler_Release(mth_src);
+                IMFMediaTypeHandler_Release(mth_sink);
+                IMFStreamDescriptor_Release(desc);
+                return hr;
+            }
+    }
+    else
+        IMFMediaTypeHandler_GetMediaTypeCount(mth_src, &num_media_types);
+
+    src_mediatypes = heap_alloc(sizeof(IMFMediaType *) * num_media_types);
+
+    if (mtype_src)
+        src_mediatypes[0] = mtype_src;
+    else
+        for (i = 0; i < num_media_types; i++)
+            IMFMediaTypeHandler_GetMediaTypeByIndex(mth_src, i, &src_mediatypes[i]);
+
+
+    MFCreateTopologyNode(MF_TOPOLOGY_SOURCESTREAM_NODE, &clone_src);
+    MFCreateTopologyNode(MF_TOPOLOGY_OUTPUT_NODE, &clone_sink);
+    IMFTopologyNode_CloneFrom(clone_src, &src->IMFTopologyNode_iface);
+    IMFTopologyNode_CloneFrom(clone_sink, &sink->IMFTopologyNode_iface);
+
+    if (FAILED(IMFTopologyNode_GetUINT32(clone_sink, &MF_TOPONODE_STREAMID, &streamid)))
+        IMFTopologyNode_SetUINT32(clone_sink, &MF_TOPONODE_STREAMID, 0);
+
+    if (FAILED(IMFAttributes_GetUINT32(attrs_sink, &MF_TOPONODE_CONNECT_METHOD, &sink_method)))
+        sink_method = MF_CONNECT_ALLOW_DECODER;
+
+    if (enum_src_types)
+    {
+        hr = IMFAttributes_GetUINT32(attrs_src, &MF_TOPONODE_CONNECT_METHOD, &src_method);
+        if (hr == S_OK && src_method != MF_CONNECT_RESOLVE_INDEPENDENT_OUTPUTTYPES)
+        {
+            for (method = MF_CONNECT_DIRECT; method <= sink_method; method++)
+                for (i = 0; i < num_media_types; i++)
+                    if (SUCCEEDED(topology_loader_resolve_branch(clone_src, src_mediatypes[i], clone_sink, method)))
+                    {
+                        topology_loader_add_branch(*full_topology, clone_src, clone_sink);
+                        heap_free(src_mediatypes);
+                        return S_OK;
+                    }
+        }
+        else
+        {
+            for (i = 0; i < num_media_types; i++)
+                for (method = MF_CONNECT_DIRECT; method <= sink_method; method++)
+                    if (SUCCEEDED(topology_loader_resolve_branch(clone_src, src_mediatypes[i], clone_sink, method)))
+                    {
+                        topology_loader_add_branch(*full_topology, clone_src, clone_sink);
+                        heap_free(src_mediatypes);
+                        return S_OK;
+                    }
+        }
+    }
+    else
+    {
+        for (method = MF_CONNECT_DIRECT; method <= sink_method; method++)
+            if (SUCCEEDED(topology_loader_resolve_branch(clone_src, src_mediatypes[0], clone_sink, method)))
+            {
+                TRACE("Successfully connected nodes with method %u\n", method);
+                topology_loader_add_branch(*full_topology, clone_src, clone_sink);
+                heap_free(src_mediatypes);
+                return S_OK;
+            }
+    }
+
+    heap_free(src_mediatypes);
+    return MF_E_TOPO_UNSUPPORTED;
 }
 
 static HRESULT WINAPI topology_loader_Load(IMFTopoLoader *iface, IMFTopology *input_topology,
-        IMFTopology **ret_topology, IMFTopology *current_topology)
+        IMFTopology **output_topology, IMFTopology *current_topology)
 {
-    struct topoloader_context context = { 0 };
-    IMFTopology *output_topology;
-    MF_TOPOLOGY_TYPE node_type;
-    unsigned int layer_size;
-    IMFTopologyNode *node;
-    unsigned short i = 0;
+    struct topology *topology = unsafe_impl_from_IMFTopology(input_topology);
+    struct topology_node *(*node_pairs)[2];
+    int num_connections;
     IMFStreamSink *sink;
-    IUnknown *object;
-    HRESULT hr = E_FAIL;
+    HRESULT hr;
+    int i, idx;
 
-    FIXME("%p, %p, %p, %p.\n", iface, input_topology, ret_topology, current_topology);
+    FIXME("%p, %p, %p, %p.\n", iface, input_topology, output_topology, current_topology);
 
     if (current_topology)
         FIXME("Current topology instance is ignored.\n");
 
-    /* Basic sanity checks for input topology:
+    if (!topology || topology->nodes.count < 2)
+        return MF_E_TOPO_UNSUPPORTED;
 
-       - source nodes must have stream descriptor set;
-       - sink nodes must be resolved to stream sink objects;
-    */
-    while (SUCCEEDED(IMFTopology_GetNode(input_topology, i++, &node)))
+    num_connections = 0;
+    for (i = 0; i < topology->nodes.count; i++)
     {
-        IMFTopologyNode_GetNodeType(node, &node_type);
+        struct topology_node *node = topology->nodes.nodes[i];
 
-        switch (node_type)
+        if (node->node_type == MF_TOPOLOGY_SOURCESTREAM_NODE)
         {
-            case MF_TOPOLOGY_OUTPUT_NODE:
-                if (SUCCEEDED(hr = IMFTopologyNode_GetObject(node, &object)))
-                {
-                    /* Sinks must be bound beforehand. */
-                    if (FAILED(IUnknown_QueryInterface(object, &IID_IMFStreamSink, (void **)&sink)))
-                        hr = MF_E_TOPO_SINK_ACTIVATES_UNSUPPORTED;
-                    else if (sink)
-                        IMFStreamSink_Release(sink);
-                    IUnknown_Release(object);
-                }
-                break;
-            case MF_TOPOLOGY_SOURCESTREAM_NODE:
-                hr = IMFTopologyNode_GetItem(node, &MF_TOPONODE_STREAM_DESCRIPTOR, NULL);
-                break;
-            default:
-                ;
+            if (node->outputs.count && node->outputs.streams->connection)
+                num_connections++;
         }
-
-        IMFTopologyNode_Release(node);
-        if (FAILED(hr))
-            return hr;
     }
 
-    if (FAILED(hr = MFCreateTopology(&output_topology)))
+    if (!num_connections)
+        return MF_E_TOPO_UNSUPPORTED;
+
+    node_pairs = heap_alloc_zero(sizeof(struct topology_node *[2]) * num_connections);
+
+    idx = 0;
+    for (i = 0; i < topology->nodes.count; ++i)
+    {
+        struct topology_node *node = topology->nodes.nodes[i];
+
+        if (node->node_type == MF_TOPOLOGY_SOURCESTREAM_NODE)
+        {
+            if (node->outputs.count && node->outputs.streams->connection)
+            {
+                node_pairs[idx][0] = node;
+                if (node->outputs.streams->connection->node_type == MF_TOPOLOGY_TRANSFORM_NODE)
+                {
+                    struct topology_node *sink = node->outputs.streams->connection;
+
+                    while (sink && sink->node_type != MF_TOPOLOGY_OUTPUT_NODE && sink->outputs.count)
+                        sink = sink->outputs.streams->connection;
+                    if (!sink || !sink->outputs.count)
+                    {
+                        FIXME("Check for MF_CONNECT_AS_OPTIONAL and MF_CONNECT_AS_OPTIONAL_BRANCH flags.\n");
+                        heap_free(node_pairs);
+                        return MF_E_TOPO_UNSUPPORTED;
+                    }
+                    node_pairs[idx][1] = sink;
+                }
+                else if (node->outputs.streams->connection->node_type == MF_TOPOLOGY_OUTPUT_NODE)
+                    node_pairs[idx][1] = node->outputs.streams->connection;
+                else {
+                    FIXME("Tee nodes currently unhandled.\n");
+                    heap_free(node_pairs);
+                    return MF_E_TOPO_UNSUPPORTED;
+                }
+                idx++;
+            }
+        }
+    }
+
+    /* all sinks must be activated */
+    for (i = 0; i < num_connections; i++)
+    {
+        if (FAILED(IUnknown_QueryInterface(node_pairs[i][1]->object, &IID_IMFStreamSink, (void **)&sink)))
+        {
+            FIXME("Check for MF_CONNECT_AS_OPTIONAL and MF_CONNECT_AS_OPTIONAL_BRANCH flags.\n");
+            heap_free(node_pairs);
+            return MF_E_TOPO_SINK_ACTIVATES_UNSUPPORTED;
+        }
+        IMFStreamSink_Release(sink);
+    }
+
+    if (FAILED(hr = MFCreateTopology(output_topology)))
         return hr;
 
-    context.input_topology = input_topology;
-    context.output_topology = output_topology;
-    memset(&context.key, 0xff, sizeof(context.key));
-
-    /* Clone source nodes, use initial marker value. */
-    i = 0;
-    while (SUCCEEDED(IMFTopology_GetNode(input_topology, i++, &node)))
+    /* resolve each branch */
+    for (i = 0; i < num_connections; i++)
     {
-        IMFTopologyNode_GetNodeType(node, &node_type);
+        struct topology_node *src = node_pairs[i][0];
+        struct topology_node *sink = node_pairs[i][1];
+        struct topology *full_topology = unsafe_impl_from_IMFTopology(*output_topology);
 
-        if (node_type == MF_TOPOLOGY_SOURCESTREAM_NODE)
+        if (FAILED(hr = topology_loader_resolve_partial_topology(src, sink, topology, &full_topology)))
         {
-            if (FAILED(hr = topology_loader_clone_node(&context, node, NULL, 0)))
-                WARN("Failed to clone source node, hr %#x.\n", hr);
+            ERR("Failed to resolve connection between %p and %p. %x\n", src, sink, hr);
+            heap_free(node_pairs);
+            return hr;
         }
-
-        IMFTopologyNode_Release(node);
     }
 
-    for (context.marker = 0;; ++context.marker)
-    {
-        if (FAILED(hr = topology_loader_resolve_nodes(&context, &layer_size)))
-        {
-            WARN("Failed to resolve for marker %u, hr %#x.\n", context.marker, hr);
-            break;
-        }
-
-        /* Reached last marker value. */
-        if (!layer_size)
-            break;
-    }
-
-    /* For now return original topology. */
-
-    *ret_topology = output_topology;
-
-    return IMFTopology_CloneFrom(output_topology, input_topology);
+    heap_free(node_pairs);
+    return S_OK;
 }
 
 static const IMFTopoLoaderVtbl topologyloadervtbl =

@@ -235,6 +235,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_NV_vertex_program2_option",        NV_VERTEX_PROGRAM2_OPTION     },
     {"GL_NV_vertex_program3",               NV_VERTEX_PROGRAM3            },
     {"GL_NV_texture_barrier",               NV_TEXTURE_BARRIER            },
+    {"GL_NVX_gpu_memory_info",              NVX_GPU_MEMORY_INFO           },
 };
 
 static const struct wined3d_extension_map wgl_extension_map[] =
@@ -1025,6 +1026,17 @@ static const struct wined3d_gpu_description *query_gpu_description(const struct 
 
         gpu_description = wined3d_get_gpu_description(vendor, device);
     }
+    else if (gl_info->supported[NVX_GPU_MEMORY_INFO])
+    {
+        GLint vram_kb;
+        gl_info->gl_ops.gl.p_glGetIntegerv(GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, &vram_kb);
+
+        *vram_bytes = (UINT64)vram_kb * 1024;
+        TRACE("Got 0x%s as video memory from NVX_GPU_MEMORY_INFO extension.\n",
+                wine_dbgstr_longlong(*vram_bytes));
+
+        gpu_description = wined3d_get_gpu_description(vendor, device);
+    }
 
     if ((gpu_description_override = wined3d_get_user_override_gpu_description(vendor, device)))
         gpu_description = gpu_description_override;
@@ -1188,6 +1200,7 @@ static enum wined3d_gl_vendor wined3d_guess_gl_vendor(const struct wined3d_gl_in
         return GL_VENDOR_FGLRX;
 
     if (strstr(gl_vendor_string, "Mesa")
+            || strstr(gl_vendor_string, "Brian Paul")
             || strstr(gl_vendor_string, "X.Org")
             || strstr(gl_vendor_string, "Advanced Micro Devices, Inc.")
             || strstr(gl_vendor_string, "DRI R300 Project")
@@ -3098,6 +3111,9 @@ static void wined3d_adapter_init_limits(struct wined3d_gl_info *gl_info)
             gl_info->limits.uniform_blocks[WINED3D_SHADER_TYPE_VERTEX] = min(gl_max, WINED3D_MAX_CBS);
             TRACE("Max vertex uniform blocks: %u (%d).\n",
                     gl_info->limits.uniform_blocks[WINED3D_SHADER_TYPE_VERTEX], gl_max);
+            gl_info->gl_ops.gl.p_glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &gl_max);
+            gl_info->limits.glsl_max_uniform_block_size = gl_max;
+            TRACE("Max uniform block size %u.\n", gl_max);
         }
     }
     if (gl_info->supported[ARB_TESSELLATION_SHADER])
@@ -4293,6 +4309,7 @@ static void adapter_gl_get_wined3d_caps(const struct wined3d_adapter *adapter, s
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
 
     caps->ddraw_caps.dds_caps |= WINEDDSCAPS_BACKBUFFER
+            | WINEDDSCAPS_FLIP
             | WINEDDSCAPS_COMPLEX
             | WINEDDSCAPS_FRONTBUFFER
             | WINEDDSCAPS_3DDEVICE
@@ -5072,12 +5089,14 @@ static void wined3d_adapter_gl_init_d3d_info(struct wined3d_adapter_gl *adapter_
     d3d_info->limits.gs_version = shader_caps.gs_version;
     d3d_info->limits.ps_version = shader_caps.ps_version;
     d3d_info->limits.cs_version = shader_caps.cs_version;
-    d3d_info->limits.vs_uniform_count = shader_caps.vs_uniform_count;
+    d3d_info->limits.vs_uniform_count_swvp = shader_caps.vs_uniform_count;
+    d3d_info->limits.vs_uniform_count = min(WINED3D_MAX_VS_CONSTS_F, shader_caps.vs_uniform_count);
     d3d_info->limits.ps_uniform_count = shader_caps.ps_uniform_count;
     d3d_info->limits.varying_count = shader_caps.varying_count;
     d3d_info->limits.ffp_textures = fragment_caps.MaxSimultaneousTextures;
     d3d_info->limits.ffp_blend_stages = fragment_caps.MaxTextureBlendStages;
     TRACE("Max texture stages: %u.\n", d3d_info->limits.ffp_blend_stages);
+    d3d_info->limits.ffp_max_vertex_blend_matrix_index = vertex_caps.max_vertex_blend_matrix_index;
     d3d_info->limits.ffp_vertex_blend_matrices = vertex_caps.max_vertex_blend_matrices;
     d3d_info->limits.active_light_count = vertex_caps.max_active_lights;
 

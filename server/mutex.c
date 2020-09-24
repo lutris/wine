@@ -142,8 +142,7 @@ static void mutex_dump( struct object *obj, int verbose )
 
 static struct object_type *mutex_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'M','u','t','a','n','t'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Mutant, sizeof(type_Mutant) };
     return get_object_type( &str );
 }
 

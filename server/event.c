@@ -164,8 +164,7 @@ static void event_dump( struct object *obj, int verbose )
 
 static struct object_type *event_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'E','v','e','n','t'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Event, sizeof(type_Event) };
     return get_object_type( &str );
 }
 
@@ -240,8 +239,7 @@ static void keyed_event_dump( struct object *obj, int verbose )
 
 static struct object_type *keyed_event_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'K','e','y','e','d','E','v','e','n','t'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_KeyedEvent, sizeof(type_KeyedEvent) };
     return get_object_type( &str );
 }
 

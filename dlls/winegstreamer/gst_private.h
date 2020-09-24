@@ -36,6 +36,7 @@
 #include "winuser.h"
 #include "dshow.h"
 #include "strmif.h"
+#include "mfobjects.h"
 #include "wine/heap.h"
 #include "wine/strmbase.h"
 
@@ -52,8 +53,28 @@ BOOL init_gstreamer(void) DECLSPEC_HIDDEN;
 
 void start_dispatch_thread(void) DECLSPEC_HIDDEN;
 
+extern HRESULT mfplat_DllRegisterServer(void) DECLSPEC_HIDDEN;
 extern HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj) DECLSPEC_HIDDEN;
 
 HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj) DECLSPEC_HIDDEN;
+GstCaps *make_mf_compatible_caps(GstCaps *caps);
+IMFMediaType *mf_media_type_from_caps(GstCaps *caps);
+GstCaps *caps_from_mf_media_type(IMFMediaType *type);
+IMFSample *mf_sample_from_gst_buffer(GstBuffer *in);
+GstBuffer *gst_buffer_from_mf_sample(IMFSample *in);
+
+enum decoder_type
+{
+    DECODER_TYPE_H264,
+    DECODER_TYPE_AAC,
+    DECODER_TYPE_WMV,
+    DECODER_TYPE_WMA,
+    DECODER_TYPE_M4S2,
+};
+HRESULT generic_decoder_construct(REFIID riid, void **obj, enum decoder_type) DECLSPEC_HIDDEN;
+HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj) DECLSPEC_HIDDEN;
+
+HRESULT color_converter_create(REFIID riid, void **ret);
+HRESULT audio_converter_create(REFIID riid, void **ret);
 
 #endif /* __GST_PRIVATE_INCLUDED__ */

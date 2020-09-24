@@ -1435,6 +1435,9 @@ DWORD    WINAPI OpenAndMapForRead(PCWSTR, PDWORD, PHANDLE, PHANDLE, PVOID *);
 LONG     WINAPI QueryRegistryValue(HKEY, PCWSTR, PBYTE *, PDWORD, PDWORD);
 /* RetreiveFileSecurity is not a typo, as per Microsoft's dlls */
 DWORD    WINAPI RetreiveFileSecurity(PCWSTR, PSECURITY_DESCRIPTOR *);
+BOOL     WINAPI SetupAddInstallSectionToDiskSpaceListA(HDSKSPC, HINF, HINF, PCSTR, PVOID, UINT);
+BOOL     WINAPI SetupAddInstallSectionToDiskSpaceListW(HDSKSPC, HINF, HINF, PCWSTR, PVOID, UINT);
+#define         SetupAddInstallSectionToDiskSpaceList WINELIB_NAME_AW(SetupAddInstallSectionToDiskSpaceList)
 BOOL     WINAPI SetupAddSectionToDiskSpaceListA(HDSKSPC, HINF, HINF, PCSTR, UINT, PVOID, UINT);
 BOOL     WINAPI SetupAddSectionToDiskSpaceListW(HDSKSPC, HINF, HINF, PCWSTR, UINT, PVOID, UINT);
 #define         SetupAddSectionToDiskSpaceList WINELIB_NAME_AW(SetupAddSectionToDiskSpaceList)

@@ -1173,23 +1173,17 @@ static void test_CopyFileEx(void)
     ok(hfile != INVALID_HANDLE_VALUE, "failed to open destination file, error %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     retok = CopyFileExA(source, dest, copy_progress_cb, hfile, NULL, 0);
-    todo_wine
     ok(!retok, "CopyFileExA unexpectedly succeeded\n");
-    todo_wine
     ok(GetLastError() == ERROR_REQUEST_ABORTED, "expected ERROR_REQUEST_ABORTED, got %d\n", GetLastError());
     ok(GetFileAttributesA(dest) != INVALID_FILE_ATTRIBUTES, "file was deleted\n");
 
     hfile = CreateFileA(dest, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                         NULL, OPEN_EXISTING, 0, 0);
-    todo_wine
     ok(hfile != INVALID_HANDLE_VALUE, "failed to open destination file, error %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     retok = CopyFileExA(source, dest, copy_progress_cb, hfile, NULL, 0);
-    todo_wine
     ok(!retok, "CopyFileExA unexpectedly succeeded\n");
-    todo_wine
     ok(GetLastError() == ERROR_REQUEST_ABORTED, "expected ERROR_REQUEST_ABORTED, got %d\n", GetLastError());
-    todo_wine
     ok(GetFileAttributesA(dest) == INVALID_FILE_ATTRIBUTES, "file was not deleted\n");
 
     retok = CopyFileExA(source, NULL, copy_progress_cb, hfile, NULL, 0);
@@ -2604,11 +2598,85 @@ static char get_windows_drive(void)
     return windowsdir[0];
 }
 
+struct
+{
+    const char *path;
+    BOOL expected;
+}
+static const invalid_char_tests[] =
+{
+    { "./test-dir",                     TRUE },
+    { "./test-dir/",                    FALSE },
+    { ".\\test-dir",                    TRUE },
+    { ".\\test-dir\\",                  FALSE },
+    { "/>test-dir",                     FALSE },
+    { "<\"test->dir",                   FALSE },
+    { "<test->dir",                     FALSE },
+    { "><test->dir",                    FALSE },
+    { ">>test-dir",                     FALSE },
+    { ">test->dir",                     FALSE },
+    { ">test-dir",                      FALSE },
+    { "\"test-dir\"",                   FALSE },
+    { "\"test-file\"",                  FALSE },
+    { "test-/>dir",                     FALSE },
+    { "test-dir/",                      FALSE },
+    { "test-dir//",                     FALSE },
+    { "test-dir/:",                     FALSE },
+    { "test-dir/<",                     TRUE },
+    { "test-dir/>",                     TRUE },
+    { "test-dir/\"",                    TRUE },
+    { "test-dir/\\",                    FALSE },
+    { "test-dir/|",                     FALSE },
+    { "test-dir<",                      TRUE },
+    { "test-dir</",                     FALSE },
+    { "test-dir<<",                     TRUE },
+    { "test-dir<<<><><>\"\"\"\"<<<>",   TRUE },
+    { "test-dir<>",                     TRUE },
+    { "test-dir<\"",                    TRUE },
+    { "test-dir>",                      TRUE },
+    { "test-dir>/",                     FALSE },
+    { "test-dir><",                     TRUE },
+    { "test-dir>>",                     TRUE },
+    { "test-dir>\"",                    TRUE },
+    { "test-dir\"",                     TRUE },
+    { "test-dir\"/",                    FALSE },
+    { "test-dir\"<",                    TRUE },
+    { "test-dir\">",                    TRUE },
+    { "test-dir\"\"",                   TRUE },
+    { "test-dir\"\"\"\"\"",             TRUE },
+    { "test-dir\\",                     FALSE },
+    { "test-dir\\/",                    FALSE },
+    { "test-dir\\<",                    TRUE },
+    { "test-dir\\>",                    TRUE },
+    { "test-dir\\\"",                   TRUE },
+    { "test-dir\\\\",                   FALSE },
+    { "test-file/",                     FALSE },
+    { "test-file/<",                    FALSE },
+    { "test-file/>",                    FALSE },
+    { "test-file/\"",                   FALSE },
+    { "test-file<",                     TRUE },
+    { "test-file<<",                    TRUE },
+    { "test-file<>",                    TRUE },
+    { "test-file<\"",                   TRUE },
+    { "test-file>",                     TRUE },
+    { "test-file><",                    TRUE },
+    { "test-file>>",                    TRUE },
+    { "test-file>\"",                   TRUE },
+    { "test-file\"",                    TRUE },
+    { "test-file\"<",                   TRUE },
+    { "test-file\">",                   TRUE },
+    { "test-file\"\"",                  TRUE },
+    { "test-file\\",                    FALSE },
+    { "test-file\\<",                   FALSE },
+    { "test-file\\>",                   FALSE },
+    { "test-file\\\"",                  FALSE },
+};
+
 static void test_FindFirstFileA(void)
 {
     HANDLE handle;
     WIN32_FIND_DATAA data;
-    int err;
+    int err, i;
     char buffer[5] = "C:\\";
     char buffer2[100];
     char nonexistent[MAX_PATH];
@@ -2776,6 +2844,30 @@ static void test_FindFirstFileA(void)
     err = GetLastError();
     ok ( handle == INVALID_HANDLE_VALUE, "FindFirstFile on %s should fail\n", buffer2 );
     ok ( err == ERROR_PATH_NOT_FOUND, "Bad Error number %d\n", err );
+
+    /* try FindFirstFileA with invalid characters */
+    CreateDirectoryA("test-dir", NULL);
+    _lclose(_lcreat("test-file", 0));
+
+    for (i = 0; i < sizeof(invalid_char_tests) / sizeof(invalid_char_tests[0]); i++)
+    {
+        handle = FindFirstFileA(invalid_char_tests[i].path, &data);
+        if (invalid_char_tests[i].expected)
+        {
+            ok(handle != INVALID_HANDLE_VALUE, "FindFirstFileA on %s should succeed\n",
+               invalid_char_tests[i].path);
+        }
+        else
+        {
+            ok(handle == INVALID_HANDLE_VALUE, "FindFirstFileA on %s should fail\n",
+               invalid_char_tests[i].path);
+        }
+        if (handle != INVALID_HANDLE_VALUE)
+            FindClose(handle);
+    }
+
+    DeleteFileA("test-file");
+    RemoveDirectoryA("test-dir");
 }
 
 static void test_FindNextFileA(void)

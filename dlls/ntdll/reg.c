@@ -657,6 +657,17 @@ out:
 }
 
 /*************************************************************************
+ * RtlQueryRegistryValuesEx   [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlQueryRegistryValuesEx(IN ULONG RelativeTo, IN PCWSTR path,
+                                       IN PRTL_QUERY_REGISTRY_TABLE QueryTable, void *context,
+                                       void *Environment)
+{
+    return RtlQueryRegistryValues (RelativeTo, path, QueryTable, context, Environment);
+}
+
+
+/*************************************************************************
  * RtlCheckRegistryKey   [NTDLL.@]
  *
  * Query multiple registry values with a single call.

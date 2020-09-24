@@ -2503,6 +2503,8 @@ static HRESULT transform_node_pull_samples(struct topo_node *node)
     return hr;
 }
 
+static HRESULT session_request_sample_from_node(struct media_session *session, IMFTopologyNode *node, DWORD output);
+
 static void session_deliver_sample_to_node(struct media_session *session, IMFTopologyNode *node, unsigned int input,
         IMFSample *sample)
 {
@@ -2575,7 +2577,14 @@ static void session_deliver_sample_to_node(struct media_session *session, IMFTop
                     WARN("Drain command failed for transform, hr %#x.\n", hr);
             }
 
-            transform_node_pull_samples(topo_node);
+            if (transform_node_pull_samples(topo_node) == MF_E_TRANSFORM_NEED_MORE_INPUT && !drain)
+            {
+                IMFTopologyNode *upstream_node;
+                DWORD upstream_output;
+
+                if (SUCCEEDED(IMFTopologyNode_GetInput(node, input, &upstream_node, &upstream_output)))
+                    session_request_sample_from_node(session, upstream_node, upstream_output);
+            }
 
             /* Remaining unprocessed input has been discarded, now queue markers for every output. */
             if (drain)

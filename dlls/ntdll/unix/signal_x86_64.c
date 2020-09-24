@@ -28,6 +28,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -62,6 +63,13 @@
 #endif
 #ifdef __APPLE__
 # include <mach/mach.h>
+#endif
+
+#if defined(HAVE_LINUX_FILTER_H) && defined(HAVE_LINUX_SECCOMP_H) && defined(HAVE_SYS_PRCTL_H)
+#define HAVE_SECCOMP 1
+# include <linux/filter.h>
+# include <linux/seccomp.h>
+# include <sys/prctl.h>
 #endif
 
 #define NONAMELESSUNION
@@ -1438,11 +1446,6 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
     context->SegFs  = FS_sig(sigcontext);
     context->SegGs  = GS_sig(sigcontext);
     context->EFlags = EFL_sig(sigcontext);
-#ifdef DS_sig
-    context->SegDs  = DS_sig(sigcontext);
-#else
-    __asm__("movw %%ds,%0" : "=m" (context->SegDs));
-#endif
 #ifdef ES_sig
     context->SegEs  = ES_sig(sigcontext);
 #else
@@ -1453,6 +1456,12 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
 #else
     __asm__("movw %%ss,%0" : "=m" (context->SegSs));
 #endif
+   /* Legends of Runeterra depends on having SegDs == SegSs in an exception
+    * handler. Testing shows that Windows returns fixed values from
+    * RtlCaptureContext() and NtGetContextThread() for at least %ds and %es,
+    * regardless of their actual values, and never sets them in
+    * NtSetContextThread(). */
+    context->SegDs  = context->SegSs;
     context->Dr0    = amd64_thread_data()->dr0;
     context->Dr1    = amd64_thread_data()->dr1;
     context->Dr2    = amd64_thread_data()->dr2;
@@ -2210,6 +2219,116 @@ static inline DWORD is_privileged_instr( CONTEXT *context )
     return 0;
 }
 
+#ifdef HAVE_SECCOMP
+static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+{
+    ucontext_t *ctx = sigcontext;
+    void ***rsp;
+
+    TRACE("SIGSYS, rax %#llx, rip %#llx.\n", ctx->uc_mcontext.gregs[REG_RAX],
+            ctx->uc_mcontext.gregs[REG_RIP]);
+
+    rsp = (void ***)&ctx->uc_mcontext.gregs[REG_RSP];
+    *rsp -= 1;
+    **rsp = (void *)(ctx->uc_mcontext.gregs[REG_RIP] + 0xb);
+
+    ctx->uc_mcontext.gregs[REG_RIP] = (ULONG64)__wine_syscall_dispatcher;
+}
+#endif
+
+#ifdef HAVE_SECCOMP
+static int sc_seccomp(unsigned int operation, unsigned int flags, void *args)
+{
+#ifndef __NR_seccomp
+#   define __NR_seccomp 317
+#endif
+    return syscall(__NR_seccomp, operation, flags, args);
+}
+#endif
+
+static void check_bpf_jit_enable(void)
+{
+    char enabled;
+    int fd;
+
+    fd = open("/proc/sys/net/core/bpf_jit_enable", O_RDONLY);
+    if (fd == -1)
+    {
+        WARN("Could not open /proc/sys/net/core/bpf_jit_enable.\n");
+        return;
+    }
+
+    if (read(fd, &enabled, sizeof(enabled)) == sizeof(enabled))
+    {
+        TRACE("enabled %#x.\n", enabled);
+
+        if (enabled != '1')
+            ERR("BPF JIT is not enabled in the kernel, enable it to reduce syscall emulation overhead.\n");
+    }
+    else
+    {
+        WARN("Could not read /proc/sys/net/core/bpf_jit_enable.\n");
+    }
+    close(fd);
+}
+
+static void install_bpf(struct sigaction *sig_act)
+{
+#ifdef HAVE_SECCOMP
+#   ifndef SECCOMP_FILTER_FLAG_SPEC_ALLOW
+#       define SECCOMP_FILTER_FLAG_SPEC_ALLOW (1UL << 2)
+#   endif
+
+#   ifndef SECCOMP_SET_MODE_FILTER
+#       define SECCOMP_SET_MODE_FILTER 1
+#   endif
+    static const unsigned int flags = SECCOMP_FILTER_FLAG_SPEC_ALLOW;
+    static struct sock_filter filter[] =
+    {
+       BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+                (offsetof(struct seccomp_data, nr))),
+       BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0xf000, 0, 1),
+       BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP),
+       BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    };
+    struct sock_fprog prog;
+    int ret;
+
+    memset(&prog, 0, sizeof(prog));
+    prog.len = ARRAY_SIZE(filter);
+    prog.filter = filter;
+
+    if (!(ret = prctl(PR_GET_SECCOMP, 0, NULL, 0, 0)))
+    {
+        if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0))
+        {
+            perror("prctl(PR_SET_NO_NEW_PRIVS, ...)");
+            exit(1);
+        }
+
+        if (sc_seccomp(SECCOMP_SET_MODE_FILTER, flags, &prog))
+
+        {
+            perror("prctl(PR_SET_SECCOMP, ...)");
+            exit(1);
+        }
+
+        check_bpf_jit_enable();
+    }
+    else
+    {
+        if (ret == 2)
+            TRACE("Seccomp filters already installed.\n");
+        else
+            ERR("Seccomp filters cannot be installed, ret %d, error %s.\n", ret, strerror(errno));
+    }
+
+    sig_act->sa_sigaction = sigsys_handler;
+    sigaction(SIGSYS, sig_act, NULL);
+#else
+    WARN("Built without seccomp.\n");
+#endif
+}
 
 /***********************************************************************
  *           handle_interrupt
@@ -2309,6 +2428,30 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, EXCEPTION_RECORD *rec,
     return TRUE;
 }
 
+
+/**********************************************************************
+ *    segv_handler_early
+ *
+ * Handler for SIGSEGV and related errors. Used only during the initialization
+ * of the process to handle virtual faults.
+ */
+static void segv_handler_early( int signal, siginfo_t *siginfo, void *sigcontext )
+{
+    ucontext_t *ucontext = sigcontext;
+
+    switch(TRAP_sig(ucontext))
+    {
+    case TRAP_x86_PAGEFLT:  /* Page fault */
+        if (!virtual_handle_fault( siginfo->si_addr, (ERROR_sig(ucontext) >> 1) & 0x09,
+                NULL ))
+            return;
+        /* fall-through */
+    default:
+        WINE_ERR( "Got unexpected trap %lld during process initialization\n", TRAP_sig(ucontext) );
+        abort_thread(1);
+        break;
+    }
+}
 
 /**********************************************************************
  *		segv_handler
@@ -2673,6 +2816,7 @@ void signal_init_process(void)
     if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
     if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
     if (sigaction( SIGBUS, &sig_act, NULL ) == -1) goto error;
+    install_bpf(&sig_act);
     return;
 
  error:
@@ -2680,6 +2824,29 @@ void signal_init_process(void)
     exit(1);
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+    struct sigaction sig_act;
+
+    sig_act.sa_mask = server_block_set;
+    sig_act.sa_flags = SA_RESTART | SA_SIGINFO | SA_ONSTACK;
+
+    sig_act.sa_sigaction = segv_handler_early;
+    if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
+    if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
+#ifdef SIGBUS
+    if (sigaction( SIGBUS, &sig_act, NULL ) == -1) goto error;
+#endif
+
+    return;
+
+ error:
+    perror("sigaction");
+    exit(1);
+}
 
 /***********************************************************************
  *           init_thread_context

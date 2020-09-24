@@ -142,8 +142,7 @@ static void winstation_dump( struct object *obj, int verbose )
 
 static struct object_type *winstation_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'W','i','n','d','o','w','S','t','a','t','i','o','n'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_WindowStation, sizeof(type_WindowStation) };
     return get_object_type( &str );
 }
 
@@ -247,8 +246,7 @@ static void desktop_dump( struct object *obj, int verbose )
 
 static struct object_type *desktop_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'D','e','s','k','t','o','p'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Desktop, sizeof(type_Desktop) };
     return get_object_type( &str );
 }
 

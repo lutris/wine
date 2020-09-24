@@ -3,15 +3,19 @@ IMPORTS   = strmiids uuid ole32 mfuuid
 DELAYIMPORTS = mfplat
 EXTRAINCL = $(GSTREAMER_CFLAGS)
 EXTRALIBS = $(GSTREAMER_LIBS) $(PTHREAD_LIBS)
-PARENTSRC = ../strmbase
+PARENTSRC = ../strmbase ../mf
 
 C_SRCS = \
+	audioconvert.c \
+	colorconvert.c \
 	filter.c \
 	gst_cbs.c \
 	gstdemux.c \
+	handler.c \
 	main.c \
 	media_source.c \
 	mediatype.c \
+	mf_decode.c \
 	mfplat.c \
 	pin.c \
 	qualitycontrol.c \

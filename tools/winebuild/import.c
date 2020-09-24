@@ -1524,6 +1524,7 @@ void output_syscalls( DLLSPEC *spec )
             /* Legends of Runeterra hooks the first system call return instruction, and
              * depends on us returning to it. Adjust the return address accordingly. */
             output( "\tsubq $0xb,0x8(%%rbp)\n" );
+            output( "\tsubq $0xf000,%%rax\n" );
             output( "\tmovq %%rsp,0x328(%%rcx)\n" );  /* amd64_thread_data()->syscall_frame */
             output( "\tcmpq $%u,%%rax\n", count );
             output( "\tjae 4f\n" );
@@ -1703,17 +1704,17 @@ void output_syscalls( DLLSPEC *spec )
              * validate that instruction, we can just put a jmp there instead. */
             output( "\t.byte 0x4c,0x8b,0xd1\n" ); /* movq %rcx,%r10 */
             output( "\t.byte 0xb8\n" );           /* movl $i,%eax */
-            output( "\t.long %u\n", i );
+            output( "\t.long %u\n", 0xf000 + i );
             output( "\t.byte 0xf6,0x04,0x25,0x08,0x03,0xfe,0x7f,0x01\n" ); /* testb $1,0x7ffe0308 */
             output( "\t.byte 0x75,0x03\n" );      /* jne 1f */
             output( "\t.byte 0x0f,0x05\n" );      /* syscall */
             output( "\t.byte 0xc3\n" );           /* ret */
             output( "\tjmp 1f\n" );
             output( "\t.byte 0xc3\n" );           /* ret */
-            if (target_platform == PLATFORM_WINDOWS)
+            if (target_platform == PLATFORM_WINDOWS || target_platform == PLATFORM_APPLE)
             {
-                output( "1:\t.byte 0xff,0x14,0x25\n" ); /* 1: callq *(__wine_syscall_dispatcher) */
-                output( "\t.long __wine_syscall_dispatcher\n" );
+                output( "1:\t.byte 0xff,0x14,0x25\n" ); /* call *(user_shared_data + 0x1000) */
+                output( "\t.long 0x7ffe1000\n" );
             }
             else
             {
@@ -1754,7 +1755,7 @@ void output_syscalls( DLLSPEC *spec )
         output( "\t.align %d\n", get_alignment(16) );
         output( "\t%s\n", func_declaration("__wine_syscall") );
         output( "%s:\n", asm_name("__wine_syscall") );
-        output( "\tjmp *(%s)\n", asm_name("__wine_syscall_dispatcher") );
+        output( "\tjmp *(0x7ffe1000)\n" );
         output_function_size( "__wine_syscall" );
     }
     output( "\t.data\n" );

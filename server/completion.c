@@ -109,8 +109,7 @@ static void completion_dump( struct object *obj, int verbose )
 
 static struct object_type *completion_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'I','o','C','o','m','p','l','e','t','i','o','n'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_IoCompletion, sizeof(type_IoCompletion) };
     return get_object_type( &str );
 }
 

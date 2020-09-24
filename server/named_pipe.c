@@ -455,8 +455,7 @@ static void named_pipe_device_dump( struct object *obj, int verbose )
 
 static struct object_type *named_pipe_device_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'D','e','v','i','c','e'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    const struct unicode_str str = { type_Device, sizeof(type_Device) };
     return get_object_type( &str );
 }
 
@@ -1142,7 +1141,7 @@ static int pipe_server_ioctl( struct fd *fd, ioctl_code_t code, struct async *as
         if (current->process->token) /* FIXME: use the client token */
         {
             struct token *token;
-            if (!(token = token_duplicate( current->process->token, 0, SecurityImpersonation, NULL )))
+            if (!(token = token_duplicate( current->process->token, 0, SecurityImpersonation, NULL, NULL, 0, NULL, 0 )))
                 return 0;
             if (current->token) release_object( current->token );
             current->token = token;
