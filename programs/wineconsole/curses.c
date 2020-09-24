@@ -324,7 +324,7 @@ static void	WCCURSES_ComputePositions(struct inner_data* data)
                   data->curcfg.win_width, data->curcfg.win_height, x, y);
         pos.Left = pos.Top = 0;
         pos.Right = x - 1; pos.Bottom = y - 1;
-        SetConsoleWindowInfo(data->console, FALSE, &pos);
+        SetConsoleWindowInfo(data->hConOut, FALSE, &pos);
         return; /* we'll get called again upon event for new window size */
     }
     if (PRIVATE(data)->pad) WCCURSES_PosCursor(data);
@@ -339,7 +339,7 @@ static void	WCCURSES_SetTitle(const struct inner_data* data)
 {
     WCHAR   wbuf[256];
 
-    if (WINECON_GetConsoleTitle(data->console, wbuf, ARRAY_SIZE(wbuf)))
+    if (WINECON_GetConsoleTitle(data->hConIn, wbuf, ARRAY_SIZE(wbuf)))
     {
         char        buffer[256];
 
@@ -965,7 +965,7 @@ static DWORD CALLBACK input_thread( void *arg )
             else
                 numEvent = WCCURSES_FillSimpleChar(ir, inchar);
 
-            if (numEvent) WriteConsoleInputW(data->console, ir, numEvent, &n);
+            if (numEvent) WriteConsoleInputW(data->hConIn, ir, numEvent, &n);
         }
         LeaveCriticalSection(&PRIVATE(data)->lock);
     }
@@ -1020,7 +1020,7 @@ static int WCCURSES_MainLoop(struct inner_data* data)
     if (pipe( PRIVATE(data)->sync_pipe ) == -1) return 1;
     PRIVATE(data)->input_thread = CreateThread( NULL, 0, input_thread, data, 0, &id );
 
-    while (!data->dying && WaitForSingleObject(data->overlapped.hEvent, INFINITE) == WAIT_OBJECT_0)
+    while (!data->dying && WaitForSingleObject(data->hSynchro, INFINITE) == WAIT_OBJECT_0)
     {
         EnterCriticalSection(&PRIVATE(data)->lock);
         WINECON_GrabChanges(data);

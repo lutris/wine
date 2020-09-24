@@ -34,11 +34,8 @@
 # include <unistd.h>
 #endif
 
-#include "windef.h"
-#include "winnt.h"
-#include "winternl.h"
-#include "unix_private.h"
 #include "wine/debug.h"
+#include "ntdll_misc.h"
 
 WINE_DECLARE_DEBUG_CHANNEL(pid);
 WINE_DECLARE_DEBUG_CHANNEL(timestamp);
@@ -290,7 +287,7 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
 /***********************************************************************
  *		dbg_init
  */
-void dbg_init(void)
+void CDECL dbg_init(void)
 {
     setbuf( stdout, NULL );
     setbuf( stderr, NULL );

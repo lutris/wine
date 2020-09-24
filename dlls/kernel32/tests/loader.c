@@ -1570,6 +1570,100 @@ static void test_filenames(void)
     DeleteFileA( long_path );
 }
 
+static void test_FakeDLL(void)
+{
+#if defined(__i386__) || defined(__x86_64__)
+    NTSTATUS (WINAPI *pNtSetEvent)(HANDLE, ULONG *) = NULL;
+    IMAGE_EXPORT_DIRECTORY *dir;
+    HMODULE module = GetModuleHandleA("ntdll.dll");
+    HANDLE file, map, event;
+    WCHAR path[MAX_PATH];
+    DWORD *names, *funcs;
+    WORD *ordinals;
+    ULONG size;
+    void *ptr;
+    int i;
+
+    GetModuleFileNameW(module, path, MAX_PATH);
+
+    file = CreateFileW(path, GENERIC_READ | GENERIC_EXECUTE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
+    ok(file != INVALID_HANDLE_VALUE, "Failed to open %s (error %u)\n", wine_dbgstr_w(path), GetLastError());
+
+    map = CreateFileMappingW(file, NULL, PAGE_EXECUTE_READ | SEC_IMAGE, 0, 0, NULL);
+    ok(map != NULL, "CreateFileMapping failed with error %u\n", GetLastError());
+    ptr = MapViewOfFile(map, FILE_MAP_READ | FILE_MAP_EXECUTE, 0, 0, 0);
+    ok(ptr != NULL, "MapViewOfFile failed with error %u\n", GetLastError());
+
+    dir = RtlImageDirectoryEntryToData(ptr, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &size);
+    ok(dir != NULL, "RtlImageDirectoryEntryToData failed\n");
+
+    names    = RVAToAddr(dir->AddressOfNames, ptr);
+    ordinals = RVAToAddr(dir->AddressOfNameOrdinals, ptr);
+    funcs    = RVAToAddr(dir->AddressOfFunctions, ptr);
+    ok(dir->NumberOfNames > 0, "Could not find any exported functions\n");
+
+    for (i = 0; i < dir->NumberOfNames; i++)
+    {
+        DWORD map_rva, dll_rva, map_offset, dll_offset;
+        char *func_name = RVAToAddr(names[i], ptr);
+        BYTE *dll_func, *map_func;
+
+        /* check only Nt functions for now */
+        if (strncmp(func_name, "Zw", 2) && strncmp(func_name, "Nt", 2))
+            continue;
+
+        dll_func = (BYTE *)GetProcAddress(module, func_name);
+        ok(dll_func != NULL, "%s: GetProcAddress returned NULL\n", func_name);
+#if defined(__i386__)
+        if (dll_func[0] == 0x90 && dll_func[1] == 0x90 &&
+            dll_func[2] == 0x90 && dll_func[3] == 0x90)
+#elif defined(__x86_64__)
+        if (dll_func[0] == 0x48 && dll_func[1] == 0x83 &&
+            dll_func[2] == 0xec && dll_func[3] == 0x08)
+#endif
+        {
+            todo_wine ok(0, "%s: Export is a stub-function, skipping\n", func_name);
+            continue;
+        }
+
+        /* check position in memory */
+        dll_rva = (DWORD_PTR)dll_func - (DWORD_PTR)module;
+        map_rva = funcs[ordinals[i]];
+        ok(map_rva == dll_rva, "%s: Rva of mapped function (0x%x) does not match dll (0x%x)\n",
+           func_name, dll_rva, map_rva);
+
+        /* check position in file */
+        map_offset = (DWORD_PTR)RtlImageRvaToVa(RtlImageNtHeader(ptr),    ptr,    map_rva, NULL) - (DWORD_PTR)ptr;
+        dll_offset = (DWORD_PTR)RtlImageRvaToVa(RtlImageNtHeader(module), module, dll_rva, NULL) - (DWORD_PTR)module;
+        ok(map_offset == dll_offset, "%s: File offset of mapped function (0x%x) does not match dll (0x%x)\n",
+           func_name, map_offset, dll_offset);
+
+        /* check function content */
+        map_func = RVAToAddr(map_rva, ptr);
+        ok(!memcmp(map_func, dll_func, 0x20), "%s: Function content does not match!\n", func_name);
+
+        if (!strcmp(func_name, "NtSetEvent"))
+            pNtSetEvent = (void *)map_func;
+    }
+
+    ok(pNtSetEvent != NULL, "Could not find NtSetEvent export\n");
+    if (pNtSetEvent)
+    {
+        event = CreateEventA(NULL, TRUE, FALSE, NULL);
+        ok(event != NULL, "CreateEvent failed with error %u\n", GetLastError());
+        pNtSetEvent(event, 0);
+        ok(WaitForSingleObject(event, 0) == WAIT_OBJECT_0, "Event was not signaled\n");
+        pNtSetEvent(event, 0);
+        ok(WaitForSingleObject(event, 0) == WAIT_OBJECT_0, "Event was not signaled\n");
+        CloseHandle(event);
+    }
+
+    UnmapViewOfFile(ptr);
+    CloseHandle(map);
+    CloseHandle(file);
+#endif
+}
+
 /* Verify linking style of import descriptors */
 static void test_ImportDescriptors(void)
 {
@@ -3889,7 +3983,7 @@ static void test_wow64_redirection(void)
     ok(pWow64RevertWow64FsRedirection(OldValue), "Re-enabling FS redirection failed\n");
 }
 
-static void test_dll_file( const char *name, BOOL is_todo )
+static void test_dll_file( const char *name )
 {
     HMODULE module = GetModuleHandleA( name );
     IMAGE_NT_HEADERS *nt, *nt_file;
@@ -3914,29 +4008,27 @@ static void test_dll_file( const char *name, BOOL is_todo )
     nt_file = pRtlImageNtHeader( ptr );
     ok( nt_file != NULL, "%s: invalid header\n", path );
 #define OK_FIELD(x) ok( nt->x == nt_file->x, "%s:%u: wrong " #x " %x / %x\n", name, i, nt->x, nt_file->x )
-    todo_wine_if(is_todo)
+    todo_wine
     OK_FIELD( FileHeader.NumberOfSections );
-    todo_wine_if(is_todo)
+    todo_wine
     OK_FIELD( OptionalHeader.AddressOfEntryPoint );
     OK_FIELD( OptionalHeader.NumberOfRvaAndSizes );
     for (i = 0; i < nt->OptionalHeader.NumberOfRvaAndSizes; i++)
     {
-        todo_wine_if( is_todo &&
-                      (i == IMAGE_DIRECTORY_ENTRY_EXPORT ||
-                       (i == IMAGE_DIRECTORY_ENTRY_IMPORT && nt->OptionalHeader.DataDirectory[i].Size) ||
-                       i == IMAGE_DIRECTORY_ENTRY_RESOURCE ||
-                       i == IMAGE_DIRECTORY_ENTRY_BASERELOC ))
+        todo_wine_if( i == IMAGE_DIRECTORY_ENTRY_EXPORT ||
+                      (i == IMAGE_DIRECTORY_ENTRY_IMPORT && nt->OptionalHeader.DataDirectory[i].Size) ||
+                      i == IMAGE_DIRECTORY_ENTRY_RESOURCE ||
+                      i == IMAGE_DIRECTORY_ENTRY_BASERELOC )
         OK_FIELD( OptionalHeader.DataDirectory[i].VirtualAddress );
-        todo_wine_if( is_todo &&
-                      (i == IMAGE_DIRECTORY_ENTRY_EXPORT ||
-                       (i == IMAGE_DIRECTORY_ENTRY_IMPORT && nt->OptionalHeader.DataDirectory[i].Size) ||
-                       i == IMAGE_DIRECTORY_ENTRY_BASERELOC ))
+        todo_wine_if( i == IMAGE_DIRECTORY_ENTRY_EXPORT ||
+                      (i == IMAGE_DIRECTORY_ENTRY_IMPORT && nt->OptionalHeader.DataDirectory[i].Size) ||
+                      i == IMAGE_DIRECTORY_ENTRY_BASERELOC )
         OK_FIELD( OptionalHeader.DataDirectory[i].Size );
     }
     sec = (IMAGE_SECTION_HEADER *)((char *)&nt->OptionalHeader + nt->FileHeader.SizeOfOptionalHeader);
     sec_file = (IMAGE_SECTION_HEADER *)((char *)&nt_file->OptionalHeader + nt_file->FileHeader.SizeOfOptionalHeader);
     for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
-        todo_wine_if(is_todo)
+        todo_wine
         ok( !memcmp( sec + i, sec_file + i, sizeof(*sec) ), "%s: wrong section %d\n", name, i );
     UnmapViewOfFile( ptr );
 #undef OK_FIELD
@@ -4094,6 +4186,7 @@ START_TEST(loader)
         return;
     }
 
+    test_FakeDLL();
     test_filenames();
     test_ResolveDelayLoadedAPI();
     test_ImportDescriptors();
@@ -4104,10 +4197,11 @@ START_TEST(loader)
     test_LoadPackagedLibrary();
     test_wow64_redirection();
     test_HashLinks();
-    test_dll_file( "ntdll.dll", FALSE );
-    test_dll_file( "kernel32.dll", TRUE );
-    test_dll_file( "advapi32.dll", FALSE );
-    test_dll_file( "user32.dll", TRUE );
+    test_dll_file( "ntdll.dll" );
+    test_dll_file( "kernel32.dll" );
+    test_dll_file( "advapi32.dll" );
+    test_dll_file( "user32.dll" );
+
     /* loader test must be last, it can corrupt the internal loader state on Windows */
     test_Loader();
 }

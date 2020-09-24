@@ -1,5 +1,4 @@
 MODULE    = conhost.exe
-IMPORTS   = user32
 
 EXTRADLLFLAGS = -mwindows -municode -mno-cygwin
 

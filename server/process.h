@@ -98,6 +98,17 @@ struct process
     const struct rawinput_device *rawinput_mouse; /* rawinput mouse device, if any */
     const struct rawinput_device *rawinput_kbd;   /* rawinput keyboard device, if any */
     struct list          kernel_object;   /* list of kernel object pointers */
+    int                  esync_fd;        /* esync file descriptor (signaled on exit) */
+    unsigned int         fsync_idx;
+};
+
+struct process_snapshot
+{
+    struct process *process;  /* process ptr */
+    int             count;    /* process refcount */
+    int             threads;  /* number of threads */
+    int             priority; /* priority class */
+    int             handles;  /* number of handles */
 };
 
 #define CPU_FLAG(cpu) (1 << (cpu))
@@ -109,7 +120,7 @@ extern unsigned int alloc_ptid( void *ptr );
 extern void free_ptid( unsigned int id );
 extern void *get_ptid_entry( unsigned int id );
 extern struct process *create_process( int fd, struct process *parent, int inherit_all,
-                                       const struct security_descriptor *sd );
+                                       const struct security_descriptor *sd, struct token *token );
 extern data_size_t init_process( struct thread *thread );
 extern struct thread *get_process_first_thread( struct process *process );
 extern struct process *get_process_from_id( process_id_t id );
@@ -128,11 +139,13 @@ extern void kill_process( struct process *process, int violent_death );
 extern void kill_console_processes( struct thread *renderer, int exit_code );
 extern void kill_debugged_processes( struct thread *debugger, int exit_code );
 extern void detach_debugged_processes( struct thread *debugger );
+extern struct process_snapshot *process_snap( int *count );
 extern void enum_processes( int (*cb)(struct process*, void*), void *user);
+extern void replace_process_token( struct process *process, struct token *token );
 
 /* console functions */
-extern obj_handle_t inherit_console( struct thread *parent_thread, obj_handle_t handle,
-                                     struct process *process, obj_handle_t hconin );
+extern void inherit_console( struct thread *parent_thread, struct process *parent,
+                             struct process *process, obj_handle_t hconin );
 extern int free_console( struct process *process );
 extern struct thread *console_get_renderer( struct console_input *console );
 

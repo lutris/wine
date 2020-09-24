@@ -20,6 +20,7 @@
 
 #include "config.h"
 #include "wine/port.h"
+#include "wine/library.h"
 #include <pcap/pcap.h>
 
 /* pcap.h might define those: */

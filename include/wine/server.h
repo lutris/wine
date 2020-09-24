@@ -120,6 +120,17 @@ static inline void *wine_server_get_ptr( client_ptr_t ptr )
     return (void *)(ULONG_PTR)ptr;
 }
 
+/* returns a pointer to the wineserver global shared memory block */
+static inline shmglobal_t *wine_get_shmglobal(void)
+{
+    return (shmglobal_t *)NtCurrentTeb()->Reserved5[1];
+}
+
+/* returns a pointer to the wineserver local shared memory block */
+static inline shmlocal_t *wine_get_shmlocal(void)
+{
+    return (shmlocal_t *)NtCurrentTeb()->Reserved5[2];
+}
 
 /* macros for server requests */
 

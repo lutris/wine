@@ -278,8 +278,7 @@ data_size_t get_path_element( const WCHAR *name, data_size_t len )
 }
 
 static struct object *create_object( struct object *parent, const struct object_ops *ops,
-                                     const struct unicode_str *name, unsigned int attributes,
-                                     const struct security_descriptor *sd )
+                                     const struct unicode_str *name, const struct security_descriptor *sd )
 {
     struct object *obj;
     struct object_name *name_ptr;
@@ -293,11 +292,6 @@ static struct object *create_object( struct object *parent, const struct object_
 
     name_ptr->obj = obj;
     obj->name = name_ptr;
-    if (attributes & OBJ_PERMANENT)
-    {
-        make_object_static( obj );
-        grab_object( obj );
-    }
     return obj;
 
 failed:
@@ -346,7 +340,7 @@ void *create_named_object( struct object *parent, const struct object_ops *ops,
         return obj;
     }
 
-    new_obj = create_object( obj, ops, &new_name, attributes, sd );
+    new_obj = create_object( obj, ops, &new_name, sd );
     release_object( obj );
     return new_obj;
 }
@@ -407,20 +401,9 @@ void unlink_named_object( struct object *obj )
 /* mark an object as being stored statically, i.e. only released at shutdown */
 void make_object_static( struct object *obj )
 {
-    obj->is_permanent = 1;
 #ifdef DEBUG_OBJECTS
     list_remove( &obj->obj_list );
     list_add_head( &static_object_list, &obj->obj_list );
-#endif
-}
-
-/* mark an object as no longer static */
-void make_object_temporary( struct object *obj )
-{
-    obj->is_permanent = 0;
-#ifdef DEBUG_OBJECTS
-    list_remove( &obj->obj_list );
-    list_add_head( &object_list, &obj->obj_list );
 #endif
 }
 

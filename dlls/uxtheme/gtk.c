@@ -35,6 +35,7 @@
 #include "vssym32.h"
 
 #include "wine/debug.h"
+#include "wine/library.h"
 
 #include "uxthemedll.h"
 

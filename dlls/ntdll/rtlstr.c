@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -1699,7 +1701,7 @@ NTSTATUS WINAPI RtlStringFromGUID(const GUID* guid, UNICODE_STRING *str)
     str->Length = str->MaximumLength = 0;
     return STATUS_NO_MEMORY;
   }
-  swprintf(str->Buffer, str->MaximumLength/sizeof(WCHAR), szFormat, guid->Data1, guid->Data2, guid->Data3,
+  NTDLL_swprintf(str->Buffer, szFormat, guid->Data1, guid->Data2, guid->Data3,
           guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
           guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
 

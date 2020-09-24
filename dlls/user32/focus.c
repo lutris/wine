@@ -348,8 +348,10 @@ BOOL WINAPI SetForegroundWindow( HWND hwnd )
  */
 HWND WINAPI GetActiveWindow(void)
 {
+    shmlocal_t *shm = wine_get_shmlocal();
     HWND ret = 0;
 
+    if (shm) return wine_server_ptr_handle( shm->input_active );
     SERVER_START_REQ( get_thread_input )
     {
         req->tid = GetCurrentThreadId();
@@ -365,8 +367,10 @@ HWND WINAPI GetActiveWindow(void)
  */
 HWND WINAPI GetFocus(void)
 {
+    shmlocal_t *shm = wine_get_shmlocal();
     HWND ret = 0;
 
+    if (shm) return wine_server_ptr_handle( shm->input_focus );
     SERVER_START_REQ( get_thread_input )
     {
         req->tid = GetCurrentThreadId();

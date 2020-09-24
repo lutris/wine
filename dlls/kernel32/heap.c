@@ -47,6 +47,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(globalmem);
 
 static HANDLE systemHeap;   /* globally shared heap */
 
+extern BOOL CDECL __wine_needs_override_large_address_aware(void);
+
 
 /***********************************************************************
  *           HEAP_CreateSystemHeap
@@ -333,10 +335,10 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
    {
       retval=HeapSize(GetProcessHeap(), 0, hmem);
 
-      if (retval == ~(SIZE_T)0) /* It might be a GMEM_MOVEABLE data pointer */
+      if (retval == ~0ul) /* It might be a GMEM_MOVEABLE data pointer */
       {
           retval = HeapSize(GetProcessHeap(), 0, (char*)hmem - HGLOBAL_STORAGE);
-          if (retval != ~(SIZE_T)0) retval -= HGLOBAL_STORAGE;
+          if (retval != ~0ul) retval -= HGLOBAL_STORAGE;
       }
    }
    else
@@ -351,7 +353,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
          else
          {
              retval = HeapSize(GetProcessHeap(), 0, (char *)pintern->Pointer - HGLOBAL_STORAGE );
-             if (retval != ~(SIZE_T)0) retval -= HGLOBAL_STORAGE;
+             if (retval != ~0ul) retval -= HGLOBAL_STORAGE;
          }
       }
       else
@@ -362,7 +364,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
       }
       RtlUnlockHeap(GetProcessHeap());
    }
-   if (retval == ~(SIZE_T)0) retval = 0;
+   if (retval == ~0ul) retval = 0;
    return retval;
 }
 
@@ -547,6 +549,10 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
     MEMORYSTATUSEX memstatus;
     OSVERSIONINFOW osver;
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( GetModuleHandleW(0) );
+    static int force_large_address_aware = -1;
+
+    if (force_large_address_aware == -1)
+        force_large_address_aware = __wine_needs_override_large_address_aware();
 
     /* Because GlobalMemoryStatus is identical to GlobalMemoryStatusEX save
        for one extra field in the struct, and the lack of a bug, we simply
@@ -587,7 +593,8 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 
     /* values are limited to 2Gb unless the app has the IMAGE_FILE_LARGE_ADDRESS_AWARE flag */
     /* page file sizes are not limited (Adobe Illustrator 8 depends on this) */
-    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE))
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) &&
+        !force_large_address_aware)
     {
         if (lpBuffer->dwTotalPhys > MAXLONG) lpBuffer->dwTotalPhys = MAXLONG;
         if (lpBuffer->dwAvailPhys > MAXLONG) lpBuffer->dwAvailPhys = MAXLONG;

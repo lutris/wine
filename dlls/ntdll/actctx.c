@@ -22,6 +22,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -1100,7 +1103,7 @@ static WCHAR *build_assembly_dir(struct assembly_identity* ai)
     wcscat( ret, undW );
     wcscat( ret, key );
     wcscat( ret, undW );
-    swprintf( ret + wcslen(ret), size - wcslen(ret), version_formatW,
+    NTDLL_swprintf( ret + wcslen(ret), version_formatW,
               ai->version.major, ai->version.minor, ai->version.build, ai->version.revision );
     wcscat( ret, undW );
     wcscat( ret, lang );
@@ -1137,7 +1140,7 @@ static WCHAR *build_assembly_id( const struct assembly_identity *ai )
     WCHAR version[64], *ret;
     SIZE_T size = 0;
 
-    swprintf( version, ARRAY_SIZE(version), version_formatW,
+    NTDLL_swprintf( version, version_formatW,
               ai->version.major, ai->version.minor, ai->version.build, ai->version.revision );
     if (ai->name) size += wcslen(ai->name) * sizeof(WCHAR);
     if (ai->arch) size += wcslen(archW) + wcslen(ai->arch) + 2;
@@ -1983,7 +1986,7 @@ static int get_assembly_version(struct assembly *assembly, WCHAR *ret)
     WCHAR buff[25];
 
     if (!ret) ret = buff;
-    return swprintf(ret, ARRAY_SIZE(buff), fmtW, ver->major, ver->minor, ver->build, ver->revision);
+    return NTDLL_swprintf(ret, fmtW, ver->major, ver->minor, ver->build, ver->revision);
 }
 
 static void parse_window_class_elem( xmlbuf_t *xmlbuf, struct dll_redirect *dll,
@@ -2267,11 +2270,7 @@ static void parse_dependent_assembly_elem( xmlbuf_t *xmlbuf, struct actctx_loade
         {
             parse_assembly_identity_elem(xmlbuf, acl->actctx, &ai, &elem);
             /* store the newly found identity for later loading */
-            if (ai.arch && !wcscmp(ai.arch, wildcardW))
-            {
-                RtlFreeHeap( GetProcessHeap(), 0, ai.arch );
-                ai.arch = strdupW( current_archW );
-            }
+            if (ai.arch && !wcscmp(ai.arch, wildcardW)) ai.arch = strdupW( current_archW );
             TRACE( "adding name=%s version=%s arch=%s\n",
                    debugstr_w(ai.name), debugstr_version(&ai.version), debugstr_w(ai.arch) );
             if (!add_dependent_assembly_id(acl, &ai)) set_error( xmlbuf );
@@ -2929,7 +2928,7 @@ static NTSTATUS open_nt_file( HANDLE *handle, UNICODE_STRING *name )
     attr.ObjectName = name;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    return NtOpenFile( handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
+    return __syscall_NtOpenFile( handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
 }
 
 static NTSTATUS get_manifest_in_module( struct actctx_loader* acl, struct assembly_identity* ai,
@@ -3097,7 +3096,7 @@ static NTSTATUS get_manifest_in_associated_manifest( struct actctx_loader* acl, 
 
         if (!(status = get_module_filename( module, &name, sizeof(dotManifestW) + 10*sizeof(WCHAR) )))
         {
-            if (resid != 1) swprintf( name.Buffer + wcslen(name.Buffer), 10, fmtW, resid );
+            if (resid != 1) NTDLL_swprintf( name.Buffer + wcslen(name.Buffer), fmtW, resid );
             wcscat( name.Buffer, dotManifestW );
             if (!RtlDosPathNameToNtPathName_U( name.Buffer, &nameW, NULL, NULL ))
                 status = STATUS_RESOURCE_DATA_NOT_FOUND;
@@ -3111,7 +3110,7 @@ static NTSTATUS get_manifest_in_associated_manifest( struct actctx_loader* acl, 
                                         (wcslen(filename) + 10) * sizeof(WCHAR) + sizeof(dotManifestW) )))
             return STATUS_NO_MEMORY;
         wcscpy( buffer, filename );
-        if (resid != 1) swprintf( buffer + wcslen(buffer), 10, fmtW, resid );
+        if (resid != 1) NTDLL_swprintf( buffer + wcslen(buffer), fmtW, resid );
         wcscat( buffer, dotManifestW );
         RtlInitUnicodeString( &nameW, buffer );
     }
@@ -3137,14 +3136,17 @@ static WCHAR *lookup_manifest_file( HANDLE dir, struct assembly_identity *ai )
     UNICODE_STRING lookup_us;
     IO_STATUS_BLOCK io;
     const WCHAR *lang = ai->language;
-    unsigned int data_pos = 0, data_len, len;
+    unsigned int data_pos = 0, data_len;
     char buffer[8192];
 
     if (!lang || !wcsicmp( lang, neutralW )) lang = wildcardW;
 
-    len = wcslen(ai->arch) + wcslen(ai->name) + wcslen(ai->public_key) + wcslen(lang) + 20 + ARRAY_SIZE(lookup_fmtW);
-    if (!(lookup = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return NULL;
-    swprintf( lookup, len, lookup_fmtW, ai->arch, ai->name, ai->public_key,
+    if (!(lookup = RtlAllocateHeap( GetProcessHeap(), 0,
+                                    (wcslen(ai->arch) + wcslen(ai->name)
+                                     + wcslen(ai->public_key) + wcslen(lang) + 20) * sizeof(WCHAR)
+                                    + sizeof(lookup_fmtW) )))
+        return NULL;
+    NTDLL_swprintf( lookup, lookup_fmtW, ai->arch, ai->name, ai->public_key,
               ai->version.major, ai->version.minor, lang );
     RtlInitUnicodeString( &lookup_us, lookup );
 
@@ -3243,7 +3245,7 @@ static NTSTATUS lookup_winsxs(struct actctx_loader* acl, struct assembly_identit
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    if (!NtOpenFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    if (!__syscall_NtOpenFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
                      FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT ))
     {
         sxs_ai = *ai;
@@ -5172,24 +5174,15 @@ NTSTATUS WINAPI RtlZombifyActivationContext( HANDLE handle )
  */
 NTSTATUS WINAPI RtlActivateActivationContext( ULONG unknown, HANDLE handle, PULONG_PTR cookie )
 {
-    return RtlActivateActivationContextEx( 0, NtCurrentTeb(), handle, cookie );
-}
-
-
-/******************************************************************
- *		RtlActivateActivationContextEx (NTDLL.@)
- */
-NTSTATUS WINAPI RtlActivateActivationContextEx( ULONG flags, TEB *teb, HANDLE handle, ULONG_PTR *cookie )
-{
     RTL_ACTIVATION_CONTEXT_STACK_FRAME *frame;
 
     if (!(frame = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*frame) )))
         return STATUS_NO_MEMORY;
 
-    frame->Previous = teb->ActivationContextStack.ActiveFrame;
+    frame->Previous = NtCurrentTeb()->ActivationContextStack.ActiveFrame;
     frame->ActivationContext = handle;
     frame->Flags = 0;
-    teb->ActivationContextStack.ActiveFrame = frame;
+    NtCurrentTeb()->ActivationContextStack.ActiveFrame = frame;
     RtlAddRefActivationContext( handle );
 
     *cookie = (ULONG_PTR)frame;

@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
 #include <stdarg.h>
 
 #include "ntstatus.h"
@@ -106,6 +108,17 @@ NTSTATUS WINAPI RtlGetLastNtStatus(void)
 DWORD WINAPI RtlGetLastWin32Error(void)
 {
     return NtCurrentTeb()->LastErrorValue;
+}
+
+/**********************************************************************
+ *      NtRaiseHardError (NTDLL.@)
+ */
+NTSTATUS WINAPI NtRaiseHardError( NTSTATUS ErrorStatus, ULONG NumberOfParameters,
+                                  PUNICODE_STRING UnicodeStringParameterMask, PVOID *Parameters,
+                                  HARDERROR_RESPONSE_OPTION ResponseOption, PHARDERROR_RESPONSE Response )
+{
+    FIXME(": stub. Errorstatus was %08x\n", ErrorStatus);
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 /***********************************************************************

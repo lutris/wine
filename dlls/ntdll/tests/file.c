@@ -373,7 +373,7 @@ static void open_file_test(void)
     attr.Length = sizeof(attr);
     attr.RootDirectory = 0;
     attr.ObjectName = &nameW;
-    attr.Attributes = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
     status = pNtOpenFile( &dir, SYNCHRONIZE|FILE_LIST_DIRECTORY, &attr, &io,
@@ -424,31 +424,6 @@ static void open_file_test(void)
     ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
     CloseHandle( handle );
     CloseHandle( dir );
-
-    attr.RootDirectory = 0;
-    wcscat( path, L"\\cmd.exe" );
-    pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
-    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
-                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
-    ok( status == STATUS_NOT_A_DIRECTORY, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
-    CloseHandle( handle );
-    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
-                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_NON_DIRECTORY_FILE );
-    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
-    CloseHandle( handle );
-    pRtlFreeUnicodeString( &nameW );
-
-    wcscat( path, L"\\cmd.exe" );
-    pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
-    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
-                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
-    todo_wine
-    ok( status == STATUS_OBJECT_PATH_NOT_FOUND, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
-    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
-                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_NON_DIRECTORY_FILE );
-    todo_wine
-    ok( status == STATUS_OBJECT_PATH_NOT_FOUND, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
-    pRtlFreeUnicodeString( &nameW );
 
     GetTempPathW( MAX_PATH, path );
     lstrcatW( path, testdirW );
@@ -3126,17 +3101,16 @@ todo_wine
     fileDeleted = RemoveDirectoryA( buffer );
     ok( fileDeleted, "Directory should have been deleted\n" );
     fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
+todo_wine
     ok( !fileDeleted, "Directory shouldn't have been deleted\n" );
     res = nt_get_file_attrs( buffer, &fdi2 );
 todo_wine
     ok( res == STATUS_DELETE_PENDING, "got %#x\n", res );
     /* can't open the deleted directory */
     handle2 = CreateFileA(buffer, DELETE, FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
-todo_wine
     ok( handle2 == INVALID_HANDLE_VALUE, "CreateFile should fail\n" );
 todo_wine
     ok(GetLastError() == ERROR_ACCESS_DENIED, "got %u\n", GetLastError());
-    if (handle2 != INVALID_HANDLE_VALUE) CloseHandle( handle2 );
     CloseHandle( handle );
     fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
     ok( fileDeleted, "Directory should have been deleted\n" );
@@ -3898,6 +3872,7 @@ static void test_file_mode(void)
         UNICODE_STRING *file_name;
         ULONG options;
         ULONG mode;
+        BOOL todo;
     } option_tests[] = {
         { &file_name, 0, 0 },
         { &file_name, FILE_NON_DIRECTORY_FILE, 0 },
@@ -3911,7 +3886,7 @@ static void test_file_mode(void)
         { &pipe_dev_name, 0, 0 },
         { &pipe_dev_name, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_ALERT },
         { &mailslot_dev_name, 0, 0 },
-        { &mailslot_dev_name, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_ALERT },
+        { &mailslot_dev_name, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_ALERT, TRUE },
         { &mountmgr_dev_name, 0, 0 },
         { &mountmgr_dev_name, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_ALERT }
     };
@@ -3963,6 +3938,7 @@ static void test_file_mode(void)
         memset(&mode, 0xcc, sizeof(mode));
         status = pNtQueryInformationFile(file, &io, &mode, sizeof(mode), FileModeInformation);
         ok(status == STATUS_SUCCESS, "[%u] can't get FileModeInformation: %x\n", i, status);
+        todo_wine_if(option_tests[i].todo)
         ok(mode.Mode == option_tests[i].mode, "[%u] Mode = %x, expected %x\n",
            i, mode.Mode, option_tests[i].mode);
 
@@ -5237,71 +5213,6 @@ static void test_file_readonly_access(void)
     DeleteFileW(path);
 }
 
-static void test_mailslot_name(void)
-{
-    char buffer[1024] = {0};
-    const FILE_NAME_INFORMATION *name = (const FILE_NAME_INFORMATION *)buffer;
-    HANDLE server, client, device;
-    IO_STATUS_BLOCK io;
-    NTSTATUS ret;
-
-    server = CreateMailslotA( "\\\\.\\mailslot\\winetest", 100, 1000, NULL );
-    ok(server != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
-
-    ret = NtQueryInformationFile( server, &io, buffer, 0, FileNameInformation );
-    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got %#x\n", ret);
-
-    memset(buffer, 0xcc, sizeof(buffer));
-    ret = NtQueryInformationFile( server, &io, buffer,
-            offsetof(FILE_NAME_INFORMATION, FileName[5]), FileNameInformation );
-    todo_wine ok(ret == STATUS_BUFFER_OVERFLOW, "got %#x\n", ret);
-    if (ret == STATUS_BUFFER_OVERFLOW)
-    {
-        ok(name->FileNameLength == 18, "got length %u\n", name->FileNameLength);
-        ok(!memcmp(name->FileName, L"\\wine", 10), "got %s\n",
-                debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
-    }
-
-    memset(buffer, 0xcc, sizeof(buffer));
-    ret = NtQueryInformationFile( server, &io, buffer, sizeof(buffer), FileNameInformation );
-    todo_wine ok(!ret, "got %#x\n", ret);
-    if (!ret)
-    {
-        ok(name->FileNameLength == 18, "got length %u\n", name->FileNameLength);
-        ok(!memcmp(name->FileName, L"\\winetest", 18), "got %s\n",
-                debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
-    }
-
-    client = CreateFileA( "\\\\.\\mailslot\\winetest", 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL );
-    ok(client != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
-
-    ret = NtQueryInformationFile( client, &io, buffer, 0, FileNameInformation );
-    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got %#x\n", ret);
-
-    ret = NtQueryInformationFile( client, &io, buffer, sizeof(buffer), FileNameInformation );
-    todo_wine ok(ret == STATUS_INVALID_PARAMETER || !ret /* win8+ */, "got %#x\n", ret);
-    if (!ret)
-    {
-        ok(name->FileNameLength == 18, "got length %u\n", name->FileNameLength);
-        ok(!memcmp(name->FileName, L"\\winetest", 18), "got %s\n",
-                debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
-    }
-
-    CloseHandle( server );
-    CloseHandle( client );
-
-    device = CreateFileA("\\\\.\\mailslot", 0, 0, NULL, OPEN_EXISTING, 0, NULL);
-    ok(device != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
-
-    ret = NtQueryInformationFile( device, &io, buffer, 0, FileNameInformation );
-    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got %#x\n", ret);
-
-    ret = NtQueryInformationFile( device, &io, buffer, sizeof(buffer), FileNameInformation );
-    todo_wine ok(ret == STATUS_INVALID_PARAMETER, "got %#x\n", ret);
-
-    CloseHandle( device );
-}
-
 static INT build_reparse_buffer(const WCHAR *filename, ULONG tag, ULONG flags,
                                 REPARSE_DATA_BUFFER **pbuffer)
 {
@@ -5757,5 +5668,4 @@ START_TEST(file)
     test_query_ea();
     test_flush_buffers_file();
     test_reparse_points();
-    test_mailslot_name();
 }

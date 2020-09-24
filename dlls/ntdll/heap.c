@@ -20,13 +20,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <assert.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-
-#define RUNNING_ON_VALGRIND 0  /* FIXME */
+#ifdef HAVE_VALGRIND_MEMCHECK_H
+#include <valgrind/memcheck.h>
+#else
+#define RUNNING_ON_VALGRIND 0
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -164,10 +170,10 @@ typedef struct tagHEAP
     RTL_CRITICAL_SECTION critSection; /* Critical section for serialization */
     struct list     *freeList;      /* Free lists */
     struct wine_rb_tree freeTree;   /* Free tree */
-    DWORD            freeMask[HEAP_NB_FREE_LISTS / (8 * sizeof(DWORD))];
+    unsigned long    freeMask[HEAP_NB_FREE_LISTS / (8 * sizeof(unsigned long))];
 } HEAP;
 
-#define HEAP_FREEMASK_BLOCK    (8 * sizeof(DWORD))
+#define HEAP_FREEMASK_BLOCK    (8 * sizeof(unsigned long))
 #define HEAP_FREEMASK_INDEX(x) ((x) / HEAP_FREEMASK_BLOCK)
 #define HEAP_FREEMASK_BIT(x)   (1UL << ((x) & (HEAP_FREEMASK_BLOCK - 1)))
 
@@ -194,6 +200,23 @@ static inline DWORD get_arena_size( const struct wine_rb_entry *entry )
 {
     ARENA_FREE *arena = WINE_RB_ENTRY_VALUE( entry, ARENA_FREE, entry.tree );
     return (arena->size & ARENA_SIZE_MASK);
+}
+
+/* return number of trailing 0-bits in x */
+static inline int ctzl(unsigned long x)
+{
+#ifdef HAVE___BUILTIN_CTZL
+    return __builtin_ctzl(x);
+#else
+    int c = 1;
+    if (!(x & 0xffffffff)) { x >>= 32; c += 32; }
+    if (!(x & 0x0000ffff)) { x >>= 16; c += 16; }
+    if (!(x & 0x000000ff)) { x >>=  8; c +=  8; }
+    if (!(x & 0x0000000f)) { x >>=  4; c +=  4; }
+    if (!(x & 0x00000003)) { x >>=  2; c +=  2; }
+    c -= (x & 0x00000001);
+    return c;
+#endif
 }
 
 /* mark a block of memory as free for debugging purposes */
@@ -1020,7 +1043,7 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
 
         /* Initialize the free mask */
 
-        for (i = 0; i < ARRAY_SIZE(heap->freeMask); i++)
+        for (i = 0; i < sizeof(heap->freeMask) / sizeof(heap->freeMask[0]); i++)
             heap->freeMask[i] = 0;
 
         /* Initialize critical section */
@@ -1102,7 +1125,7 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
                                        SUBHEAP **ppSubHeap )
 {
     struct wine_rb_entry *ptr;
-    DWORD mask;
+    unsigned long mask;
     ARENA_FREE *arena;
     SUBHEAP *subheap;
     SIZE_T total_size;
@@ -1115,9 +1138,7 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
         mask = heap->freeMask[ HEAP_FREEMASK_INDEX( index ) ] & ~(HEAP_FREEMASK_BIT( index ) - 1);
         if (mask)
         {
-            DWORD ctz;
-            BitScanForward( &ctz, mask );
-            index = (index & ~(HEAP_FREEMASK_BLOCK - 1)) | ctz;
+            index = (index & ~(HEAP_FREEMASK_BLOCK - 1)) | ctzl( mask );
             arena = LIST_ENTRY( heap->freeList[index].next, ARENA_FREE, entry.list );
             subheap = HEAP_FindSubHeap( heap, arena );
             if (!HEAP_Commit( subheap, (ARENA_INUSE *)arena, size )) return NULL;
@@ -2138,7 +2159,7 @@ SIZE_T WINAPI RtlSizeHeap( HANDLE heap, ULONG flags, const void *ptr )
     if (!heapPtr)
     {
         RtlSetLastWin32ErrorAndNtStatusFromNtStatus( STATUS_INVALID_HANDLE );
-        return ~(SIZE_T)0;
+        return ~0UL;
     }
     flags &= HEAP_NO_SERIALIZE;
     flags |= heapPtr->flags;
@@ -2148,7 +2169,7 @@ SIZE_T WINAPI RtlSizeHeap( HANDLE heap, ULONG flags, const void *ptr )
     if (!validate_block_pointer( heapPtr, &subheap, pArena ))
     {
         RtlSetLastWin32ErrorAndNtStatusFromNtStatus( STATUS_INVALID_PARAMETER );
-        ret = ~(SIZE_T)0;
+        ret = ~0UL;
     }
     else if (!subheap)
     {

@@ -1,5 +1,5 @@
-/*
- * CD-ROM support
+/* -*- tab-width: 8; c-basic-offset: 4 -*- */
+/* Main file for CD-ROM support
  *
  * Copyright 1994 Martin Ayotte
  * Copyright 1999, 2001, 2003 Eric Pouech
@@ -20,10 +20,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-
-#if 0
-#pragma makedep unix
-#endif
 
 #include "config.h"
 #include "wine/port.h"
@@ -132,8 +128,9 @@ typedef struct
 #include "ntddcdrm.h"
 #include "ddk/ntddcdvd.h"
 #include "ntddscsi.h"
+#include "ntdll_misc.h"
 #include "wine/server.h"
-#include "unix_private.h"
+#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cdrom);
@@ -279,7 +276,7 @@ struct linux_cdrom_generic_command
 
 /* FIXME: this is needed because we can't open simultaneously several times /dev/cdrom
  * this should be removed when a proper device interface is implemented
- *
+ * 
  * (WS) We need this to keep track of current position and to safely
  * detect media changes. Besides this should provide a great speed up
  * for toc inquiries.
@@ -292,13 +289,20 @@ struct cdrom_cache {
     SUB_Q_CURRENT_POSITION CurrentPosition;
 };
 /* who has more than 5 cdroms on his/her machine ?? */
-/* FIXME: this should grow depending on the number of cdroms we install/configure
+/* FIXME: this should grow depending on the number of cdroms we install/configure 
  * at startup
  */
 #define MAX_CACHE_ENTRIES       5
 static struct cdrom_cache cdrom_cache[MAX_CACHE_ENTRIES];
 
-static pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+static RTL_CRITICAL_SECTION cache_section;
+static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &cache_section,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": cache_section") }
+};
+static RTL_CRITICAL_SECTION cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /* Proposed media change function: not really needed at this time */
 /* This is a 1 or 0 type of function */
@@ -355,7 +359,7 @@ static NTSTATUS get_parent_device( int fd, char *name, size_t len )
     CFMutableDictionaryRef dict;
     CFTypeRef val;
 
-    if (fstat( fd, &st ) == -1) return errno_to_status( errno );
+    if (fstat( fd, &st ) == -1) return FILE_GetNtStatus();
     if (!S_ISCHR( st.st_mode )) return STATUS_OBJECT_TYPE_MISMATCH;
 
     /* create a dictionary with the right major/minor numbers */
@@ -435,7 +439,7 @@ static NTSTATUS CDROM_SyncCache(int dev, int fd)
    if (ioctl(fd, CDROMREADTOCHDR, &hdr) == -1)
    {
       WARN("(%d) -- Error occurred (%s)!\n", dev, strerror(errno));
-      return errno_to_status( errno );
+      return FILE_GetNtStatus();
    }
 
    toc->FirstTrack = hdr.cdth_trk0;
@@ -451,13 +455,13 @@ static NTSTATUS CDROM_SyncCache(int dev, int fd)
    {
      if (i == toc->LastTrack + 1)
        entry.cdte_track = CDROM_LEADOUT;
-     else
+     else 
        entry.cdte_track = i;
      entry.cdte_format = CDROM_MSF;
      if (ioctl(fd, CDROMREADTOCENTRY, &entry) == -1)
      {
        WARN("error read entry (%s)\n", strerror(errno));
-       return errno_to_status( errno );
+       return FILE_GetNtStatus();
      }
      toc->TrackData[i - toc->FirstTrack].Control = entry.cdte_ctrl;
      toc->TrackData[i - toc->FirstTrack].Adr = entry.cdte_adr;
@@ -484,7 +488,7 @@ static NTSTATUS CDROM_SyncCache(int dev, int fd)
     if (ioctl(fd, CDIOREADTOCHEADER, &hdr) == -1)
     {
         WARN("(%d) -- Error occurred (%s)!\n", dev, strerror(errno));
-        return errno_to_status( errno );
+        return FILE_GetNtStatus();
     }
     toc->FirstTrack = hdr.starting_track;
     toc->LastTrack  = hdr.ending_track;
@@ -511,7 +515,7 @@ static NTSTATUS CDROM_SyncCache(int dev, int fd)
         if (ioctl(fd, CDIOREADTOCENTRYS, &entry) == -1)
         {
 	    WARN("error read entry (%s)\n", strerror(errno));
-            return errno_to_status( errno );
+            return FILE_GetNtStatus();
 	}
         toc->TrackData[i - toc->FirstTrack].Control = toc_buffer.control;
         toc->TrackData[i - toc->FirstTrack].Adr = toc_buffer.addr_type;
@@ -537,7 +541,7 @@ static NTSTATUS CDROM_SyncCache(int dev, int fd)
     if (ioctl(fd, DKIOCCDREADTOC, &hdr) == -1)
     {
         WARN("(%d) -- Error occurred (%s)!\n", dev, strerror(errno));
-        return errno_to_status( errno );
+        return FILE_GetNtStatus();
     }
     for (i = toc->FirstTrack; i <= toc->LastTrack + 1; i++)
     {
@@ -559,9 +563,9 @@ static NTSTATUS CDROM_SyncCache(int dev, int fd)
 
 static void CDROM_ClearCacheEntry(int dev)
 {
-    pthread_mutex_lock( &cache_mutex );
+    RtlEnterCriticalSection( &cache_section );
     cdrom_cache[dev].toc_good = 0;
-    pthread_mutex_unlock( &cache_mutex );
+    RtlLeaveCriticalSection( &cache_section );
 }
 
 
@@ -665,9 +669,9 @@ static NTSTATUS CDROM_Open(int fd, int* dev)
     NTSTATUS ret = STATUS_SUCCESS;
     int         empty = -1;
 
-    if (fstat(fd, &st) == -1) return errno_to_status( errno );
+    if (fstat(fd, &st) == -1) return FILE_GetNtStatus();
 
-    pthread_mutex_lock( &cache_mutex );
+    RtlEnterCriticalSection( &cache_section );
     for (*dev = 0; *dev < MAX_CACHE_ENTRIES; (*dev)++)
     {
         if (empty == -1 &&
@@ -688,7 +692,7 @@ static NTSTATUS CDROM_Open(int fd, int* dev)
             cdrom_cache[*dev].inode   = st.st_ino;
         }
     }
-    pthread_mutex_unlock( &cache_mutex );
+    RtlLeaveCriticalSection( &cache_section );
 
     TRACE("%d, %d\n", *dev, fd);
     return ret;
@@ -702,7 +706,7 @@ static NTSTATUS CDROM_Open(int fd, int* dev)
 static NTSTATUS CDROM_GetStatusCode(int io)
 {
     if (io == 0) return STATUS_SUCCESS;
-    return errno_to_status( errno );
+    return FILE_GetNtStatus();
 }
 
 /******************************************************************
@@ -755,10 +759,10 @@ static NTSTATUS CDROM_GetDriveGeometry(int dev, int fd, DISK_GEOMETRY* dg)
         - FRAME_OF_TOC(toc, 1); /* Total size in frames */
 
   dg->Cylinders.QuadPart = fsize / (64 * 32);
-  dg->MediaType = RemovableMedia;
-  dg->TracksPerCylinder = 64;
-  dg->SectorsPerTrack = 32;
-  dg->BytesPerSector= 2048;
+  dg->MediaType = RemovableMedia;  
+  dg->TracksPerCylinder = 64; 
+  dg->SectorsPerTrack = 32;  
+  dg->BytesPerSector= 2048; 
   return ret;
 }
 
@@ -840,13 +844,13 @@ static NTSTATUS CDROM_ReadTOC(int dev, int fd, CDROM_TOC* toc)
     if (dev < 0 || dev >= MAX_CACHE_ENTRIES)
         return STATUS_INVALID_PARAMETER;
 
-    pthread_mutex_lock( &cache_mutex );
+    RtlEnterCriticalSection( &cache_section );
     if (cdrom_cache[dev].toc_good || !(ret = CDROM_SyncCache(dev, fd)))
     {
         *toc = cdrom_cache[dev].toc;
         ret = STATUS_SUCCESS;
     }
-    pthread_mutex_unlock( &cache_mutex );
+    RtlLeaveCriticalSection( &cache_section );
     return ret;
 }
 
@@ -926,21 +930,21 @@ static NTSTATUS CDROM_ReadQChannel(int dev, int fd, const CDROM_SUB_Q_DATA_FORMA
     switch (fmt->Format)
     {
     case IOCTL_CDROM_CURRENT_POSITION:
-        pthread_mutex_lock( &cache_mutex );
+        RtlEnterCriticalSection( &cache_section );
 	if (hdr->AudioStatus==AUDIO_STATUS_IN_PROGRESS) {
           data->CurrentPosition.FormatCode = IOCTL_CDROM_CURRENT_POSITION;
-          data->CurrentPosition.Control = sc.cdsc_ctrl;
-          data->CurrentPosition.ADR = sc.cdsc_adr;
-          data->CurrentPosition.TrackNumber = sc.cdsc_trk;
-          data->CurrentPosition.IndexNumber = sc.cdsc_ind;
+          data->CurrentPosition.Control = sc.cdsc_ctrl; 
+          data->CurrentPosition.ADR = sc.cdsc_adr; 
+          data->CurrentPosition.TrackNumber = sc.cdsc_trk; 
+          data->CurrentPosition.IndexNumber = sc.cdsc_ind; 
 
-          data->CurrentPosition.AbsoluteAddress[0] = 0;
-          data->CurrentPosition.AbsoluteAddress[1] = sc.cdsc_absaddr.msf.minute;
+          data->CurrentPosition.AbsoluteAddress[0] = 0; 
+          data->CurrentPosition.AbsoluteAddress[1] = sc.cdsc_absaddr.msf.minute; 
           data->CurrentPosition.AbsoluteAddress[2] = sc.cdsc_absaddr.msf.second;
           data->CurrentPosition.AbsoluteAddress[3] = sc.cdsc_absaddr.msf.frame;
-
-          data->CurrentPosition.TrackRelativeAddress[0] = 0;
-          data->CurrentPosition.TrackRelativeAddress[1] = sc.cdsc_reladdr.msf.minute;
+ 
+          data->CurrentPosition.TrackRelativeAddress[0] = 0; 
+          data->CurrentPosition.TrackRelativeAddress[1] = sc.cdsc_reladdr.msf.minute; 
           data->CurrentPosition.TrackRelativeAddress[2] = sc.cdsc_reladdr.msf.second;
           data->CurrentPosition.TrackRelativeAddress[3] = sc.cdsc_reladdr.msf.frame;
 
@@ -951,7 +955,7 @@ static NTSTATUS CDROM_ReadQChannel(int dev, int fd, const CDROM_SUB_Q_DATA_FORMA
 	  cdrom_cache[dev].CurrentPosition.Header = *hdr; /* Preserve header info */
 	  data->CurrentPosition = cdrom_cache[dev].CurrentPosition;
 	}
-        pthread_mutex_unlock( &cache_mutex );
+        RtlLeaveCriticalSection( &cache_section );
         break;
     case IOCTL_CDROM_MEDIA_CATALOG:
         data->MediaCatalog.FormatCode = IOCTL_CDROM_MEDIA_CATALOG;
@@ -1037,7 +1041,7 @@ static NTSTATUS CDROM_ReadQChannel(int dev, int fd, const CDROM_SUB_Q_DATA_FORMA
     switch (fmt->Format)
     {
     case IOCTL_CDROM_CURRENT_POSITION:
-        pthread_mutex_lock( &cache_mutex );
+        RtlEnterCriticalSection( &cache_section );
 	if (hdr->AudioStatus==AUDIO_STATUS_IN_PROGRESS) {
           data->CurrentPosition.FormatCode = IOCTL_CDROM_CURRENT_POSITION;
           data->CurrentPosition.Control = sc.what.position.control;
@@ -1059,7 +1063,7 @@ static NTSTATUS CDROM_ReadQChannel(int dev, int fd, const CDROM_SUB_Q_DATA_FORMA
 	  cdrom_cache[dev].CurrentPosition.Header = *hdr; /* Preserve header info */
 	  data->CurrentPosition = cdrom_cache[dev].CurrentPosition;
 	}
-        pthread_mutex_unlock( &cache_mutex );
+        RtlLeaveCriticalSection( &cache_section );
         break;
     case IOCTL_CDROM_MEDIA_CATALOG:
         data->MediaCatalog.FormatCode = IOCTL_CDROM_MEDIA_CATALOG;
@@ -1248,21 +1252,21 @@ static NTSTATUS CDROM_SeekAudioMSF(int dev, int fd, const CDROM_SEEK_AUDIO_MSF* 
     if (i <= toc.FirstTrack || i > toc.LastTrack+1)
       return STATUS_INVALID_PARAMETER;
     i--;
-    pthread_mutex_lock( &cache_mutex );
+    RtlEnterCriticalSection( &cache_section );
     cp = &cdrom_cache[dev].CurrentPosition;
-    cp->FormatCode = IOCTL_CDROM_CURRENT_POSITION;
-    cp->Control = toc.TrackData[i-toc.FirstTrack].Control;
-    cp->ADR = toc.TrackData[i-toc.FirstTrack].Adr;
+    cp->FormatCode = IOCTL_CDROM_CURRENT_POSITION; 
+    cp->Control = toc.TrackData[i-toc.FirstTrack].Control; 
+    cp->ADR = toc.TrackData[i-toc.FirstTrack].Adr; 
     cp->TrackNumber = toc.TrackData[i-toc.FirstTrack].TrackNumber;
     cp->IndexNumber = 0; /* FIXME: where do they keep these? */
-    cp->AbsoluteAddress[0] = 0;
+    cp->AbsoluteAddress[0] = 0; 
     cp->AbsoluteAddress[1] = toc.TrackData[i-toc.FirstTrack].Address[1];
     cp->AbsoluteAddress[2] = toc.TrackData[i-toc.FirstTrack].Address[2];
     cp->AbsoluteAddress[3] = toc.TrackData[i-toc.FirstTrack].Address[3];
     frame -= FRAME_OF_TOC(toc,i);
     cp->TrackRelativeAddress[0] = 0;
-    MSF_OF_FRAME(cp->TrackRelativeAddress[1], frame);
-    pthread_mutex_unlock( &cache_mutex );
+    MSF_OF_FRAME(cp->TrackRelativeAddress[1], frame); 
+    RtlLeaveCriticalSection( &cache_section );
 
     /* If playing, then issue a seek command, otherwise do nothing */
 #ifdef linux
@@ -1297,7 +1301,7 @@ static NTSTATUS CDROM_SeekAudioMSF(int dev, int fd, const CDROM_SEEK_AUDIO_MSF* 
 	CDROM_ClearCacheEntry(dev);
         return CDROM_GetStatusCode(io);
     }
-    if (sc.header.audio_status==CD_AS_PLAY_IN_PROGRESS)
+    if (sc.header.audio_status==CD_AS_PLAY_IN_PROGRESS) 
     {
 
       msf.start_m      = audio_msf->M;
@@ -2022,7 +2026,7 @@ static NTSTATUS CDROM_GetAddress(int fd, SCSI_ADDRESS* address)
 
     address->PortNumber = portnum; /* primary=0 secondary=1 for ide */
     address->PathId = busid;       /* always 0 for ide */
-    address->TargetId = targetid;  /* device id 0/1 for ide */
+    address->TargetId = targetid;  /* master=0 slave=1 for ide */
     address->Lun = lun;
     return STATUS_SUCCESS;
 }
@@ -2122,7 +2126,7 @@ static NTSTATUS DVD_SendKey(int fd, const DVD_COPY_PROTECT_KEY *key)
 	auth_info.hsk.agid = (int)key->SessionId;
 
 	memcpy( auth_info.hsk.key, key->KeyData, DVD_KEY_SIZE );
-
+	
 	TRACE("DvdBusKey2\n");
 	ret = CDROM_GetStatusCode(ioctl( fd, DVD_AUTH, &auth_info ));
 	break;
@@ -2179,7 +2183,7 @@ static NTSTATUS DVD_SendKey(int fd, const DVD_COPY_PROTECT_KEY *key)
 #else
     FIXME("not supported on this O/S\n");
     return STATUS_NOT_SUPPORTED;
-#endif
+#endif    
 }
 
 /******************************************************************
@@ -2199,11 +2203,11 @@ static NTSTATUS DVD_ReadKey(int fd, PDVD_COPY_PROTECT_KEY key)
     switch (key->KeyType)
     {
     case DvdDiskKey:
-
+	
 	dvd.type = DVD_STRUCT_DISCKEY;
 	dvd.disckey.agid = (int)key->SessionId;
 	memset( dvd.disckey.value, 0, DVD_DISCKEY_SIZE );
-
+	
 	TRACE("DvdDiskKey\n");
 	ret = CDROM_GetStatusCode(ioctl( fd, DVD_READ_STRUCT, &dvd ));
 	if (ret == STATUS_SUCCESS)
@@ -2214,7 +2218,7 @@ static NTSTATUS DVD_ReadKey(int fd, PDVD_COPY_PROTECT_KEY key)
 	auth_info.lstk.agid = (int)key->SessionId;
 	auth_info.lstk.lba = (int)(key->Parameters.TitleOffset.QuadPart>>11);
 	TRACE("DvdTitleKey session %d Quadpart 0x%08lx offset 0x%08x\n",
-	      (int)key->SessionId, (long)key->Parameters.TitleOffset.QuadPart,
+	      (int)key->SessionId, (long)key->Parameters.TitleOffset.QuadPart, 
 	      auth_info.lstk.lba);
 	ret = CDROM_GetStatusCode(ioctl( fd, DVD_AUTH, &auth_info ));
 	if (ret == STATUS_SUCCESS)
@@ -2762,7 +2766,7 @@ static NTSTATUS DVD_ReadStructure(int dev, const DVD_READ_STRUCTURE *structure, 
  *        GetInquiryData
  *        Implements the IOCTL_GET_INQUIRY_DATA ioctl.
  *        Returns Inquiry data for all devices on the specified scsi bus
- *        Returns STATUS_BUFFER_TOO_SMALL if the output buffer is too small,
+ *        Returns STATUS_BUFFER_TOO_SMALL if the output buffer is too small, 
  *        STATUS_INVALID_DEVICE_REQUEST if the given handle isn't to a SCSI device,
  *        or STATUS_NOT_SUPPORTED if the OS driver is too old
  */
@@ -2818,21 +2822,29 @@ static NTSTATUS GetInquiryData(int fd, PSCSI_ADAPTER_BUS_INFO BufferOut, DWORD O
 }
 
 /******************************************************************
- *		cdrom_DeviceIoControl
+ *		CDROM_DeviceIoControl
+ *
+ *
  */
-NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                                IO_STATUS_BLOCK *io, ULONG code, void *in_buffer,
-                                ULONG in_size, void *out_buffer, ULONG out_size )
+NTSTATUS CDROM_DeviceIoControl(HANDLE hDevice, 
+                               HANDLE hEvent, PIO_APC_ROUTINE UserApcRoutine,
+                               PVOID UserApcContext, 
+                               PIO_STATUS_BLOCK piosb, 
+                               ULONG dwIoControlCode,
+                               LPVOID lpInBuffer, DWORD nInBufferSize,
+                               LPVOID lpOutBuffer, DWORD nOutBufferSize)
 {
     DWORD       sz = 0;
     NTSTATUS    status = STATUS_SUCCESS;
     int fd, needs_close, dev = 0;
 
-    TRACE( "%p %s %p %d %p %d %p\n", device, iocodex(code), in_buffer, in_size, out_buffer, out_size, io );
+    TRACE("%p %s %p %d %p %d %p\n",
+          hDevice, iocodex(dwIoControlCode), lpInBuffer, nInBufferSize,
+          lpOutBuffer, nOutBufferSize, piosb);
 
-    io->Information = 0;
+    piosb->Information = 0;
 
-    if ((status = server_get_unix_fd( device, 0, &fd, &needs_close, NULL, NULL )))
+    if ((status = server_get_unix_fd( hDevice, 0, &fd, &needs_close, NULL, NULL )))
     {
         if (status == STATUS_BAD_DEVICE_TYPE) return status;  /* no associated fd */
         goto error;
@@ -2856,20 +2868,20 @@ NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc
          * open the parent if we're trying to eject the disk.
          */
         if ((status = get_parent_device( fd, name, sizeof(name) ))) goto error;
-        if (code == IOCTL_STORAGE_EJECT_MEDIA)
-            NtClose( device );
+        if (dwIoControlCode == IOCTL_STORAGE_EJECT_MEDIA)
+            NtClose( hDevice );
         if (needs_close) close( fd );
         TRACE("opening parent %s\n", name );
         if ((fd = open( name, O_RDONLY )) == -1)
         {
-            status = errno_to_status( errno );
+            status = FILE_GetNtStatus();
             goto error;
         }
         needs_close = 1;
     }
 #endif
 
-    switch (code)
+    switch (dwIoControlCode)
     {
     case IOCTL_CDROM_CHECK_VERIFY:
     case IOCTL_DISK_CHECK_VERIFY:
@@ -2877,7 +2889,7 @@ NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc
     case IOCTL_STORAGE_CHECK_VERIFY2:
         sz = 0;
 	CDROM_ClearCacheEntry(dev);
-        if (in_buffer != NULL || in_size != 0 || out_buffer != NULL || out_size != 0)
+        if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)
             status = STATUS_INVALID_PARAMETER;
         else status = CDROM_Verify(dev, fd);
         break;
@@ -2891,14 +2903,14 @@ NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc
     case IOCTL_CDROM_LOAD_MEDIA:
         sz = 0;
 	CDROM_ClearCacheEntry(dev);
-        if (in_buffer != NULL || in_size != 0 || out_buffer != NULL || out_size != 0)
+        if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)
             status = STATUS_INVALID_PARAMETER;
         else status = CDROM_SetTray(fd, FALSE);
         break;
      case IOCTL_STORAGE_EJECT_MEDIA:
         sz = 0;
 	CDROM_ClearCacheEntry(dev);
-        if (in_buffer != NULL || in_size != 0 || out_buffer != NULL || out_size != 0)
+        if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)
             status = STATUS_INVALID_PARAMETER;
         else
             status = CDROM_SetTray(fd, TRUE);
@@ -2912,216 +2924,216 @@ NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc
          * lockcount/owner should be handled */
         sz = 0;
 	CDROM_ClearCacheEntry(dev);
-        if (out_buffer != NULL || out_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (in_size < sizeof(PREVENT_MEDIA_REMOVAL)) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_ControlEjection(fd, in_buffer);
+        if (lpOutBuffer != NULL || nOutBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nInBufferSize < sizeof(PREVENT_MEDIA_REMOVAL)) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_ControlEjection(fd, lpInBuffer);
         break;
 
     case IOCTL_DISK_GET_MEDIA_TYPES:
     case IOCTL_STORAGE_GET_MEDIA_TYPES:
     case IOCTL_STORAGE_GET_MEDIA_TYPES_EX:
         sz = sizeof(GET_MEDIA_TYPES);
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_GetMediaType(dev, out_buffer);
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_GetMediaType(dev, lpOutBuffer);
         break;
 
     case IOCTL_STORAGE_GET_DEVICE_NUMBER:
         sz = sizeof(STORAGE_DEVICE_NUMBER);
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_GetDeviceNumber(dev, out_buffer);
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_GetDeviceNumber(dev, lpOutBuffer);
         break;
 
     case IOCTL_STORAGE_RESET_DEVICE:
         sz = 0;
 	CDROM_ClearCacheEntry(dev);
-        if (in_buffer != NULL || in_size != 0 || out_buffer != NULL || out_size != 0)
+        if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)
             status = STATUS_INVALID_PARAMETER;
         else status = CDROM_ResetAudio(fd);
         break;
 
     case IOCTL_CDROM_GET_CONTROL:
         sz = sizeof(CDROM_AUDIO_CONTROL);
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_GetControl(dev, fd, out_buffer);
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_GetControl(dev, fd, lpOutBuffer);
         break;
 
     case IOCTL_CDROM_GET_DRIVE_GEOMETRY:
         sz = sizeof(DISK_GEOMETRY);
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_GetDriveGeometry(dev, fd, out_buffer);
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_GetDriveGeometry(dev, fd, lpOutBuffer);
         break;
 
     case IOCTL_CDROM_DISK_TYPE:
         sz = sizeof(CDROM_DISK_DATA);
 	/* CDROM_ClearCacheEntry(dev); */
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_GetDiskData(dev, fd, out_buffer);
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_GetDiskData(dev, fd, lpOutBuffer);
         break;
 
 /* EPP     case IOCTL_CDROM_GET_LAST_SESSION: */
 
     case IOCTL_CDROM_READ_Q_CHANNEL:
         sz = sizeof(SUB_Q_CHANNEL_DATA);
-        if (in_buffer == NULL || in_size < sizeof(CDROM_SUB_Q_DATA_FORMAT))
+        if (lpInBuffer == NULL || nInBufferSize < sizeof(CDROM_SUB_Q_DATA_FORMAT))
             status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_ReadQChannel(dev, fd, in_buffer, out_buffer);
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_ReadQChannel(dev, fd, lpInBuffer, lpOutBuffer);
         break;
 
     case IOCTL_CDROM_READ_TOC:
         sz = sizeof(CDROM_TOC);
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_ReadTOC(dev, fd, out_buffer);
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_ReadTOC(dev, fd, lpOutBuffer);
         break;
 
 /* EPP     case IOCTL_CDROM_READ_TOC_EX: */
 
     case IOCTL_CDROM_PAUSE_AUDIO:
         sz = 0;
-        if (in_buffer != NULL || in_size != 0 || out_buffer != NULL || out_size != 0)
+        if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)
             status = STATUS_INVALID_PARAMETER;
         else status = CDROM_PauseAudio(fd);
         break;
     case IOCTL_CDROM_PLAY_AUDIO_MSF:
         sz = 0;
-        if (out_buffer != NULL || out_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (in_size < sizeof(CDROM_PLAY_AUDIO_MSF)) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_PlayAudioMSF(fd, in_buffer);
+        if (lpOutBuffer != NULL || nOutBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nInBufferSize < sizeof(CDROM_PLAY_AUDIO_MSF)) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_PlayAudioMSF(fd, lpInBuffer);
         break;
     case IOCTL_CDROM_RESUME_AUDIO:
         sz = 0;
-        if (in_buffer != NULL || in_size != 0 || out_buffer != NULL || out_size != 0)
+        if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)
             status = STATUS_INVALID_PARAMETER;
         else status = CDROM_ResumeAudio(fd);
         break;
     case IOCTL_CDROM_SEEK_AUDIO_MSF:
         sz = 0;
-        if (out_buffer != NULL || out_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (in_size < sizeof(CDROM_SEEK_AUDIO_MSF)) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_SeekAudioMSF(dev, fd, in_buffer);
+        if (lpOutBuffer != NULL || nOutBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nInBufferSize < sizeof(CDROM_SEEK_AUDIO_MSF)) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_SeekAudioMSF(dev, fd, lpInBuffer);
         break;
     case IOCTL_CDROM_STOP_AUDIO:
         sz = 0;
 	CDROM_ClearCacheEntry(dev); /* Maybe intention is to change media */
-        if (in_buffer != NULL || in_size != 0 || out_buffer != NULL || out_size != 0)
+        if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)
             status = STATUS_INVALID_PARAMETER;
         else status = CDROM_StopAudio(fd);
         break;
     case IOCTL_CDROM_GET_VOLUME:
         sz = sizeof(VOLUME_CONTROL);
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_GetVolume(fd, out_buffer);
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_GetVolume(fd, lpOutBuffer);
         break;
     case IOCTL_CDROM_SET_VOLUME:
         sz = 0;
 	CDROM_ClearCacheEntry(dev);
-        if (in_buffer == NULL || in_size < sizeof(VOLUME_CONTROL) || out_buffer != NULL)
+        if (lpInBuffer == NULL || nInBufferSize < sizeof(VOLUME_CONTROL) || lpOutBuffer != NULL)
             status = STATUS_INVALID_PARAMETER;
-        else status = CDROM_SetVolume(fd, in_buffer);
+        else status = CDROM_SetVolume(fd, lpInBuffer);
         break;
     case IOCTL_CDROM_RAW_READ:
         sz = 0;
-        if (in_size < sizeof(RAW_READ_INFO)) status = STATUS_INVALID_PARAMETER;
-        else if (out_buffer == NULL) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_RawRead(fd, in_buffer, out_buffer,
-                                    out_size, &sz);
+        if (nInBufferSize < sizeof(RAW_READ_INFO)) status = STATUS_INVALID_PARAMETER;
+        else if (lpOutBuffer == NULL) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_RawRead(fd, lpInBuffer, lpOutBuffer,
+                                    nOutBufferSize, &sz);
         break;
     case IOCTL_SCSI_GET_ADDRESS:
         sz = sizeof(SCSI_ADDRESS);
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_GetAddress(fd, out_buffer);
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_GetAddress(fd, lpOutBuffer);
         break;
     case IOCTL_SCSI_PASS_THROUGH_DIRECT:
         sz = sizeof(SCSI_PASS_THROUGH_DIRECT);
-        if (out_buffer == NULL) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sizeof(SCSI_PASS_THROUGH_DIRECT)) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_ScsiPassThroughDirect(fd, out_buffer);
+        if (lpOutBuffer == NULL) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sizeof(SCSI_PASS_THROUGH_DIRECT)) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_ScsiPassThroughDirect(fd, lpOutBuffer);
         break;
     case IOCTL_SCSI_PASS_THROUGH:
         sz = sizeof(SCSI_PASS_THROUGH);
-        if (out_buffer == NULL) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sizeof(SCSI_PASS_THROUGH)) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_ScsiPassThrough(fd, out_buffer);
+        if (lpOutBuffer == NULL) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sizeof(SCSI_PASS_THROUGH)) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_ScsiPassThrough(fd, lpOutBuffer);
         break;
     case IOCTL_SCSI_GET_CAPABILITIES:
         sz = sizeof(IO_SCSI_CAPABILITIES);
-        if (out_buffer == NULL) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sizeof(IO_SCSI_CAPABILITIES)) status = STATUS_BUFFER_TOO_SMALL;
-        else status = CDROM_ScsiGetCaps(fd, out_buffer);
+        if (lpOutBuffer == NULL) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sizeof(IO_SCSI_CAPABILITIES)) status = STATUS_BUFFER_TOO_SMALL;
+        else status = CDROM_ScsiGetCaps(fd, lpOutBuffer);
         break;
     case IOCTL_DVD_START_SESSION:
         sz = sizeof(DVD_SESSION_ID);
-        if (out_buffer == NULL) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
+        if (lpOutBuffer == NULL) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
         else
         {
-            TRACE("before in 0x%08x out 0x%08x\n",(in_buffer)?*(PDVD_SESSION_ID)in_buffer:0,
-                  *(PDVD_SESSION_ID)out_buffer);
-            status = DVD_StartSession(fd, in_buffer, out_buffer);
-            TRACE("before in 0x%08x out 0x%08x\n",(in_buffer)?*(PDVD_SESSION_ID)in_buffer:0,
-                  *(PDVD_SESSION_ID)out_buffer);
+            TRACE("before in 0x%08x out 0x%08x\n",(lpInBuffer)?*(PDVD_SESSION_ID)lpInBuffer:0,
+                  *(PDVD_SESSION_ID)lpOutBuffer);
+            status = DVD_StartSession(fd, lpInBuffer, lpOutBuffer);
+            TRACE("before in 0x%08x out 0x%08x\n",(lpInBuffer)?*(PDVD_SESSION_ID)lpInBuffer:0,
+                  *(PDVD_SESSION_ID)lpOutBuffer);
         }
         break;
     case IOCTL_DVD_END_SESSION:
         sz = sizeof(DVD_SESSION_ID);
-        if ((in_buffer == NULL) ||  (in_size < sz))status = STATUS_INVALID_PARAMETER;
-        else status = DVD_EndSession(fd, in_buffer);
+        if ((lpInBuffer == NULL) ||  (nInBufferSize < sz))status = STATUS_INVALID_PARAMETER;
+        else status = DVD_EndSession(fd, lpInBuffer);
         break;
     case IOCTL_DVD_SEND_KEY:
         sz = 0;
-        if (!in_buffer ||
-            (((PDVD_COPY_PROTECT_KEY)in_buffer)->KeyLength != in_size))
+        if (!lpInBuffer ||
+            (((PDVD_COPY_PROTECT_KEY)lpInBuffer)->KeyLength != nInBufferSize))
             status = STATUS_INVALID_PARAMETER;
         else
         {
             TRACE("doing DVD_SendKey\n");
-            status = DVD_SendKey(fd, in_buffer);
+            status = DVD_SendKey(fd, lpInBuffer);
         }
         break;
     case IOCTL_DVD_READ_KEY:
-        if (!in_buffer ||
-            (((PDVD_COPY_PROTECT_KEY)in_buffer)->KeyLength != in_size))
+        if (!lpInBuffer ||
+            (((PDVD_COPY_PROTECT_KEY)lpInBuffer)->KeyLength != nInBufferSize))
             status = STATUS_INVALID_PARAMETER;
-        else if (in_buffer !=out_buffer) status = STATUS_BUFFER_TOO_SMALL;
+        else if (lpInBuffer !=lpOutBuffer) status = STATUS_BUFFER_TOO_SMALL;
         else
         {
             TRACE("doing DVD_READ_KEY\n");
-            sz = ((PDVD_COPY_PROTECT_KEY)in_buffer)->KeyLength;
-            status = DVD_ReadKey(fd, in_buffer);
+            sz = ((PDVD_COPY_PROTECT_KEY)lpInBuffer)->KeyLength;
+            status = DVD_ReadKey(fd, lpInBuffer);
         }
         break;
     case IOCTL_DVD_GET_REGION:
         sz = sizeof(DVD_REGION);
-        if (in_buffer != NULL || in_size != 0) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
+        if (lpInBuffer != NULL || nInBufferSize != 0) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz) status = STATUS_BUFFER_TOO_SMALL;
         else
         {
             TRACE("doing DVD_Get_REGION\n");
-            status = DVD_GetRegion(fd, out_buffer);
+            status = DVD_GetRegion(fd, lpOutBuffer);
         }
         break;
     case IOCTL_DVD_READ_STRUCTURE:
-        sz = DVD_ReadStructureSize(in_buffer, in_size);
-        if (in_buffer == NULL || in_size != sizeof(DVD_READ_STRUCTURE)) status = STATUS_INVALID_PARAMETER;
-        else if (out_size < sz || !out_buffer) status = STATUS_BUFFER_TOO_SMALL;
+        sz = DVD_ReadStructureSize(lpInBuffer, nInBufferSize);
+        if (lpInBuffer == NULL || nInBufferSize != sizeof(DVD_READ_STRUCTURE)) status = STATUS_INVALID_PARAMETER;
+        else if (nOutBufferSize < sz || !lpOutBuffer) status = STATUS_BUFFER_TOO_SMALL;
         else
         {
             TRACE("doing DVD_READ_STRUCTURE\n");
-            status = DVD_ReadStructure(fd, in_buffer, out_buffer);
+            status = DVD_ReadStructure(fd, lpInBuffer, lpOutBuffer);
         }
         break;
 
     case IOCTL_SCSI_GET_INQUIRY_DATA:
         sz = INQ_REPLY_LEN;
-        status = GetInquiryData(fd, out_buffer, out_size);
+        status = GetInquiryData(fd, lpOutBuffer, nOutBufferSize);
         break;
 
     default:
@@ -3130,8 +3142,8 @@ NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc
     }
     if (needs_close) close( fd );
  error:
-    io->u.Status = status;
-    io->Information = sz;
-    if (event) NtSetEvent(event, NULL);
+    piosb->u.Status = status;
+    piosb->Information = sz;
+    if (hEvent) NtSetEvent(hEvent, NULL);
     return status;
 }

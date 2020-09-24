@@ -24,6 +24,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wine/debug.h"
+#include "wine/library.h"
 
 #include "nvencodeapi.h"
 

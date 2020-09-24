@@ -60,6 +60,8 @@ static const struct object_ops symlink_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -133,9 +135,9 @@ static void symlink_destroy( struct object *obj )
     free( symlink->target );
 }
 
-struct object *create_symlink( struct object *root, const struct unicode_str *name,
-                               unsigned int attr, const struct unicode_str *target,
-                               const struct security_descriptor *sd )
+static struct symlink *create_symlink( struct object *root, const struct unicode_str *name,
+                                       unsigned int attr, const struct unicode_str *target,
+                                       const struct security_descriptor *sd )
 {
     struct symlink *symlink;
 
@@ -144,14 +146,20 @@ struct object *create_symlink( struct object *root, const struct unicode_str *na
         set_error( STATUS_INVALID_PARAMETER );
         return NULL;
     }
-    if (!(symlink = create_named_object( root, &symlink_ops, name, attr, sd ))) return NULL;
-    if (get_error() != STATUS_OBJECT_NAME_EXISTS && !(symlink->target = memdup( target->str, target->len )))
+    if ((symlink = create_named_object( root, &symlink_ops, name, attr, sd )) &&
+        (get_error() != STATUS_OBJECT_NAME_EXISTS))
     {
-        release_object( symlink );
-        return NULL;
+        if ((symlink->target = memdup( target->str, target->len )))
+        {
+            symlink->len = target->len;
+        }
+        else
+        {
+            release_object( symlink );
+            symlink = NULL;
+        }
     }
-    symlink->len = target->len;
-    return &symlink->obj;
+    return symlink;
 }
 
 /* create a symlink pointing to an existing object */
@@ -183,7 +191,7 @@ struct object *create_obj_symlink( struct object *root, const struct unicode_str
 /* create a symbolic link object */
 DECL_HANDLER(create_symlink)
 {
-    struct object *symlink;
+    struct symlink *symlink;
     struct unicode_str name, target;
     struct object *root;
     const struct security_descriptor *sd;

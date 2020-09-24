@@ -53,9 +53,9 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #define NULL_PTR_ERR MAKE_HRESULT(SEVERITY_ERROR, FACILITY_WIN32, RPC_X_NULL_REF_POINTER)
 
-static const REFERENCE_TIME DefaultPeriod = 100000;
-static const REFERENCE_TIME MinimumPeriod = 50000;
-#define                     EXTRA_SAFE_RT   40000
+static const REFERENCE_TIME DefaultPeriod = 4000;
+static const REFERENCE_TIME MinimumPeriod = 2000;
+#define                     EXTRA_SAFE_RT   1000
 
 struct ACImpl;
 typedef struct ACImpl ACImpl;

@@ -523,6 +523,7 @@ static void output_module16( DLLSPEC *spec )
         entry_point->flags = FLAG_REGISTER;
         entry_point->name = NULL;
         entry_point->link_name = xstrdup( spec->init_func );
+        entry_point->impl_name = NULL;
         entry_point->export_name = NULL;
         entry_point->u.func.nb_args = 0;
         assert( !spec->ordinals[0] );

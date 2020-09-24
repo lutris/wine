@@ -60,6 +60,8 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
+WINE_DECLARE_DEBUG_CHANNEL(relay);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 typedef struct
 {
@@ -87,6 +89,105 @@ const WCHAR DIR_System[] = {'C',':','\\','w','i','n','d','o','w','s',
 #define PDB32_WIN32S_PROC   0x8000  /* Win32s process */
 
 static DEP_SYSTEM_POLICY_TYPE system_DEP_policy = OptIn;
+
+#ifdef __i386__
+extern DWORD call_process_entry( PEB *peb, LPTHREAD_START_ROUTINE entry );
+__ASM_GLOBAL_FUNC( call_process_entry,
+                    "pushl %ebp\n\t"
+                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                    "movl %esp,%ebp\n\t"
+                    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                    "pushl %ebx\n\t"
+                    __ASM_CFI(".cfi_rel_offset %ebx,-4\n\t")
+                    "movl 8(%ebp),%ebx\n\t"
+                    /* deliberately mis-align the stack by 8, Doom 3 needs this */
+                    "pushl 4(%ebp)\n\t"  /* Driller expects readable address at this offset */
+                    "pushl 4(%ebp)\n\t"
+                    "pushl %ebx\n\t"
+                    "call *12(%ebp)\n\t"
+                    "leal -4(%ebp),%esp\n\t"
+                    "popl %ebx\n\t"
+                    __ASM_CFI(".cfi_same_value %ebx\n\t")
+                    "popl %ebp\n\t"
+                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                    __ASM_CFI(".cfi_same_value %ebp\n\t")
+                    "ret" )
+
+__ASM_GLOBAL_FUNC( __wine_start_process,
+                   "pushl %ebp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                   __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                   "movl %esp,%ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                   "pushl %ebx\n\t"  /* arg */
+                   "pushl %eax\n\t"  /* entry */
+                   "call " __ASM_NAME("start_process") )
+#else
+static inline DWORD call_process_entry( PEB *peb, LPTHREAD_START_ROUTINE entry )
+{
+    return entry( peb );
+}
+#endif
+
+extern const char * CDECL wine_get_version(void);
+/***********************************************************************
+ *           __wine_start_process
+ *
+ * Startup routine of a new process. Runs on the new process stack.
+ */
+#ifdef __i386__
+void CDECL start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
+#else
+void CDECL __wine_start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
+#endif
+{
+    BOOL being_debugged;
+
+    if (!entry)
+    {
+        ERR( "%s doesn't have an entry point, it cannot be executed\n",
+             debugstr_w(peb->ProcessParameters->ImagePathName.Buffer) );
+        ExitThread( 1 );
+    }
+
+    TRACE_(relay)( "\1Starting process %s (entryproc=%p)\n",
+                   debugstr_w(peb->ProcessParameters->ImagePathName.Buffer), entry );
+
+    __TRY
+    {
+        if (CreateEventA(0, 0, 0, "__winestaging_warn_event") && GetLastError() != ERROR_ALREADY_EXISTS)
+        {
+            FIXME_(winediag)("Wine TkG %s is a testing version containing experimental patches.\n", wine_get_version());
+            FIXME_(winediag)("Please don't report bugs about it on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead.\n");
+        }
+        else
+            WARN_(winediag)("Wine TkG %s is a testing version containing experimental patches.\n", wine_get_version());
+
+
+        if (!CheckRemoteDebuggerPresent( GetCurrentProcess(), &being_debugged ))
+            being_debugged = FALSE;
+
+        SetLastError( 0 );  /* clear error code */
+        if (being_debugged) DbgBreakPoint();
+    }
+    __EXCEPT_ALL
+    {
+        /* do nothing */
+    }
+    __ENDTRY
+
+    __TRY
+    {
+        ExitThread( call_process_entry( peb, entry ));
+    }
+    __EXCEPT(UnhandledExceptionFilter)
+    {
+        TerminateProcess( GetCurrentProcess(), GetExceptionCode() );
+    }
+    __ENDTRY
+    abort();  /* should not be reached */
+}
 
 /***********************************************************************
  *           wait_input_idle
@@ -204,6 +305,7 @@ DWORD WINAPI LoadModule( LPCSTR name, LPVOID paramBlock )
     HeapFree( GetProcessHeap(), 0, cmdline );
     return ret;
 }
+
 
 /***********************************************************************
  *           ExitProcess   (KERNEL32.@)
@@ -761,6 +863,15 @@ WORD WINAPI GetMaximumProcessorGroupCount(void)
     return 1;
 }
 
+
+/***********************************************************************
+ *           GetEnabledXStateFeatures (KERNEL32.@)
+ */
+DWORD64 WINAPI GetEnabledXStateFeatures(void)
+{
+    FIXME("\n");
+    return 0;
+}
 
 /***********************************************************************
  *           GetFirmwareEnvironmentVariableA     (KERNEL32.@)

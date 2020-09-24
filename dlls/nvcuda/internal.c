@@ -25,6 +25,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "wine/library.h"
 #include "wine/debug.h"
 #include "wine/list.h"
 #include "cuda.h"

@@ -20,6 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
+#include <ctype.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -27,69 +31,24 @@
 #include <string.h>
 
 #include "windef.h"
-#include "winbase.h"
-#include "winnls.h"
 #include "winternl.h"
-#include "ntdll_misc.h"
-
-
-/* same as wctypes except for TAB, which doesn't have C1_BLANK for some reason... */
-static const unsigned short ctypes[257] =
-{
-    /* -1 */
-    0x0000,
-    /* 00 */
-    0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020,
-    0x0020, 0x0028, 0x0028, 0x0028, 0x0028, 0x0028, 0x0020, 0x0020,
-    /* 10 */
-    0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020,
-    0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020,
-    /* 20 */
-    0x0048, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010,
-    0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010,
-    /* 30 */
-    0x0084, 0x0084, 0x0084, 0x0084, 0x0084, 0x0084, 0x0084, 0x0084,
-    0x0084, 0x0084, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010,
-    /* 40 */
-    0x0010, 0x0181, 0x0181, 0x0181, 0x0181, 0x0181, 0x0181, 0x0101,
-    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
-    /* 50 */
-    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
-    0x0101, 0x0101, 0x0101, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010,
-    /* 60 */
-    0x0010, 0x0182, 0x0182, 0x0182, 0x0182, 0x0182, 0x0182, 0x0102,
-    0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102,
-    /* 70 */
-    0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102,
-    0x0102, 0x0102, 0x0102, 0x0010, 0x0010, 0x0010, 0x0010, 0x0020
-};
 
 
 /*********************************************************************
  *                  memchr   (NTDLL.@)
  */
-void * __cdecl memchr( const void *ptr, int c, size_t n )
+void * __cdecl NTDLL_memchr( const void *ptr, int c, size_t n )
 {
-    const unsigned char *p = ptr;
-
-    for (p = ptr; n; n--, p++) if (*p == c) return (void *)(ULONG_PTR)p;
-    return NULL;
+    return memchr( ptr, c, n );
 }
 
 
 /*********************************************************************
  *                  memcmp   (NTDLL.@)
  */
-int __cdecl memcmp( const void *ptr1, const void *ptr2, size_t n )
+int __cdecl NTDLL_memcmp( const void *ptr1, const void *ptr2, size_t n )
 {
-    const unsigned char *p1, *p2;
-
-    for (p1 = ptr1, p2 = ptr2; n; n--, p1++, p2++)
-    {
-        if (*p1 < *p2) return -1;
-        if (*p1 > *p2) return 1;
-    }
-    return 0;
+    return memcmp( ptr1, ptr2, n );
 }
 
 
@@ -99,218 +58,153 @@ int __cdecl memcmp( const void *ptr1, const void *ptr2, size_t n )
  * NOTES
  *  Behaves like memmove.
  */
-void * __cdecl memcpy( void *dst, const void *src, size_t n )
+void * __cdecl NTDLL_memcpy( void *dst, const void *src, size_t n )
 {
-    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
-    const unsigned char *s = src;
-
-    if ((size_t)dst - (size_t)src >= n)
-    {
-        while (n--) *d++ = *s++;
-    }
-    else
-    {
-        d += n - 1;
-        s += n - 1;
-        while (n--) *d-- = *s--;
-    }
-    return dst;
+    return memmove( dst, src, n );
 }
 
 
 /*********************************************************************
  *                  memmove   (NTDLL.@)
  */
-void * __cdecl memmove( void *dst, const void *src, size_t n )
+void * __cdecl NTDLL_memmove( void *dst, const void *src, size_t n )
 {
-    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
-    const unsigned char *s = src;
-
-    if ((size_t)dst - (size_t)src >= n)
-    {
-        while (n--) *d++ = *s++;
-    }
-    else
-    {
-        d += n - 1;
-        s += n - 1;
-        while (n--) *d-- = *s--;
-    }
-    return dst;
+    return memmove( dst, src, n );
 }
 
 
 /*********************************************************************
  *                  memset   (NTDLL.@)
  */
-void * __cdecl memset( void *dst, int c, size_t n )
+void * __cdecl NTDLL_memset( void *dst, int c, size_t n )
 {
-    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
-    while (n--) *d++ = c;
-    return dst;
+    return memset( dst, c, n );
 }
 
 
 /*********************************************************************
  *                  strcat   (NTDLL.@)
  */
-char * __cdecl strcat( char *dst, const char *src )
+char * __cdecl NTDLL_strcat( char *dst, const char *src )
 {
-    char *d = dst;
-    while (*d) d++;
-    while ((*d++ = *src++));
-    return dst;
+    return strcat( dst, src );
 }
 
 
 /*********************************************************************
  *                  strchr   (NTDLL.@)
  */
-char * __cdecl strchr( const char *str, int c )
+char * __cdecl NTDLL_strchr( const char *str, int c )
 {
-    do { if (*str == (char)c) return (char *)(ULONG_PTR)str; } while (*str++);
-    return NULL;
+    return strchr( str, c );
 }
 
 
 /*********************************************************************
  *                  strcmp   (NTDLL.@)
  */
-int __cdecl strcmp( const char *str1, const char *str2 )
+int __cdecl NTDLL_strcmp( const char *str1, const char *str2 )
 {
-    while (*str1 && *str1 == *str2) { str1++; str2++; }
-    if ((unsigned char)*str1 > (unsigned char)*str2) return 1;
-    if ((unsigned char)*str1 < (unsigned char)*str2) return -1;
-    return 0;
+    return strcmp( str1, str2 );
 }
 
 
 /*********************************************************************
  *                  strcpy   (NTDLL.@)
  */
-char * __cdecl strcpy( char *dst, const char *src )
+char * __cdecl NTDLL_strcpy( char *dst, const char *src )
 {
-    char *d = dst;
-    while ((*d++ = *src++));
-    return dst;
+    return strcpy( dst, src );
 }
 
 
 /*********************************************************************
  *                  strcspn   (NTDLL.@)
  */
-size_t __cdecl strcspn( const char *str, const char *reject )
+size_t __cdecl NTDLL_strcspn( const char *str, const char *reject )
 {
-    const char *ptr;
-    for (ptr = str; *ptr; ptr++) if (strchr( reject, *ptr )) break;
-    return ptr - str;
+    return strcspn( str, reject );
 }
 
 
 /*********************************************************************
  *                  strlen   (NTDLL.@)
  */
-size_t __cdecl strlen( const char *str )
+size_t __cdecl NTDLL_strlen( const char *str )
 {
-    const char *s = str;
-    while (*s) s++;
-    return s - str;
+    return strlen( str );
 }
 
 
 /*********************************************************************
  *                  strncat   (NTDLL.@)
  */
-char * __cdecl strncat( char *dst, const char *src, size_t len )
+char * __cdecl NTDLL_strncat( char *dst, const char *src, size_t len )
 {
-    char *d = dst;
-    while (*d) d++;
-    for ( ; len && *src; d++, src++, len--) *d = *src;
-    *d = 0;
-    return dst;
+    return strncat( dst, src, len );
 }
 
 
 /*********************************************************************
  *                  strncmp   (NTDLL.@)
  */
-int __cdecl strncmp( const char *str1, const char *str2, size_t len )
+int __cdecl NTDLL_strncmp( const char *str1, const char *str2, size_t len )
 {
-    if (!len) return 0;
-    while (--len && *str1 && *str1 == *str2) { str1++; str2++; }
-    return (unsigned char)*str1 - (unsigned char)*str2;
+    return strncmp( str1, str2, len );
 }
 
 
 /*********************************************************************
  *                  strncpy   (NTDLL.@)
  */
-#undef strncpy
-char * __cdecl strncpy( char *dst, const char *src, size_t len )
+char * __cdecl NTDLL_strncpy( char *dst, const char *src, size_t len )
 {
-    char *d;
-    for (d = dst; len && *src; d++, src++, len--) *d = *src;
-    while (len--) *d++ = 0;
-    return dst;
+    return strncpy( dst, src, len );
 }
 
 
 /*********************************************************************
  *                  strnlen   (NTDLL.@)
  */
-size_t __cdecl strnlen( const char *str, size_t len )
+size_t __cdecl NTDLL_strnlen( const char *str, size_t len )
 {
-    const char *s = str;
-    for (s = str; len && *s; s++, len--) ;
-    return s - str;
+    return strnlen( str, len );
 }
 
 
 /*********************************************************************
  *                  strpbrk   (NTDLL.@)
  */
-char * __cdecl strpbrk( const char *str, const char *accept )
+char * __cdecl NTDLL_strpbrk( const char *str, const char *accept )
 {
-    for ( ; *str; str++) if (strchr( accept, *str )) return (char *)(ULONG_PTR)str;
-    return NULL;
+    return strpbrk( str, accept );
 }
 
 
 /*********************************************************************
  *                  strrchr   (NTDLL.@)
  */
-char * __cdecl strrchr( const char *str, int c )
+char * __cdecl NTDLL_strrchr( const char *str, int c )
 {
-    char *ret = NULL;
-    do { if (*str == (char)c) ret = (char *)(ULONG_PTR)str; } while (*str++);
-    return ret;
+    return strrchr( str, c );
 }
 
 
 /*********************************************************************
  *                  strspn   (NTDLL.@)
  */
-size_t __cdecl strspn( const char *str, const char *accept )
+size_t __cdecl NTDLL_strspn( const char *str, const char *accept )
 {
-    const char *ptr;
-    for (ptr = str; *ptr; ptr++) if (!strchr( accept, *ptr )) break;
-    return ptr - str;
+    return strspn( str, accept );
 }
 
 
 /*********************************************************************
  *                  strstr   (NTDLL.@)
  */
-char * __cdecl strstr( const char *str, const char *sub )
+char * __cdecl NTDLL_strstr( const char *haystack, const char *needle )
 {
-    while (*str)
-    {
-        const char *p1 = str, *p2 = sub;
-        while (*p1 && *p2 && *p1 == *p2) { p1++; p2++; }
-        if (!*p2) return (char *)str;
-        str++;
-    }
-    return NULL;
+    return strstr( haystack, needle );
 }
 
 
@@ -319,17 +213,14 @@ char * __cdecl strstr( const char *str, const char *sub )
  */
 void * __cdecl _memccpy( void *dst, const void *src, int c, size_t n )
 {
-    unsigned char *d = dst;
-    const unsigned char *s = src;
-    while (n--) if ((*d++ = *s++) == (unsigned char)c) return d;
-    return NULL;
+    return memccpy( dst, src, c, n );
 }
 
 
 /*********************************************************************
  *                  tolower   (NTDLL.@)
  */
-int __cdecl tolower( int c )
+int __cdecl NTDLL_tolower( int c )
 {
     return (char)c >= 'A' && (char)c <= 'Z' ? c - 'A' + 'a' : c;
 }
@@ -353,13 +244,12 @@ int __cdecl tolower( int c )
  *  Any Nul characters in s1 or s2 are ignored. This function always
  *  compares up to len bytes or the first place where s1 and s2 differ.
  */
-int __cdecl _memicmp( const void *str1, const void *str2, size_t len )
+INT __cdecl _memicmp( LPCSTR s1, LPCSTR s2, DWORD len )
 {
-    const unsigned char *s1 = str1, *s2 = str2;
     int ret = 0;
     while (len--)
     {
-        if ((ret = tolower(*s1) - tolower(*s2))) break;
+        if ((ret = NTDLL_tolower(*s1) - NTDLL_tolower(*s2))) break;
         s1++;
         s2++;
     }
@@ -376,8 +266,8 @@ int __cdecl _strnicmp( LPCSTR str1, LPCSTR str2, size_t n )
 
     while (n--)
     {
-        l1 = (unsigned char)tolower(*str1);
-        l2 = (unsigned char)tolower(*str2);
+        l1 = (unsigned char)NTDLL_tolower(*str1);
+        l2 = (unsigned char)NTDLL_tolower(*str2);
         if (l1 != l2)
         {
             if (sizeof(void *) > sizeof(int)) return l1 - l2;
@@ -436,7 +326,7 @@ LPSTR __cdecl _strupr( LPSTR str )
 LPSTR __cdecl _strlwr( LPSTR str )
 {
     LPSTR ret = str;
-    for ( ; *str; str++) *str = tolower(*str);
+    for ( ; *str; str++) *str = NTDLL_tolower(*str);
     return ret;
 }
 
@@ -444,7 +334,7 @@ LPSTR __cdecl _strlwr( LPSTR str )
 /*********************************************************************
  *                  toupper   (NTDLL.@)
  */
-int __cdecl toupper( int c )
+int __cdecl NTDLL_toupper( int c )
 {
     char str[2], *p = str;
     WCHAR wc;
@@ -463,106 +353,106 @@ int __cdecl toupper( int c )
 /*********************************************************************
  *                  isalnum   (NTDLL.@)
  */
-int __cdecl isalnum( int c )
+int __cdecl NTDLL_isalnum( int c )
 {
-    return ctypes[c + 1] & (C1_LOWER | C1_UPPER | C1_DIGIT);
+    return isalnum( c );
 }
 
 
 /*********************************************************************
  *                  isalpha   (NTDLL.@)
  */
-int __cdecl isalpha( int c )
+int __cdecl NTDLL_isalpha( int c )
 {
-    return ctypes[c + 1] & (C1_LOWER | C1_UPPER);
+    return isalpha( c );
 }
 
 
 /*********************************************************************
  *                  iscntrl   (NTDLL.@)
  */
-int __cdecl iscntrl( int c )
+int __cdecl NTDLL_iscntrl( int c )
 {
-    return ctypes[c + 1] & C1_CNTRL;
+    return iscntrl( c );
 }
 
 
 /*********************************************************************
  *                  isdigit   (NTDLL.@)
  */
-int __cdecl isdigit( int c )
+int __cdecl NTDLL_isdigit( int c )
 {
-    return ctypes[c + 1] & C1_DIGIT;
+    return isdigit( c );
 }
 
 
 /*********************************************************************
  *                  isgraph   (NTDLL.@)
  */
-int __cdecl isgraph( int c )
+int __cdecl NTDLL_isgraph( int c )
 {
-    return ctypes[c + 1] & (C1_LOWER | C1_UPPER | C1_DIGIT | C1_PUNCT);
+    return isgraph( c );
 }
 
 
 /*********************************************************************
  *                  islower   (NTDLL.@)
  */
-int __cdecl islower( int c )
+int __cdecl NTDLL_islower( int c )
 {
-    return ctypes[c + 1] & C1_LOWER;
+    return islower( c );
 }
 
 
 /*********************************************************************
  *                  isprint   (NTDLL.@)
  */
-int __cdecl isprint( int c )
+int __cdecl NTDLL_isprint( int c )
 {
-    return ctypes[c + 1] & (C1_LOWER | C1_UPPER | C1_DIGIT | C1_PUNCT | C1_BLANK);
+    return isprint( c );
 }
 
 
 /*********************************************************************
  *                  ispunct   (NTDLL.@)
  */
-int __cdecl ispunct( int c )
+int __cdecl NTDLL_ispunct( int c )
 {
-    return ctypes[c + 1] & C1_PUNCT;
+    return ispunct( c );
 }
 
 
 /*********************************************************************
  *                  isspace   (NTDLL.@)
  */
-int __cdecl isspace( int c )
+int __cdecl NTDLL_isspace( int c )
 {
-    return ctypes[c + 1] & C1_SPACE;
+    return isspace( c );
 }
 
 
 /*********************************************************************
  *                  isupper   (NTDLL.@)
  */
-int __cdecl isupper( int c )
+int __cdecl NTDLL_isupper( int c )
 {
-    return ctypes[c + 1] & C1_UPPER;
+    return isupper( c );
 }
 
 
 /*********************************************************************
  *                  isxdigit   (NTDLL.@)
  */
-int __cdecl isxdigit( int c )
+int __cdecl NTDLL_isxdigit( int c )
 {
-    return ctypes[c + 1] & C1_XDIGIT;
+    return isxdigit( c );
 }
 
 
 /*********************************************************************
  *		__isascii (NTDLL.@)
  */
-int CDECL __isascii(int c)
+int CDECL NTDLL___isascii(int c)
 {
     return (unsigned)c < 0x80;
 }
@@ -571,7 +461,7 @@ int CDECL __isascii(int c)
 /*********************************************************************
  *		__toascii (NTDLL.@)
  */
-int CDECL __toascii(int c)
+int CDECL NTDLL___toascii(int c)
 {
     return (unsigned)c & 0x7f;
 }
@@ -580,7 +470,7 @@ int CDECL __toascii(int c)
 /*********************************************************************
  *		__iscsym (NTDLL.@)
  */
-int CDECL __iscsym(int c)
+int CDECL NTDLL___iscsym(int c)
 {
     return (c < 127 && (isalnum(c) || c == '_'));
 }
@@ -589,7 +479,7 @@ int CDECL __iscsym(int c)
 /*********************************************************************
  *		__iscsymf (NTDLL.@)
  */
-int CDECL __iscsymf(int c)
+int CDECL NTDLL___iscsymf(int c)
 {
     return (c < 127 && (isalpha(c) || c == '_'));
 }
@@ -598,7 +488,7 @@ int CDECL __iscsymf(int c)
 /*********************************************************************
  *		_toupper (NTDLL.@)
  */
-int CDECL _toupper(int c)
+int CDECL NTDLL__toupper(int c)
 {
     return c - 0x20;  /* sic */
 }
@@ -607,108 +497,27 @@ int CDECL _toupper(int c)
 /*********************************************************************
  *		_tolower (NTDLL.@)
  */
-int CDECL _tolower(int c)
+int CDECL NTDLL__tolower(int c)
 {
     return c + 0x20;  /* sic */
 }
 
 
-static int char_to_int( char c )
-{
-    if ('0' <= c && c <= '9') return c - '0';
-    if ('A' <= c && c <= 'Z') return c - 'A' + 10;
-    if ('a' <= c && c <= 'z') return c - 'a' + 10;
-    return -1;
-}
-
 /*********************************************************************
  *                  strtol   (NTDLL.@)
  */
-__msvcrt_long __cdecl strtol( const char *s, char **end, int base )
+LONG __cdecl NTDLL_strtol( const char *nptr, char **endptr, int base )
 {
-    BOOL negative = FALSE, empty = TRUE;
-    LONG ret = 0;
-
-    if (base < 0 || base == 1 || base > 36) return 0;
-    if (end) *end = (char *)s;
-    while (isspace(*s)) s++;
-
-    if (*s == '-')
-    {
-        negative = TRUE;
-        s++;
-    }
-    else if (*s == '+') s++;
-
-    if ((base == 0 || base == 16) && !char_to_int( *s ) && (s[1] == 'x' || s[1] == 'X'))
-    {
-        base = 16;
-        s += 2;
-    }
-    if (base == 0) base = char_to_int( *s ) ? 10 : 8;
-
-    while (*s)
-    {
-        int v = char_to_int( *s );
-        if (v < 0 || v >= base) break;
-        if (negative) v = -v;
-        s++;
-        empty = FALSE;
-
-        if (!negative && (ret > MAXLONG / base || ret * base > MAXLONG - v))
-            ret = MAXLONG;
-        else if (negative && (ret < (LONG)MINLONG / base || ret * base < (LONG)(MINLONG - v)))
-            ret = MINLONG;
-        else
-            ret = ret * base + v;
-    }
-
-    if (end && !empty) *end = (char *)s;
-    return ret;
+    return strtol( nptr, endptr, base );
 }
 
 
 /*********************************************************************
  *                  strtoul   (NTDLL.@)
  */
-__msvcrt_ulong __cdecl strtoul( const char *s, char **end, int base )
+ULONG __cdecl NTDLL_strtoul( const char *nptr, char **endptr, int base )
 {
-    BOOL negative = FALSE, empty = TRUE;
-    ULONG ret = 0;
-
-    if (base < 0 || base == 1 || base > 36) return 0;
-    if (end) *end = (char *)s;
-    while (isspace(*s)) s++;
-
-    if (*s == '-')
-    {
-        negative = TRUE;
-        s++;
-    }
-    else if (*s == '+') s++;
-
-    if ((base == 0 || base == 16) && !char_to_int( *s ) && (s[1] == 'x' || s[1] == 'X'))
-    {
-        base = 16;
-        s += 2;
-    }
-    if (base == 0) base = char_to_int( *s ) ? 10 : 8;
-
-    while (*s)
-    {
-        int v = char_to_int( *s );
-        if (v < 0 || v >= base) break;
-        s++;
-        empty = FALSE;
-
-        if (ret > MAXDWORD / base || ret * base > MAXDWORD - v)
-            ret = MAXDWORD;
-        else
-            ret = ret * base + v;
-    }
-
-    if (end && !empty) *end = (char *)s;
-    return negative ? -ret : ret;
+    return strtoul( nptr, endptr, base );
 }
 
 
@@ -726,7 +535,10 @@ __msvcrt_ulong __cdecl strtoul( const char *s, char **end, int base )
  *  - Does not check if radix is in the range of 2 to 36.
  *  - If str is NULL it crashes, as the native function does.
  */
-char * __cdecl _ultoa( __msvcrt_ulong value, char *str, int radix )
+char * __cdecl _ultoa(
+    ULONG value,         /* [I] Value to be converted */
+    char *str,           /* [O] Destination for the converted value */
+    int radix)           /* [I] Number base for conversion */
 {
     char buffer[33];
     char *pos;
@@ -765,7 +577,10 @@ char * __cdecl _ultoa( __msvcrt_ulong value, char *str, int radix )
  *  - Does not check if radix is in the range of 2 to 36.
  *  - If str is NULL it crashes, as the native function does.
  */
-char * __cdecl _ltoa( __msvcrt_long value, char *str, int radix )
+char * __cdecl _ltoa(
+    LONG value, /* [I] Value to be converted */
+    char *str,  /* [O] Destination for the converted value */
+    int radix)  /* [I] Number base for conversion */
 {
     ULONG val;
     int negative;
@@ -979,7 +794,7 @@ LONGLONG __cdecl _atoi64( const char *str )
 /*********************************************************************
  *                  atoi   (NTDLL.@)
  */
-int __cdecl atoi( const char *nptr )
+int __cdecl NTDLL_atoi( const char *nptr )
 {
     return _atoi64( nptr );
 }
@@ -988,7 +803,7 @@ int __cdecl atoi( const char *nptr )
 /*********************************************************************
  *                  atol   (NTDLL.@)
  */
-__msvcrt_long __cdecl atol( const char *nptr )
+LONG __cdecl NTDLL_atol( const char *nptr )
 {
     return _atoi64( nptr );
 }
@@ -1007,7 +822,7 @@ static int char2digit( char c, int base )
 }
 
 
-static int vsscanf( const char *str, const char *format, __ms_va_list ap)
+static int NTDLL_vsscanf( const char *str, const char *format, __ms_va_list ap)
 {
     int rd = 0, consumed = 0;
     int nch;
@@ -1442,12 +1257,12 @@ static int vsscanf( const char *str, const char *format, __ms_va_list ap)
 /*********************************************************************
  *                  sscanf   (NTDLL.@)
  */
-int WINAPIV sscanf( const char *str, const char *format, ... )
+int WINAPIV NTDLL_sscanf( const char *str, const char *format, ... )
 {
     int ret;
     __ms_va_list valist;
     __ms_va_start( valist, format );
-    ret = vsscanf( str, format, valist );
+    ret = NTDLL_vsscanf( str, format, valist );
     __ms_va_end( valist );
     return ret;
 }

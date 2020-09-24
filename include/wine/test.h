@@ -30,6 +30,9 @@
 #ifdef __WINE_CONFIG_H
 #error config.h should not be used in Wine tests
 #endif
+#ifdef __WINE_WINE_LIBRARY_H
+#error wine/library.h should not be used in Wine tests
+#endif
 #ifdef __WINE_WINE_UNICODE_H
 #error wine/unicode.h should not be used in Wine tests
 #endif

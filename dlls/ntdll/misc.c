@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <time.h>
 #include <math.h>
 
@@ -32,6 +34,14 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+LPCSTR debugstr_ObjectAttributes(const OBJECT_ATTRIBUTES *oa)
+{
+    if (!oa) return "<null>";
+    return wine_dbg_sprintf( "{name=%s, attr=0x%08x, hRoot=%p, sd=%p}",
+                             debugstr_us(oa->ObjectName), oa->Attributes,
+                             oa->RootDirectory, oa->SecurityDescriptor );
+}
+
 LPCSTR debugstr_us( const UNICODE_STRING *us )
 {
     if (!us) return "<null>";
@@ -39,94 +49,126 @@ LPCSTR debugstr_us( const UNICODE_STRING *us )
 }
 
 /*********************************************************************
+ *                  wine_get_version   (NTDLL.@)
+ */
+const char * CDECL NTDLL_wine_get_version(void)
+{
+    return unix_funcs->get_version();
+}
+
+/*********************************************************************
+ *                  wine_get_build_id   (NTDLL.@)
+ */
+const char * CDECL NTDLL_wine_get_build_id(void)
+{
+    return unix_funcs->get_build_id();
+}
+
+/*********************************************************************
+ *                  wine_get_host_version   (NTDLL.@)
+ */
+void CDECL NTDLL_wine_get_host_version( const char **sysname, const char **release )
+{
+    return unix_funcs->get_host_version( sysname, release );
+}
+
+/*********************************************************************
  *                  abs   (NTDLL.@)
  */
-int CDECL abs( int i )
+int CDECL NTDLL_abs( int i )
 {
-    return i >= 0 ? i : -i;
+    return abs( i );
+}
+
+/*********************************************************************
+ *                  labs   (NTDLL.@)
+ */
+LONG CDECL NTDLL_labs( LONG i )
+{
+    return labs( i );
 }
 
 /*********************************************************************
  *                  atan   (NTDLL.@)
  */
-double CDECL atan( double d )
+double CDECL NTDLL_atan( double d )
 {
-    return unix_funcs->atan( d );
+    return atan( d );
 }
 
 /*********************************************************************
  *                  ceil   (NTDLL.@)
  */
-double CDECL ceil( double d )
+double CDECL NTDLL_ceil( double d )
 {
-    return unix_funcs->ceil( d );
+    return ceil( d );
 }
 
 /*********************************************************************
  *                  cos   (NTDLL.@)
  */
-double CDECL cos( double d )
+double CDECL NTDLL_cos( double d )
 {
-    return unix_funcs->cos( d );
+    return cos( d );
 }
 
 /*********************************************************************
  *                  fabs   (NTDLL.@)
  */
-double CDECL fabs( double d )
+double CDECL NTDLL_fabs( double d )
 {
-    return unix_funcs->fabs( d );
+    return fabs( d );
 }
 
 /*********************************************************************
  *                  floor   (NTDLL.@)
  */
-double CDECL floor( double d )
+double CDECL NTDLL_floor( double d )
 {
-    return unix_funcs->floor( d );
+    return floor( d );
 }
 
 /*********************************************************************
  *                  log   (NTDLL.@)
  */
-double CDECL log( double d )
+double CDECL NTDLL_log( double d )
 {
-    return unix_funcs->log( d );
+    return log( d );
 }
 
 /*********************************************************************
  *                  pow   (NTDLL.@)
  */
-double CDECL pow( double x, double y )
+double CDECL NTDLL_pow( double x, double y )
 {
-    return unix_funcs->pow( x, y );
+    return pow( x, y );
 }
 
 /*********************************************************************
  *                  sin   (NTDLL.@)
  */
-double CDECL sin( double d )
+double CDECL NTDLL_sin( double d )
 {
-    return unix_funcs->sin( d );
+    return sin( d );
 }
 
 /*********************************************************************
  *                  sqrt   (NTDLL.@)
  */
-double CDECL sqrt( double d )
+double CDECL NTDLL_sqrt( double d )
 {
-    return unix_funcs->sqrt( d );
+    return sqrt( d );
 }
 
 /*********************************************************************
  *                  tan   (NTDLL.@)
  */
-double CDECL tan( double d )
+double CDECL NTDLL_tan( double d )
 {
-    return unix_funcs->tan( d );
+    return tan( d );
 }
 
-#if (defined(__GNUC__) || defined(__clang__)) && defined(__i386__)
+#if defined(__GNUC__) && defined(__i386__)
 
 #define FPU_DOUBLE(var) double var; \
     __asm__ __volatile__( "fstpl %0;fwait" : "=m" (var) : )
@@ -137,58 +179,58 @@ double CDECL tan( double d )
 /*********************************************************************
  *		_CIcos (NTDLL.@)
  */
-double CDECL _CIcos(void)
+double CDECL NTDLL__CIcos(void)
 {
     FPU_DOUBLE(x);
-    return cos(x);
+    return NTDLL_cos(x);
 }
 
 /*********************************************************************
  *		_CIlog (NTDLL.@)
  */
-double CDECL _CIlog(void)
+double CDECL NTDLL__CIlog(void)
 {
     FPU_DOUBLE(x);
-    return log(x);
+    return NTDLL_log(x);
 }
 
 /*********************************************************************
  *		_CIpow (NTDLL.@)
  */
-double CDECL _CIpow(void)
+double CDECL NTDLL__CIpow(void)
 {
     FPU_DOUBLES(x,y);
-    return pow(x,y);
+    return NTDLL_pow(x,y);
 }
 
 /*********************************************************************
  *		_CIsin (NTDLL.@)
  */
-double CDECL _CIsin(void)
+double CDECL NTDLL__CIsin(void)
 {
     FPU_DOUBLE(x);
-    return sin(x);
+    return NTDLL_sin(x);
 }
 
 /*********************************************************************
  *		_CIsqrt (NTDLL.@)
  */
-double CDECL _CIsqrt(void)
+double CDECL NTDLL__CIsqrt(void)
 {
     FPU_DOUBLE(x);
-    return sqrt(x);
+    return NTDLL_sqrt(x);
 }
 
 /*********************************************************************
  *                  _ftol   (NTDLL.@)
  */
-LONGLONG CDECL _ftol(void)
+LONGLONG CDECL NTDLL__ftol(void)
 {
     FPU_DOUBLE(x);
     return (LONGLONG)x;
 }
 
-#endif /* (defined(__GNUC__) || defined(__clang__)) && defined(__i386__) */
+#endif /* defined(__GNUC__) && defined(__i386__) */
 
 static void
 NTDLL_mergesort( void *arr, void *barr, size_t elemsize, int(__cdecl *compar)(const void *, const void *),
@@ -223,8 +265,8 @@ NTDLL_mergesort( void *arr, void *barr, size_t elemsize, int(__cdecl *compar)(co
 /*********************************************************************
  *                  qsort   (NTDLL.@)
  */
-void __cdecl qsort( void *base, size_t nmemb, size_t size,
-                    int (__cdecl *compar)(const void *, const void *) )
+void __cdecl NTDLL_qsort( void *base, size_t nmemb, size_t size,
+                          int(__cdecl *compar)(const void *, const void *) )
 {
     void *secondarr;
     if (nmemb < 2 || size == 0) return;
@@ -236,8 +278,9 @@ void __cdecl qsort( void *base, size_t nmemb, size_t size,
 /*********************************************************************
  *                  bsearch   (NTDLL.@)
  */
-void * __cdecl bsearch( const void *key, const void *base, size_t nmemb,
-                        size_t size, int (__cdecl *compar)(const void *, const void *) )
+void * __cdecl
+NTDLL_bsearch( const void *key, const void *base, size_t nmemb,
+               size_t size, int (__cdecl *compar)(const void *, const void *) )
 {
     ssize_t min = 0;
     ssize_t max = nmemb - 1;
@@ -535,6 +578,18 @@ ULONG WINAPIV EtwTraceMessage( TRACEHANDLE handle, ULONG flags, LPGUID guid, /*U
     return ret;
 }
 
+NTSTATUS WINAPI NtCreateLowBoxToken(HANDLE *token_handle, HANDLE existing_token_handle, ACCESS_MASK desired_access,
+                                    OBJECT_ATTRIBUTES *object_attributes, SID *package_sid, ULONG capability_count,
+                                    SID_AND_ATTRIBUTES *capabilities, ULONG handle_count, HANDLE *handle)
+{
+    FIXME("(%p, %p, %x, %p, %p, %u, %p, %u, %p): stub\n", token_handle, existing_token_handle, desired_access,
+            object_attributes, package_sid, capability_count, capabilities, handle_count, handle);
+
+    /* We need to return a NULL handle since later it will be passed to CloseHandle and that must not fail */
+    *token_handle = NULL;
+    return STATUS_SUCCESS;
+}
+
 /*********************************************************************
  *                  ApiSetQueryApiSetPresence   (NTDLL.@)
  */
@@ -545,4 +600,11 @@ BOOL WINAPI ApiSetQueryApiSetPresence(const UNICODE_STRING *namespace, BOOLEAN *
     if(present)
         *present = TRUE;
     return TRUE;
+}
+
+BOOL IsTransgaming(void)
+{
+    static int call_count = -1;
+    call_count++;
+    return call_count == 1;
 }

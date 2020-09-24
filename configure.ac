@@ -442,7 +442,7 @@ AC_CHECK_HEADERS(\
 	IOKit/IOKitLib.h \
 	IOKit/hid/IOHIDLib.h \
 	OpenAL/al.h \
-	OpenCL/opencl.h \
+	CL/opencl.h \
 	QuickTime/ImageCompression.h \
 	Security/Security.h \
 	SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h \
@@ -514,6 +514,7 @@ AC_CHECK_HEADERS(\
 	sys/cdio.h \
 	sys/epoll.h \
 	sys/event.h \
+	sys/eventfd.h \
 	sys/filio.h \
 	sys/ioctl.h \
 	sys/ipc.h \
@@ -528,7 +529,6 @@ AC_CHECK_HEADERS(\
 	sys/protosw.h \
 	sys/ptrace.h \
 	sys/queue.h \
-	sys/random.h \
 	sys/resource.h \
 	sys/scsiio.h \
 	sys/shm.h \
@@ -730,6 +730,8 @@ fi
 dnl **** Check for working dll ****
 
 AC_SUBST(DLLFLAGS,"-D_REENTRANT")
+AC_SUBST(LDRPATH_INSTALL,"")
+AC_SUBST(LDRPATH_LOCAL,"")
 AC_SUBST(LDDLLFLAGS,"")
 AC_SUBST(LDEXECFLAGS,"")
 AC_SUBST(TOP_INSTALL_LIB,"")
@@ -775,6 +777,8 @@ case $host_os in
     LIBEXT="dylib"
     DLLFLAGS="$DLLFLAGS -fPIC"
     LDDLLFLAGS="-fPIC"
+    LDRPATH_INSTALL="-Wl,-rpath,@loader_path/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
+    LDRPATH_LOCAL="-Wl,-rpath,@loader_path/\$(top_builddir)/libs/wine"
     dnl declare needed frameworks
     AC_SUBST(COREFOUNDATION_LIBS,"-framework CoreFoundation")
     AC_SUBST(IOKIT_LIBS,"-framework IOKit -framework CoreFoundation")
@@ -941,6 +945,14 @@ case $host_os in
     WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                     [WINELOADER_LDFLAGS="-Wl,--export-dynamic"])
     WINEPRELOADER_LDFLAGS="-static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7d400000"
+    WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
+                    [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
+                     LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
+        [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
+                         [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
+                          LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"])])
+    WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
+                    [LDRPATH_INSTALL="$LDRPATH_INSTALL -Wl,--enable-new-dtags"])
 
     AC_SUBST(LIBWINE_SHAREDLIB,"libwine.so")
     AC_SUBST(LIBWINE_LDFLAGS,["-shared -Wl,-soname,libwine.so"])
@@ -988,6 +1000,16 @@ case $host_os in
       WINE_TRY_CFLAGS([-Wl,--export-dynamic],
                       [WINELOADER_LDFLAGS="-Wl,--export-dynamic"])
       WINEPRELOADER_LDFLAGS="-static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7d400000"
+
+      WINE_TRY_CFLAGS([-Wl,--rpath,\$ORIGIN/../lib],
+                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`:\$(DESTDIR)\${libdir}"
+                       LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
+          [WINE_TRY_CFLAGS([-Wl,-R,\$ORIGIN/../lib],
+                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`:\$(DESTDIR)\${libdir}"
+                            LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"])])
+
+      WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
+                      [LDRPATH_INSTALL="$LDRPATH_INSTALL -Wl,--enable-new-dtags"])
 
       case $host_cpu in
         *i[[3456789]]86* | x86_64 | *aarch64*)
@@ -2241,13 +2263,13 @@ AC_CHECK_FUNCS(\
 	getauxval \
 	getifaddrs \
 	getopt_long_only \
-	getrandom \
 	kqueue \
 	lstat \
 	mach_continuous_time \
 	pipe2 \
 	poll \
 	port_create \
+	ppoll \
 	prctl \
 	pread \
 	proc_pidinfo \
@@ -2311,6 +2333,16 @@ case $host_os in
     LIBS=$ac_save_LIBS
     ;;
 esac
+
+dnl Check for shm_open which may be in -lrt
+if test "$ac_cv_header_sys_mman_h" = "yes" -a "x$RT_LIBS" = "x"
+then
+    ac_save_LIBS=$LIBS
+    AC_SEARCH_LIBS(shm_open, rt,
+                   [AC_DEFINE(HAVE_SHM_OPEN, 1, [Define to 1 if you have the `shm_open' function.])
+                    test "$ac_res" = "none required" || AC_SUBST(RT_LIBS,"$ac_res")])
+fi
+LIBS=$ac_save_LIBS
 
 dnl **** Check for OpenLDAP ***
 if test "x$with_ldap" != "xno"
@@ -2713,12 +2745,6 @@ AC_CHECK_MEMBERS([struct ifreq.ifr_hwaddr],,,
 # include <net/if.h>
 #endif])
 
-dnl Check for struct sysinfo members totalram and mem_unit
-AC_CHECK_MEMBERS([struct sysinfo.totalram, struct sysinfo.mem_unit],,,
-[#ifdef HAVE_SYS_SYSINFO_H
-# include <sys/sysinfo.h>
-#endif])
-
 dnl Check for isfinite
 ac_save_LIBS="$LIBS"
 LIBS="$LIBS -lm"
@@ -2805,6 +2831,15 @@ AC_CHECK_FUNCS(\
 	yn
 )
 LIBS="$ac_save_LIBS"
+
+dnl Check for __builtin_ctzl
+AC_CACHE_CHECK([for __builtin_ctzl], ac_cv_have___builtin_ctzl,
+               AC_LINK_IFELSE([AC_LANG_PROGRAM(,[[return __builtin_ctzl(1)]])],
+               [ac_cv_have___builtin_ctzl="yes"], [ac_cv_have___builtin_ctzl="no"]))
+if test "$ac_cv_have___builtin_ctzl" = "yes"
+then
+    AC_DEFINE(HAVE___BUILTIN_CTZL, 1, [Define to 1 if you have the `__builtin_ctzl' built-in function.])
+fi
 
 dnl Check for __builtin_popcount
 AC_CACHE_CHECK([for __builtin_popcount], ac_cv_have___builtin_popcount,
@@ -4035,7 +4070,6 @@ WINE_CONFIG_MAKEFILE(programs/clock)
 WINE_CONFIG_MAKEFILE(programs/cmd)
 WINE_CONFIG_MAKEFILE(programs/cmd/tests)
 WINE_CONFIG_MAKEFILE(programs/conhost)
-WINE_CONFIG_MAKEFILE(programs/conhost/tests)
 WINE_CONFIG_MAKEFILE(programs/control)
 WINE_CONFIG_MAKEFILE(programs/cscript)
 WINE_CONFIG_MAKEFILE(programs/dism)
@@ -4083,6 +4117,7 @@ WINE_CONFIG_MAKEFILE(programs/regini)
 WINE_CONFIG_MAKEFILE(programs/regsvcs)
 WINE_CONFIG_MAKEFILE(programs/regsvr32)
 WINE_CONFIG_MAKEFILE(programs/rpcss)
+WINE_CONFIG_MAKEFILE(programs/runas)
 WINE_CONFIG_MAKEFILE(programs/rundll.exe16,enable_win16)
 WINE_CONFIG_MAKEFILE(programs/rundll32)
 WINE_CONFIG_MAKEFILE(programs/sc)

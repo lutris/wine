@@ -42,6 +42,7 @@
 # include <stdint.h>
 #endif
 
+#include "wine/library.h"
 #include "wine/list.h"
 
 struct reserved_area
@@ -65,8 +66,6 @@ static const unsigned int granularity_mask = 0xffff;  /* reserved areas have 64k
 #ifndef MAP_ANON
 #define MAP_ANON 0
 #endif
-
-void wine_mmap_add_reserved_area( void *addr, size_t size );
 
 static inline int get_fdzero(void)
 {

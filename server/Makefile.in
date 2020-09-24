@@ -11,9 +11,11 @@ C_SRCS = \
 	debugger.c \
 	device.c \
 	directory.c \
+	esync.c \
 	event.c \
 	fd.c \
 	file.c \
+	fsync.c \
 	handle.c \
 	hook.c \
 	mach.c \
@@ -34,6 +36,7 @@ C_SRCS = \
 	semaphore.c \
 	serial.c \
 	signal.c \
+	snapshot.c \
 	sock.c \
 	symlink.c \
 	thread.c \

@@ -33,6 +33,7 @@
 #include "advapi32_misc.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(advapi);
 
@@ -69,11 +70,19 @@ static void* ADVAPI_GetDomainName(unsigned sz, unsigned ofs)
     BYTE* ptr = NULL;
     UNICODE_STRING* ustr;
 
-    ret = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\VxD\\VNETSUP", 0, KEY_READ, &key);
+    static const WCHAR wVNETSUP[] = {
+        'S','y','s','t','e','m','\\',
+        'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+        'S','e','r','v','i','c','e','s','\\',
+        'V','x','D','\\','V','N','E','T','S','U','P','\0'};
+
+    ret = RegOpenKeyExW(HKEY_LOCAL_MACHINE, wVNETSUP, 0, KEY_READ, &key);
     if (ret == ERROR_SUCCESS)
     {
         DWORD size = 0;
-        ret = RegQueryValueExW(key, L"Workgroup", NULL, NULL, NULL, &size);
+        static const WCHAR wg[] = { 'W','o','r','k','g','r','o','u','p',0 };
+
+        ret = RegQueryValueExW(key, wg, NULL, NULL, NULL, &size);
         if (ret == ERROR_MORE_DATA || ret == ERROR_SUCCESS)
         {
             ptr = heap_alloc_zero(sz + size);
@@ -81,7 +90,7 @@ static void* ADVAPI_GetDomainName(unsigned sz, unsigned ofs)
             ustr = (UNICODE_STRING*)(ptr + ofs);
             ustr->MaximumLength = size;
             ustr->Buffer = (WCHAR*)(ptr + sz);
-            ret = RegQueryValueExW(key, L"Workgroup", NULL, NULL, (LPBYTE)ustr->Buffer, &size);
+            ret = RegQueryValueExW(key, wg, NULL, NULL, (LPBYTE)ustr->Buffer, &size);
             if (ret != ERROR_SUCCESS)
             {
                 heap_free(ptr);
@@ -93,13 +102,14 @@ static void* ADVAPI_GetDomainName(unsigned sz, unsigned ofs)
     }
     if (!ptr)
     {
-        ptr = heap_alloc_zero(sz + sizeof(L"DOMAIN"));
+        static const WCHAR wDomain[] = {'D','O','M','A','I','N','\0'};
+        ptr = heap_alloc_zero(sz + sizeof(wDomain));
         if (!ptr) return NULL;
         ustr = (UNICODE_STRING*)(ptr + ofs);
-        ustr->MaximumLength = sizeof(L"DOMAIN");
+        ustr->MaximumLength = sizeof(wDomain);
         ustr->Buffer = (WCHAR*)(ptr + sz);
-        ustr->Length = sizeof(L"DOMAIN") - sizeof(WCHAR);
-        memcpy(ustr->Buffer, L"DOMAIN", sizeof(L"DOMAIN"));
+        ustr->Length = sizeof(wDomain) - sizeof(WCHAR);
+        memcpy(ustr->Buffer, wDomain, sizeof(wDomain));
     }
     return ptr;
 }
@@ -334,7 +344,7 @@ static LONG lsa_reflist_add_domain(LSA_REFERENCED_DOMAIN_LIST *list, LSA_UNICODE
     {
         /* try to reuse index */
         if ((list->Domains[i].Name.Length == domain->Length) &&
-            (!wcsnicmp(list->Domains[i].Name.Buffer, domain->Buffer, (domain->Length / sizeof(WCHAR)))))
+            (!strncmpiW(list->Domains[i].Name.Buffer, domain->Buffer, (domain->Length / sizeof(WCHAR)))))
         {
             return i;
         }
@@ -555,9 +565,9 @@ NTSTATUS WINAPI LsaLookupSids(
         }
         else if (ConvertSidToStringSidW(Sids[i], &strsid))
         {
-            (*Names)[i].Name.Length = lstrlenW(strsid) * sizeof(WCHAR);
-            (*Names)[i].Name.MaximumLength = (lstrlenW(strsid) + 1) * sizeof(WCHAR);
-            name_fullsize += (lstrlenW(strsid) + 1) * sizeof(WCHAR);
+            (*Names)[i].Name.Length = strlenW(strsid) * sizeof(WCHAR);
+            (*Names)[i].Name.MaximumLength = (strlenW(strsid) + 1) * sizeof(WCHAR);
+            name_fullsize += (strlenW(strsid) + 1) * sizeof(WCHAR);
 
             LocalFree(strsid);
         }
@@ -606,11 +616,11 @@ NTSTATUS WINAPI LsaLookupSids(
         }
         else if (ConvertSidToStringSidW(Sids[i], &strsid))
         {
-            lstrcpyW((*Names)[i].Name.Buffer, strsid);
+            strcpyW((*Names)[i].Name.Buffer, strsid);
             LocalFree(strsid);
         }
 
-        name_buffer += lstrlenW(name_buffer) + 1;
+        name_buffer += strlenW(name_buffer) + 1;
     }
     TRACE("mapped %u out of %u\n", mapped, Count);
 
@@ -796,11 +806,11 @@ NTSTATUS WINAPI LsaQueryInformationPolicy(
             {
                 WCHAR *dot;
 
-                dot = wcsrchr(xdi->domain_name, '.');
+                dot = strrchrW(xdi->domain_name, '.');
                 if (dot) *dot = 0;
-                wcsupr(xdi->domain_name);
+                struprW(xdi->domain_name);
                 xdi->info.Name.Buffer = xdi->domain_name;
-                xdi->info.Name.Length = lstrlenW(xdi->domain_name) * sizeof(WCHAR);
+                xdi->info.Name.Length = strlenW(xdi->domain_name) * sizeof(WCHAR);
                 xdi->info.Name.MaximumLength = xdi->info.Name.Length + sizeof(WCHAR);
                 TRACE("setting Name to %s\n", debugstr_w(xdi->info.Name.Buffer));
             }
@@ -1054,7 +1064,7 @@ NTSTATUS WINAPI LsaLookupPrivilegeName(LSA_HANDLE handle, LUID *luid, LSA_UNICOD
     if (!(privnameW = get_wellknown_privilege_name(luid)))
         return STATUS_NO_SUCH_PRIVILEGE;
 
-    length = lstrlenW(privnameW);
+    length = strlenW(privnameW);
     *name = heap_alloc(sizeof(**name) + (length + 1) * sizeof(WCHAR));
     if (!*name)
         return STATUS_NO_MEMORY;

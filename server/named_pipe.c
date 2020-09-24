@@ -118,6 +118,8 @@ static const struct object_ops named_pipe_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -160,6 +162,8 @@ static const struct object_ops pipe_server_ops =
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
+    default_fd_get_esync_fd,      /* get_esync_fd */
+    default_fd_get_fsync_idx,     /* get_fsync_idx */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     pipe_end_get_fd,              /* get_fd */
@@ -202,6 +206,8 @@ static const struct object_ops pipe_client_ops =
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
+    default_fd_get_esync_fd,      /* get_esync_fd */
+    default_fd_get_fsync_idx,     /* get_fsync_idx */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     pipe_end_get_fd,              /* get_fd */
@@ -248,6 +254,8 @@ static const struct object_ops named_pipe_device_ops =
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
+    NULL,                             /* get_esync_fd */
+    NULL,                             /* get_fsync_idx */
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
@@ -273,10 +281,12 @@ static const struct object_ops named_pipe_device_file_ops =
 {
     sizeof(struct named_pipe_device_file),   /* size */
     named_pipe_device_file_dump,             /* dump */
-    file_get_type,                           /* get_type */
+    no_get_type,                             /* get_type */
     add_queue,                               /* add_queue */
     remove_queue,                            /* remove_queue */
     default_fd_signaled,                     /* signaled */
+    NULL,                                    /* get_esync_fd */
+    NULL,                                    /* get_fsync_idx */
     no_satisfied,                            /* satisfied */
     no_signal,                               /* signal */
     named_pipe_device_file_get_fd,           /* get_fd */
@@ -1135,17 +1145,6 @@ static int pipe_server_ioctl( struct fd *fd, ioctl_code_t code, struct async *as
         }
 
         pipe_end_disconnect( &server->pipe_end, STATUS_PIPE_DISCONNECTED );
-        return 1;
-
-    case FSCTL_PIPE_IMPERSONATE:
-        if (current->process->token) /* FIXME: use the client token */
-        {
-            struct token *token;
-            if (!(token = token_duplicate( current->process->token, 0, SecurityImpersonation, NULL, NULL, 0, NULL, 0 )))
-                return 0;
-            if (current->token) release_object( current->token );
-            current->token = token;
-        }
         return 1;
 
     default:

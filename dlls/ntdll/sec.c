@@ -19,18 +19,25 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
 #include <math.h>
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "ntdll_misc.h"
 #include "wine/exception.h"
+#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
@@ -1603,6 +1610,211 @@ RtlImpersonateSelf(SECURITY_IMPERSONATION_LEVEL ImpersonationLevel)
     return Status;
 }
 
+/******************************************************************************
+ *  NtImpersonateAnonymousToken      [NTDLL.@]
+ */
+NTSTATUS WINAPI
+NtImpersonateAnonymousToken(HANDLE thread)
+{
+    FIXME("(%p): stub\n", thread);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ *  NtAccessCheck		[NTDLL.@]
+ *  ZwAccessCheck		[NTDLL.@]
+ *
+ * Checks that a user represented by a token is allowed to access an object
+ * represented by a security descriptor.
+ *
+ * PARAMS
+ *  SecurityDescriptor [I] The security descriptor of the object to check.
+ *  ClientToken        [I] Token of the user accessing the object.
+ *  DesiredAccess      [I] The desired access to the object.
+ *  GenericMapping     [I] Mapping used to transform access rights in the SD to their specific forms.
+ *  PrivilegeSet       [I/O] Privileges used during the access check.
+ *  ReturnLength       [O] Number of bytes stored into PrivilegeSet.
+ *  GrantedAccess      [O] The actual access rights granted.
+ *  AccessStatus       [O] The status of the access check.
+ *
+ * RETURNS
+ *  NTSTATUS code.
+ *
+ * NOTES
+ *  DesiredAccess may be MAXIMUM_ALLOWED, in which case the function determines
+ *  the maximum access rights allowed by the SD and returns them in
+ *  GrantedAccess.
+ *  The SecurityDescriptor must have a valid owner and groups present,
+ *  otherwise the function will fail.
+ */
+NTSTATUS WINAPI
+NtAccessCheck(
+    PSECURITY_DESCRIPTOR SecurityDescriptor,
+    HANDLE ClientToken,
+    ACCESS_MASK DesiredAccess,
+    PGENERIC_MAPPING GenericMapping,
+    PPRIVILEGE_SET PrivilegeSet,
+    PULONG ReturnLength,
+    PULONG GrantedAccess,
+    NTSTATUS *AccessStatus)
+{
+    NTSTATUS status;
+
+    TRACE("(%p, %p, %08x, %p, %p, %p, %p, %p)\n",
+        SecurityDescriptor, ClientToken, DesiredAccess, GenericMapping,
+        PrivilegeSet, ReturnLength, GrantedAccess, AccessStatus);
+
+    if (!ReturnLength)
+        return STATUS_ACCESS_VIOLATION;
+
+    if (*ReturnLength == 0)
+    {
+        *ReturnLength = sizeof(PRIVILEGE_SET);
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    if (!PrivilegeSet)
+        return STATUS_ACCESS_VIOLATION;
+
+    SERVER_START_REQ( access_check )
+    {
+        struct security_descriptor sd;
+        PSID owner;
+        PSID group;
+        PACL sacl;
+        PACL dacl;
+        BOOLEAN defaulted, present;
+        DWORD revision;
+        SECURITY_DESCRIPTOR_CONTROL control;
+
+        req->handle = wine_server_obj_handle( ClientToken );
+        req->desired_access = DesiredAccess;
+        req->mapping_read = GenericMapping->GenericRead;
+        req->mapping_write = GenericMapping->GenericWrite;
+        req->mapping_execute = GenericMapping->GenericExecute;
+        req->mapping_all = GenericMapping->GenericAll;
+
+        /* marshal security descriptor */
+        RtlGetControlSecurityDescriptor( SecurityDescriptor, &control, &revision );
+        sd.control = control & ~SE_SELF_RELATIVE;
+        RtlGetOwnerSecurityDescriptor( SecurityDescriptor, &owner, &defaulted );
+        sd.owner_len = RtlLengthSid( owner );
+        RtlGetGroupSecurityDescriptor( SecurityDescriptor, &group, &defaulted );
+        sd.group_len = RtlLengthSid( group );
+        RtlGetSaclSecurityDescriptor( SecurityDescriptor, &present, &sacl, &defaulted );
+        sd.sacl_len = ((present && sacl) ? acl_bytesInUse(sacl) : 0);
+        RtlGetDaclSecurityDescriptor( SecurityDescriptor, &present, &dacl, &defaulted );
+        sd.dacl_len = ((present && dacl) ? acl_bytesInUse(dacl) : 0);
+
+        wine_server_add_data( req, &sd, sizeof(sd) );
+        wine_server_add_data( req, owner, sd.owner_len );
+        wine_server_add_data( req, group, sd.group_len );
+        wine_server_add_data( req, sacl, sd.sacl_len );
+        wine_server_add_data( req, dacl, sd.dacl_len );
+
+        wine_server_set_reply( req, PrivilegeSet->Privilege, *ReturnLength - FIELD_OFFSET( PRIVILEGE_SET, Privilege ) );
+
+        status = wine_server_call( req );
+
+        *ReturnLength = FIELD_OFFSET( PRIVILEGE_SET, Privilege ) + reply->privileges_len;
+        PrivilegeSet->PrivilegeCount = reply->privileges_len / sizeof(LUID_AND_ATTRIBUTES);
+
+        if (status == STATUS_SUCCESS)
+        {
+            *AccessStatus = reply->access_status;
+            *GrantedAccess = reply->access_granted;
+        }
+    }
+    SERVER_END_REQ;
+
+    return status;
+}
+
+/******************************************************************************
+ *  NtSetSecurityObject		[NTDLL.@]
+ *  ZwSetSecurityObject		[NTDLL.@]
+ *
+ * Sets specified parts of the object's security descriptor.
+ *
+ * PARAMS
+ *  Handle              [I] Handle to the object to change security descriptor of.
+ *  SecurityInformation [I] Specifies which parts of the security descriptor to set.
+ *  SecurityDescriptor  [I] New parts of a security descriptor for the object.
+ *
+ * RETURNS
+ *  NTSTATUS code.
+ *
+ */
+NTSTATUS WINAPI NtSetSecurityObject(HANDLE Handle,
+        SECURITY_INFORMATION SecurityInformation,
+        PSECURITY_DESCRIPTOR SecurityDescriptor)
+{
+    NTSTATUS status;
+    struct security_descriptor sd;
+    PACL dacl = NULL, sacl = NULL;
+    PSID owner = NULL, group = NULL;
+    BOOLEAN defaulted, present;
+    DWORD revision;
+    SECURITY_DESCRIPTOR_CONTROL control;
+
+    TRACE("%p 0x%08x %p\n", Handle, SecurityInformation, SecurityDescriptor);
+
+    if (!SecurityDescriptor) return STATUS_ACCESS_VIOLATION;
+
+    memset( &sd, 0, sizeof(sd) );
+    status = RtlGetControlSecurityDescriptor( SecurityDescriptor, &control, &revision );
+    if (status != STATUS_SUCCESS) return status;
+    sd.control = control & ~SE_SELF_RELATIVE;
+
+    if (SecurityInformation & OWNER_SECURITY_INFORMATION)
+    {
+        status = RtlGetOwnerSecurityDescriptor( SecurityDescriptor, &owner, &defaulted );
+        if (status != STATUS_SUCCESS) return status;
+        if (!(sd.owner_len = RtlLengthSid( owner )))
+            return STATUS_INVALID_SECURITY_DESCR;
+    }
+
+    if (SecurityInformation & GROUP_SECURITY_INFORMATION)
+    {
+        status = RtlGetGroupSecurityDescriptor( SecurityDescriptor, &group, &defaulted );
+        if (status != STATUS_SUCCESS) return status;
+        if (!(sd.group_len = RtlLengthSid( group )))
+            return STATUS_INVALID_SECURITY_DESCR;
+    }
+
+    if (SecurityInformation & SACL_SECURITY_INFORMATION ||
+        SecurityInformation & LABEL_SECURITY_INFORMATION)
+    {
+        status = RtlGetSaclSecurityDescriptor( SecurityDescriptor, &present, &sacl, &defaulted );
+        if (status != STATUS_SUCCESS) return status;
+        sd.sacl_len = (sacl && present) ? acl_bytesInUse(sacl) : 0;
+        sd.control |= SE_SACL_PRESENT;
+    }
+
+    if (SecurityInformation & DACL_SECURITY_INFORMATION)
+    {
+        status = RtlGetDaclSecurityDescriptor( SecurityDescriptor, &present, &dacl, &defaulted );
+        if (status != STATUS_SUCCESS) return status;
+        sd.dacl_len = (dacl && present) ? acl_bytesInUse(dacl) : 0;
+        sd.control |= SE_DACL_PRESENT;
+    }
+
+    SERVER_START_REQ( set_security_object )
+    {
+        req->handle = wine_server_obj_handle( Handle );
+        req->security_info = SecurityInformation;
+
+        wine_server_add_data( req, &sd, sizeof(sd) );
+        wine_server_add_data( req, owner, sd.owner_len );
+        wine_server_add_data( req, group, sd.group_len );
+        wine_server_add_data( req, sacl, sd.sacl_len );
+        wine_server_add_data( req, dacl, sd.dacl_len );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    return status;
+}
 
 /******************************************************************************
  * RtlConvertSidToUnicodeString (NTDLL.@)
@@ -1624,14 +1836,13 @@ NTSTATUS WINAPI RtlConvertSidToUnicodeString(
     DWORD i, len;
 
     *p++ = 'S';
-    p += swprintf( p, ARRAY_SIZE(buffer) - (p - buffer), formatW, sid->Revision );
-    p += swprintf( p, ARRAY_SIZE(buffer) - (p - buffer), formatW,
-                   MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
-                                       sid->IdentifierAuthority.Value[4] ),
-                             MAKEWORD( sid->IdentifierAuthority.Value[3],
-                                       sid->IdentifierAuthority.Value[2] )));
+    p += NTDLL_swprintf( p, formatW, sid->Revision );
+    p += NTDLL_swprintf( p, formatW, MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
+                                                   sid->IdentifierAuthority.Value[4] ),
+                                         MAKEWORD( sid->IdentifierAuthority.Value[3],
+                                                   sid->IdentifierAuthority.Value[2] )));
     for (i = 0; i < sid->SubAuthorityCount; i++)
-        p += swprintf( p, ARRAY_SIZE(buffer) - (p - buffer), formatW, sid->SubAuthority[i] );
+        p += NTDLL_swprintf( p, formatW, sid->SubAuthority[i] );
 
     len = (p + 1 - buffer) * sizeof(WCHAR);
 
@@ -1707,7 +1918,7 @@ NTSTATUS WINAPI RtlQueryInformationAcl(
     return status;
 }
 
-NTSTATUS WINAPI RtlConvertToAutoInheritSecurityObject(
+BOOL WINAPI RtlConvertToAutoInheritSecurityObject(
         PSECURITY_DESCRIPTOR pdesc,
         PSECURITY_DESCRIPTOR cdesc,
         PSECURITY_DESCRIPTOR* ndesc,
@@ -1717,5 +1928,5 @@ NTSTATUS WINAPI RtlConvertToAutoInheritSecurityObject(
 {
     FIXME("%p %p %p %p %d %p - stub\n", pdesc, cdesc, ndesc, objtype, isdir, genmap);
 
-    return STATUS_NOT_IMPLEMENTED;
+    return FALSE;
 }

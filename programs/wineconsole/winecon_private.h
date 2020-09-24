@@ -22,7 +22,6 @@
 #include <windef.h>
 #include <winbase.h>
 #include <wincon.h>
-#include <wine/condrv.h>
 
 #include "wineconsole_res.h"
 
@@ -60,16 +59,15 @@ struct inner_data {
 
     COORD		cursor;		/* position in cells of cursor */
 
-    HANDLE		console;	/* console renderer handle */
+    HANDLE		hConIn;		/* console input handle */
+    HANDLE		hConOut;	/* screen buffer handle: has to be changed when active sb changes */
+    HANDLE		hSynchro;	/* waitable handle signalled by server when something in server has been modified */
     HANDLE              hProcess;       /* handle to the child process or NULL */
     HWND		hWnd;           /* handle of 'user' window or NULL for 'curses' */
     INT                 nCmdShow;       /* argument of WinMain */
     BOOL                in_set_config;  /* to handle re-entrant calls to WINECON_SetConfig */
     BOOL                in_grab_changes;/* to handle re-entrant calls to WINECON_GrabChanges */
     BOOL                dying;          /* to TRUE when we've been notified by server that child has died */
-
-    OVERLAPPED          overlapped;
-    struct condrv_renderer_event events[256];
 
     int			(*fnMainLoop)(struct inner_data* data);
     void		(*fnPosCursor)(const struct inner_data* data);

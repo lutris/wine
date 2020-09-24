@@ -21,6 +21,7 @@
 
 #include "wine/debug.h"
 #include "wine/heap.h"
+#include "wine/library.h"
 #include "wine/unicode.h"
 
 #if defined(HAVE_GNUTLS_CIPHER_INIT) &&  defined(SONAME_LIBGCRYPT)

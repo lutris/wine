@@ -69,6 +69,18 @@ struct request_max_size
 #define FIRST_USER_HANDLE 0x0020  /* first possible value for low word of user handle */
 #define LAST_USER_HANDLE  0xffef  /* last possible value for low word of user handle */
 
+typedef struct
+{
+    unsigned int last_input_time;   /* last input time */
+} shmglobal_t;
+
+typedef struct
+{
+    int             queue_bits;     /* queue wake bits */
+    user_handle_t   input_focus;    /* focus window */
+    user_handle_t   input_capture;  /* capture window */
+    user_handle_t   input_active;   /* active window */
+} shmlocal_t;
 
 /* debug event data */
 typedef union
@@ -387,6 +399,13 @@ typedef union
     struct winevent_msg_data winevent;
 } message_data_t;
 
+/* structure for console char/attribute info */
+typedef struct
+{
+    WCHAR          ch;
+    unsigned short attr;
+} char_info_t;
+
 /* structure returned in filesystem events */
 struct filesystem_event
 {
@@ -521,7 +540,7 @@ typedef union
         unsigned int     op_type;      /* type of operation */
         client_ptr_t     addr;         /* requested address */
         mem_size_t       size;         /* allocation size */
-        mem_size_t       zero_bits;    /* number of zero high bits */
+        unsigned int     zero_bits_64; /* number of zero high bits */
         unsigned int     prot;         /* memory protection flags */
     } virtual_alloc;
     struct
@@ -572,9 +591,9 @@ typedef union
         client_ptr_t     addr;         /* requested address */
         mem_size_t       size;         /* allocation size */
         file_pos_t       offset;       /* file offset */
-        mem_size_t       zero_bits;    /* number of zero high bits */
         unsigned int     alloc_type;   /* allocation type */
-        unsigned int     prot;         /* memory protection flags */
+        unsigned short   zero_bits_64; /* number of zero high bits */
+        unsigned short   prot;         /* memory protection flags */
     } map_view;
     struct
     {
@@ -585,7 +604,7 @@ typedef union
     struct
     {
         enum apc_type    type;      /* APC_CREATE_THREAD */
-        unsigned int     flags;     /* creation flags */
+        int              suspend;   /* suspended thread? */
         client_ptr_t     func;      /* void (__stdcall *func)(void*);  start function */
         client_ptr_t     arg;       /* argument for start function */
         mem_size_t       reserve;   /* reserve size for thread stack */
@@ -673,9 +692,7 @@ typedef union
     {
         enum apc_type    type;      /* APC_CREATE_THREAD */
         unsigned int     status;    /* status returned by call */
-        process_id_t     pid;       /* process id */
         thread_id_t      tid;       /* thread id */
-        client_ptr_t     teb;       /* thread teb (in process address space) */
         obj_handle_t     handle;    /* handle to new thread */
     } create_thread;
     struct
@@ -814,6 +831,7 @@ struct rawinput_device
     unsigned int access;         /* access rights for process object */
     client_cpu_t cpu;            /* CPU that the new process will use */
     data_size_t  info_size;      /* size of startup info */
+    obj_handle_t token;          /* token for the new process */
     VARARG(objattr,object_attributes);   /* object attributes */
     VARARG(info,startup_info,info_size); /* startup information */
     VARARG(env,unicode_str);     /* environment for new process */
@@ -868,6 +886,7 @@ struct rawinput_device
     mod_handle_t module;       /* main module base address */
     client_ptr_t ldt_copy;     /* address of LDT copy (in thread address space) */
     client_ptr_t entry;        /* process entry point */
+    obj_handle_t usd_handle;   /* USD mapping handle */
 @REPLY
     int          suspend;      /* is process suspended? */
 @END
@@ -958,7 +977,7 @@ struct rawinput_device
 /* Retrieve information about a thread */
 @REQ(get_thread_info)
     obj_handle_t handle;        /* thread handle */
-    unsigned int access;        /* required access rights */
+    thread_id_t  tid_in;        /* thread id (optional) */
 @REPLY
     process_id_t pid;           /* server process id */
     thread_id_t  tid;           /* server thread id */
@@ -969,7 +988,6 @@ struct rawinput_device
     int          priority;      /* thread priority level */
     int          last;          /* last thread in process */
     int          suspend_count; /* thread suspend count */
-    int          dbg_hidden;    /* thread hidden from debugger */
     data_size_t  desc_len;      /* description length in bytes */
     VARARG(desc,unicode_str);   /* description string */
 @END
@@ -1001,7 +1019,6 @@ struct rawinput_device
 #define SET_THREAD_INFO_TOKEN       0x04
 #define SET_THREAD_INFO_ENTRYPOINT  0x08
 #define SET_THREAD_INFO_DESCRIPTION 0x10
-#define SET_THREAD_INFO_DBG_HIDDEN  0x20
 
 
 /* Retrieve information about a module */
@@ -1097,12 +1114,6 @@ struct rawinput_device
 #define DUP_HANDLE_CLOSE_SOURCE  DUPLICATE_CLOSE_SOURCE
 #define DUP_HANDLE_SAME_ACCESS   DUPLICATE_SAME_ACCESS
 #define DUP_HANDLE_MAKE_GLOBAL   0x80000000  /* Not a Windows flag */
-
-
-/* Make an object temporary */
-@REQ(make_temporary)
-    obj_handle_t handle;       /* handle to the object */
-@END
 
 
 /* Open a handle to a process */
@@ -1316,7 +1327,6 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Get the Unix name from a file handle */
 @REQ(get_handle_unix_name)
     obj_handle_t   handle;      /* file handle */
-    int            nofollow;    /* do not follow symlinks (return the link) */
 @REPLY
     data_size_t    name_len;    /* unix name length */
     VARARG(name,string);        /* unix name */
@@ -1353,6 +1363,12 @@ enum server_fd_type
 @REPLY
     int          entry;         /* cache entry on the client side */
     VARARG(free,ints);          /* entries that can be freed */
+@END
+
+
+/* Get file descriptor for shared memory */
+@REQ(get_shared_memory)
+    thread_id_t tid;            /* thread id or 0 */
 @END
 
 
@@ -1491,6 +1507,7 @@ enum server_fd_type
     int          input_fd;      /* if pid=-1 (bare console to current process), fd for input */
 @REPLY
     obj_handle_t handle_in;     /* handle to console input */
+    obj_handle_t event;         /* handle to renderer events change notification */
 @END
 
 
@@ -1499,9 +1516,77 @@ enum server_fd_type
 @END
 
 
+#define CONSOLE_RENDERER_NONE_EVENT        0x00
+#define CONSOLE_RENDERER_TITLE_EVENT       0x01
+#define CONSOLE_RENDERER_ACTIVE_SB_EVENT   0x02
+#define CONSOLE_RENDERER_SB_RESIZE_EVENT   0x03
+#define CONSOLE_RENDERER_UPDATE_EVENT      0x04
+#define CONSOLE_RENDERER_CURSOR_POS_EVENT  0x05
+#define CONSOLE_RENDERER_CURSOR_GEOM_EVENT 0x06
+#define CONSOLE_RENDERER_DISPLAY_EVENT     0x07
+#define CONSOLE_RENDERER_EXIT_EVENT        0x08
+struct console_renderer_event
+{
+    short event;
+    union
+    {
+        struct
+        {
+            short top;
+            short bottom;
+        } update;
+        struct
+        {
+            short width;
+            short height;
+        } resize;
+        struct
+        {
+            short x;
+            short y;
+        } cursor_pos;
+        struct
+        {
+            short visible;
+            short size;
+        } cursor_geom;
+        struct
+        {
+            short left;
+            short top;
+            short width;
+            short height;
+        } display;
+    } u;
+};
+
+/* retrieve console events for the renderer */
+@REQ(get_console_renderer_events)
+    obj_handle_t handle;        /* handle to console input events */
+@REPLY
+    VARARG(data,bytes);         /* the various console_renderer_events */
+@END
+
+
+/* Open a handle to the process console */
+@REQ(open_console)
+    obj_handle_t from;          /* 0 (resp 1) input (resp output) of current process console */
+                                /* otherwise console_in handle to get active screen buffer? */
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    int          share;         /* share mask (only for output handles) */
+@REPLY
+    obj_handle_t handle;        /* handle to the console */
+@END
+
+
 /* Attach to a other process's console */
 @REQ(attach_console)
     process_id_t pid;           /* pid of attached console process */
+@REPLY
+    obj_handle_t std_in;        /* attached stdin */
+    obj_handle_t std_out;       /* attached stdout */
+    obj_handle_t std_err;       /* attached stderr */
 @END
 
 
@@ -1510,6 +1595,58 @@ enum server_fd_type
     obj_handle_t handle;        /* handle to the console */
 @REPLY
     obj_handle_t event;
+@END
+
+/* Get a console mode (input or output) */
+@REQ(get_console_mode)
+    obj_handle_t handle;        /* handle to the console */
+@REPLY
+    int          mode;          /* console mode */
+@END
+
+
+/* Set a console mode (input or output) */
+@REQ(set_console_mode)
+    obj_handle_t handle;        /* handle to the console */
+    int          mode;          /* console mode */
+@END
+
+
+/* Set info about a console (input only) */
+@REQ(set_console_input_info)
+    obj_handle_t  handle;        /* handle to console input, or 0 for process' console */
+    int           mask;          /* setting mask (see below) */
+    obj_handle_t  active_sb;     /* active screen buffer */
+    int           history_mode;  /* whether we duplicate lines in history */
+    int           history_size;  /* number of lines in history */
+    int           edition_mode;  /* index to the edition mode flavors */
+    int           input_cp;      /* console input codepage */
+    int           output_cp;     /* console output codepage */
+    user_handle_t win;           /* console window if backend supports it */
+    VARARG(title,unicode_str);   /* console title */
+@END
+#define SET_CONSOLE_INPUT_INFO_ACTIVE_SB        0x01
+#define SET_CONSOLE_INPUT_INFO_TITLE            0x02
+#define SET_CONSOLE_INPUT_INFO_HISTORY_MODE     0x04
+#define SET_CONSOLE_INPUT_INFO_HISTORY_SIZE     0x08
+#define SET_CONSOLE_INPUT_INFO_EDITION_MODE     0x10
+#define SET_CONSOLE_INPUT_INFO_INPUT_CODEPAGE   0x20
+#define SET_CONSOLE_INPUT_INFO_OUTPUT_CODEPAGE  0x40
+#define SET_CONSOLE_INPUT_INFO_WIN              0x80
+
+
+/* Get info about a console (input only) */
+@REQ(get_console_input_info)
+    obj_handle_t  handle;         /* handle to console input, or 0 for process' console */
+@REPLY
+    int           history_mode;   /* whether we duplicate lines in history */
+    int           history_size;   /* number of lines in history */
+    int           history_index;  /* number of used lines in history */
+    int           edition_mode;   /* index to the edition mode flavors */
+    int           input_cp;       /* console input codepage */
+    int           output_cp;      /* console output codepage */
+    user_handle_t win;            /* console window if backend supports it */
+    VARARG(title,unicode_str);    /* console title */
 @END
 
 
@@ -1542,18 +1679,153 @@ enum server_fd_type
 @END
 
 
-/* Retrieve the next pending console ioctl request */
-@REQ(get_next_console_request)
-    obj_handle_t handle;        /* console server handle */
-    int          signal;        /* server signal state */
-    int          read;          /* 1 if reporting result of blocked read ioctl */
-    unsigned int status;        /* status of previous ioctl */
-    VARARG(out_data,bytes);     /* out_data of previous ioctl */
+/* Set info about a console (output only) */
+@REQ(set_console_output_info)
+    obj_handle_t handle;        /* handle to the console */
+    int          mask;          /* setting mask (see below) */
+    short int    cursor_size;   /* size of cursor (percentage filled) */
+    short int    cursor_visible;/* cursor visibility flag */
+    short int    cursor_x;      /* position of cursor (x, y) */
+    short int    cursor_y;
+    short int    width;         /* width of the screen buffer */
+    short int    height;        /* height of the screen buffer */
+    short int    attr;          /* default fill attributes (screen colors) */
+    short int    popup_attr;    /* pop-up color attributes */
+    short int    win_left;      /* window actually displayed by renderer */
+    short int    win_top;       /* the rect area is expressed within the */
+    short int    win_right;     /* boundaries of the screen buffer */
+    short int    win_bottom;
+    short int    max_width;     /* maximum size (width x height) for the window */
+    short int    max_height;
+    short int    font_width;    /* font size (width x height) */
+    short int    font_height;
+    short int    font_weight;   /* font weight */
+    short int    font_pitch_family; /* font pitch & family */
+    VARARG(colors,uints,64);    /* color table */
+    VARARG(face_name,unicode_str);  /* font face name */
+@END
+#define SET_CONSOLE_OUTPUT_INFO_CURSOR_GEOM     0x0001
+#define SET_CONSOLE_OUTPUT_INFO_CURSOR_POS      0x0002
+#define SET_CONSOLE_OUTPUT_INFO_SIZE            0x0004
+#define SET_CONSOLE_OUTPUT_INFO_ATTR            0x0008
+#define SET_CONSOLE_OUTPUT_INFO_DISPLAY_WINDOW  0x0010
+#define SET_CONSOLE_OUTPUT_INFO_MAX_SIZE        0x0020
+#define SET_CONSOLE_OUTPUT_INFO_FONT            0x0040
+#define SET_CONSOLE_OUTPUT_INFO_COLORTABLE      0x0080
+#define SET_CONSOLE_OUTPUT_INFO_POPUP_ATTR      0x0100
+
+
+/* Get info about a console (output only) */
+@REQ(get_console_output_info)
+    obj_handle_t handle;        /* handle to the console */
 @REPLY
-    unsigned int code;          /* ioctl code */
-    unsigned int output;        /* output id or 0 for input */
-    data_size_t  out_size;      /* ioctl output size */
-    VARARG(in_data,bytes);      /* ioctl in_data */
+    short int    cursor_size;   /* size of cursor (percentage filled) */
+    short int    cursor_visible;/* cursor visibility flag */
+    short int    cursor_x;      /* position of cursor (x, y) */
+    short int    cursor_y;
+    short int    width;         /* width of the screen buffer */
+    short int    height;        /* height of the screen buffer */
+    short int    attr;          /* default fill attributes (screen colors) */
+    short int    popup_attr;    /* pop-up color attributes */
+    short int    win_left;      /* window actually displayed by renderer */
+    short int    win_top;       /* the rect area is expressed within the */
+    short int    win_right;     /* boundaries of the screen buffer */
+    short int    win_bottom;
+    short int    max_width;     /* maximum size (width x height) for the window */
+    short int    max_height;
+    short int    font_width;    /* font size (width x height) */
+    short int    font_height;
+    short int    font_weight;   /* font weight */
+    short int    font_pitch_family; /* font pitch & family */
+    VARARG(colors,uints,64);    /* color table */
+    VARARG(face_name,unicode_str);  /* font face name */
+@END
+
+/* Add input records to a console input queue */
+@REQ(write_console_input)
+    obj_handle_t handle;        /* handle to the console input */
+    VARARG(rec,input_records);  /* input records */
+@REPLY
+    int          written;       /* number of records written */
+@END
+
+
+/* Fetch input records from a console input queue */
+@REQ(read_console_input)
+    obj_handle_t handle;        /* handle to the console input */
+    int          flush;         /* flush the retrieved records from the queue? */
+@REPLY
+    int          read;          /* number of records read */
+    VARARG(rec,input_records);  /* input records */
+@END
+
+
+/* write data (chars and/or attributes) in a screen buffer */
+@REQ(write_console_output)
+    obj_handle_t handle;        /* handle to the console output */
+    int          x;             /* position where to start writing */
+    int          y;
+    int          mode;          /* char info (see below) */
+    int          wrap;          /* wrap around at end of line? */
+    VARARG(data,bytes);         /* info to write */
+@REPLY
+    int          written;       /* number of char infos actually written */
+    int          width;         /* width of screen buffer */
+    int          height;        /* height of screen buffer */
+@END
+enum char_info_mode
+{
+    CHAR_INFO_MODE_TEXT,        /* characters only */
+    CHAR_INFO_MODE_ATTR,        /* attributes only */
+    CHAR_INFO_MODE_TEXTATTR,    /* both characters and attributes */
+    CHAR_INFO_MODE_TEXTSTDATTR  /* characters but use standard attributes */
+};
+
+
+/* fill a screen buffer with constant data (chars and/or attributes) */
+@REQ(fill_console_output)
+    obj_handle_t handle;        /* handle to the console output */
+    int          x;             /* position where to start writing */
+    int          y;
+    int          mode;          /* char info mode */
+    int          count;         /* number to write */
+    int          wrap;          /* wrap around at end of line? */
+    char_info_t  data;          /* data to write */
+@REPLY
+    int          written;       /* number of char infos actually written */
+@END
+
+
+/* read data (chars and/or attributes) from a screen buffer */
+@REQ(read_console_output)
+    obj_handle_t handle;        /* handle to the console output */
+    int          x;             /* position (x,y) where to start reading */
+    int          y;
+    int          mode;          /* char info mode */
+    int          wrap;          /* wrap around at end of line? */
+@REPLY
+    int          width;         /* width of screen buffer */
+    int          height;        /* height of screen buffer */
+    VARARG(data,bytes);
+@END
+
+
+/* move a rect (of data) in screen buffer content */
+@REQ(move_console_output)
+    obj_handle_t handle;        /* handle to the console output */
+    short int    x_src;         /* position (x, y) of rect to start moving from */
+    short int    y_src;
+    short int    x_dst;         /* position (x, y) of rect to move to */
+    short int    y_dst;
+    short int    w;             /* size of the rect (width, height) to move */
+    short int    h;
+@END
+
+
+/* Sends a signal to a process group */
+@REQ(send_console_signal)
+    int          signal;        /* the signal to send */
+    process_id_t group_id;      /* the group to send the signal to */
 @END
 
 
@@ -1625,6 +1897,15 @@ enum server_fd_type
 @END
 
 
+/* Get file for a mapping */
+@REQ(get_mapping_file)
+    obj_handle_t process;       /* process handle */
+    client_ptr_t addr;          /* arbitrary address in view */
+@REPLY
+    obj_handle_t handle;        /* handle to file */
+@END
+
+
 /* Get a range of committed pages in a file mapping */
 @REQ(get_mapping_committed_range)
     client_ptr_t base;          /* view base address */
@@ -1650,9 +1931,51 @@ enum server_fd_type
 @END
 
 
+#define SNAP_PROCESS    0x00000001
+#define SNAP_THREAD     0x00000002
+/* Create a snapshot */
+@REQ(create_snapshot)
+    unsigned int attributes;    /* object attributes */
+    unsigned int flags;         /* snapshot flags (SNAP_*) */
+@REPLY
+    obj_handle_t handle;        /* handle to the snapshot */
+@END
+
+
+/* Get the next process from a snapshot */
+@REQ(next_process)
+    obj_handle_t handle;        /* handle to the snapshot */
+    int          reset;         /* reset snapshot position? */
+@REPLY
+    int          count;         /* process usage count */
+    process_id_t pid;           /* process id */
+    process_id_t ppid;          /* parent process id */
+    int          threads;       /* number of threads */
+    int          priority;      /* process priority */
+    int          handles;       /* number of handles */
+    int          unix_pid;      /* Unix pid */
+    timeout_t    start_time;    /* start time */
+    VARARG(filename,unicode_str); /* file name of main exe */
+@END
+
+
+/* Get the next thread from a snapshot */
+@REQ(next_thread)
+    obj_handle_t handle;        /* handle to the snapshot */
+    int          reset;         /* reset snapshot position? */
+@REPLY
+    int          count;         /* thread usage count */
+    process_id_t pid;           /* process id */
+    thread_id_t  tid;           /* thread id */
+    timeout_t    creation_time; /* thread creation time */
+    int          base_pri;      /* base priority */
+    int          delta_pri;     /* delta priority */
+    int          unix_tid;      /* Unix tid */
+@END
+
+
 struct thread_info
 {
-    timeout_t       start_time;
     thread_id_t     tid;
     int             base_priority;
     int             current_priority;
@@ -1661,7 +1984,6 @@ struct thread_info
 
 struct process_info
 {
-    timeout_t       start_time;
     data_size_t     name_len;
     int             thread_count;
     int             priority;
@@ -1669,7 +1991,6 @@ struct process_info
     process_id_t    parent_pid;
     int             handle_count;
     int             unix_pid;
-    int             __pad;
     /* VARARG(name,unicode_str,name_len); */
     /* VARARG(threads,struct thread_info,thread_count); */
 };
@@ -2140,9 +2461,10 @@ enum message_type
 @END
 
 
-/* Accept and remove the current hardware message */
+/* Accept the current hardware message */
 @REQ(accept_hardware_message)
     unsigned int    hw_id;     /* id of the hardware message */
+    int             remove;    /* should we remove the message? */
 @END
 
 
@@ -3241,6 +3563,13 @@ enum caret_state
     VARARG(sid,SID);              /* the sid specified by which_sid from the token */
 @END
 
+@REQ(get_token_integrity)
+    obj_handle_t    handle;       /* handle to the token */
+@REPLY
+    data_size_t     sid_len;      /* length needed to store sid */
+    VARARG(sid,SID);              /* the integrity sid */
+@END
+
 @REQ(get_token_groups)
     obj_handle_t    handle;       /* handle to the token */
 @REPLY
@@ -3406,6 +3735,12 @@ struct handle_info
 @END
 
 
+/* Unlink a named object */
+@REQ(unlink_object)
+    obj_handle_t   handle;        /* handle to the object */
+@END
+
+
 /* Query the impersonation level of an impersonation token */
 @REQ(get_token_impersonation_level)
     obj_handle_t   handle;        /* handle to the object */
@@ -3519,6 +3854,29 @@ struct handle_info
     int            impersonation_level; /* level of impersonation */
     int            group_count;   /* the number of groups the token is a member of */
     int            privilege_count; /* the number of privileges the token has */
+@END
+
+
+/* Get elevation level of token */
+@REQ(get_token_elevation_type)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    unsigned int   elevation;     /* elevation level */
+@END
+
+
+/* Create a new token */
+@REQ(create_token)
+    unsigned int  admin;        /* admin or limited token */
+@REPLY
+    obj_handle_t  token;        /* handle for new token */
+@END
+
+
+/* Create a new token */
+@REQ(replace_process_token)
+    obj_handle_t  token;        /* new process token */
+@REPLY
 @END
 
 
@@ -3678,6 +4036,60 @@ struct handle_info
 #define SET_CURSOR_CLIP   0x08
 #define SET_CURSOR_NOCLIP 0x10
 
+enum fsync_type
+{
+    FSYNC_SEMAPHORE = 1,
+    FSYNC_AUTO_EVENT,
+    FSYNC_MANUAL_EVENT,
+    FSYNC_MUTEX,
+    FSYNC_AUTO_SERVER,
+    FSYNC_MANUAL_SERVER,
+    FSYNC_QUEUE,
+};
+
+/* Create a new futex-based synchronization object */
+@REQ(create_fsync)
+    unsigned int access;        /* wanted access rights */
+    int low;                    /* initial value of low word */
+    int high;                   /* initial value of high word */
+    int type;                   /* type of fsync object */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the object */
+    int type;                   /* type of fsync object */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Open an fsync object */
+@REQ(open_fsync)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    int          type;          /* type of fsync object */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+    int          type;          /* type of fsync object */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Retrieve the shm index for an object. */
+@REQ(get_fsync_idx)
+    obj_handle_t handle;        /* handle to the object */
+@REPLY
+    int          type;
+    unsigned int shm_idx;
+@END
+
+@REQ(fsync_msgwait)
+    int          in_msgwait;    /* are we in a message wait? */
+@END
+
+@REQ(get_fsync_apc_idx)
+@REPLY
+    unsigned int shm_idx;
+@END
+
 
 /* Batch read rawinput message data */
 @REQ(get_rawinput_buffer)
@@ -3776,3 +4188,65 @@ struct handle_info
 @REQ(resume_process)
     obj_handle_t handle;       /* process handle */
 @END
+
+/* Return system information values */
+@REQ(get_system_info)
+@REPLY
+    unsigned int processes;   /* number of processes */
+    unsigned int threads;     /* number of threads */
+    unsigned int handles;     /* number of handles */
+@END
+
+/* Create a new eventfd-based synchronization object */
+@REQ(create_esync)
+    unsigned int access;        /* wanted access rights */
+    int          initval;       /* initial value */
+    int          type;          /* type of esync object (see below) */
+    int          max;           /* maximum count on a semaphore */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the object */
+    int          type;          /* type of esync object (see below) */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Open an esync object */
+@REQ(open_esync)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    int          type;          /* type of esync object (above) */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+    int          type;          /* type of esync object (above) */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Retrieve the esync fd for an object. */
+@REQ(get_esync_fd)
+    obj_handle_t handle;        /* handle to the object */
+@REPLY
+    int          type;          /* esync type (defined below) */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Retrieve the fd to wait on for user APCs. */
+@REQ(get_esync_apc_fd)
+@END
+
+/* Notify the server that we are doing a message wait (or done with one). */
+@REQ(esync_msgwait)
+    int          in_msgwait;    /* are we in a message wait? */
+@END
+
+enum esync_type
+{
+    ESYNC_SEMAPHORE = 1,
+    ESYNC_AUTO_EVENT,
+    ESYNC_MANUAL_EVENT,
+    ESYNC_MUTEX,
+    ESYNC_AUTO_SERVER,
+    ESYNC_MANUAL_SERVER,
+    ESYNC_QUEUE,
+};

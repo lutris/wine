@@ -1261,7 +1261,6 @@ typedef struct _KUSER_SHARED_DATA {
     ULONG SuiteMask;                                       /* 0x2d0 */
     BOOLEAN KdDebuggerEnabled;                             /* 0x2d4 */
     UCHAR NXSupportPolicy;                                 /* 0x2d5 */
-    USHORT CyclesPerYield;                                 /* 0x2d6 */
     volatile ULONG ActiveConsoleId;                        /* 0x2d8 */
     volatile ULONG DismountCount;                          /* 0x2dc */
     ULONG ComPlusPackage;                                  /* 0x2e0 */
@@ -1269,43 +1268,16 @@ typedef struct _KUSER_SHARED_DATA {
     ULONG NumberOfPhysicalPages;                           /* 0x2e8 */
     BOOLEAN SafeBootMode;                                  /* 0x2ec */
     UCHAR VirtualizationFlags;                             /* 0x2ed */
-    union {
-        ULONG SharedDataFlags;                             /* 0x2f0 */
-        struct {
-            ULONG DbgErrorPortPresent       : 1;
-            ULONG DbgElevationEnabed        : 1;
-            ULONG DbgVirtEnabled            : 1;
-            ULONG DbgInstallerDetectEnabled : 1;
-            ULONG DbgLkgEnabled             : 1;
-            ULONG DbgDynProcessorEnabled    : 1;
-            ULONG DbgConsoleBrokerEnabled   : 1;
-            ULONG DbgSecureBootEnabled      : 1;
-            ULONG DbgMultiSessionSku        : 1;
-            ULONG DbgMultiUsersInSessionSku : 1;
-            ULONG DbgStateSeparationEnabled : 1;
-            ULONG SpareBits                 : 21;
-        } DUMMYSTRUCTNAME2;
-    } DUMMYUNIONNAME2;
-    ULONG DataFlagsPad[1];                                 /* 0x2f4 */
+    ULONG TraceLogging;                                    /* 0x2f0 */
     ULONGLONG TestRetInstruction;                          /* 0x2f8 */
-    LONGLONG QpcFrequency;                                 /* 0x300 */
-    ULONG SystemCall;                                      /* 0x308 */
-    union {
-        ULONG AllFlags;                                    /* 0x30c */
-        struct {
-            ULONG Win32Process            : 1;
-            ULONG Sgx2Enclave             : 1;
-            ULONG VbsBasicEnclave         : 1;
-            ULONG SpareBits               : 29;
-        } DUMMYSTRUCTNAME;
-    } UserCetAvailableEnvironments;
-    ULONGLONG SystemCallPad[2];                            /* 0x310 */
+    ULONG SystemCall;                                      /* 0x300 */
+    ULONG SystemCallReturn;                                /* 0x304 */
+    ULONGLONG SystemCallPad[3];                            /* 0x308 */
     union {
         volatile KSYSTEM_TIME TickCount;                   /* 0x320 */
         volatile ULONG64 TickCountQuad;
     } DUMMYUNIONNAME;
     ULONG Cookie;                                          /* 0x330 */
-    ULONG CookiePad[1];                                    /* 0x334 */
     LONGLONG ConsoleSessionForegroundProcessId;            /* 0x338 */
     ULONGLONG TimeUpdateLock;                              /* 0x340 */
     ULONGLONG BaselineSystemTimeQpc;                       /* 0x348 */
@@ -1835,20 +1807,6 @@ HANDLE    WINAPI PsGetCurrentThreadId(void);
 HANDLE    WINAPI PsGetProcessInheritedFromUniqueProcessId(PEPROCESS);
 BOOLEAN   WINAPI PsGetVersion(ULONG*,ULONG*,ULONG*,UNICODE_STRING*);
 NTSTATUS  WINAPI PsTerminateSystemThread(NTSTATUS);
-
-#if defined(__x86_64__) || defined(__i386__)
-NTSTATUS  WINAPI RtlCopyExtendedContext(CONTEXT_EX*,ULONG,CONTEXT_EX*);
-NTSTATUS  WINAPI RtlInitializeExtendedContext(void*,ULONG,CONTEXT_EX**);
-NTSTATUS  WINAPI RtlInitializeExtendedContext2(void*,ULONG,CONTEXT_EX**,ULONG64);
-ULONG64   WINAPI RtlGetEnabledExtendedFeatures(ULONG64);
-NTSTATUS  WINAPI RtlGetExtendedContextLength(ULONG,ULONG*);
-NTSTATUS  WINAPI RtlGetExtendedContextLength2(ULONG,ULONG*,ULONG64);
-void *    WINAPI RtlLocateLegacyContext(CONTEXT_EX*,ULONG*);
-void *    WINAPI RtlLocateExtendedFeature(CONTEXT_EX*,ULONG,ULONG*);
-void *    WINAPI RtlLocateExtendedFeature2(CONTEXT_EX*,ULONG,XSTATE_CONFIGURATION*,ULONG*);
-ULONG64   WINAPI RtlGetExtendedFeaturesMask(CONTEXT_EX*);
-void      WINAPI RtlSetExtendedFeaturesMask(CONTEXT_EX*,ULONG64);
-#endif
 
 #ifdef __x86_64__
 void      WINAPI RtlCopyMemoryNonTemporal(void*,const void*,SIZE_T);

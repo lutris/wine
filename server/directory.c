@@ -58,6 +58,8 @@ static const struct object_ops object_type_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -96,6 +98,8 @@ static const struct object_ops directory_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -356,35 +360,18 @@ void init_directories(void)
     static const WCHAR link_nulW[]    = {'N','U','L'};
     static const WCHAR link_pipeW[]   = {'P','I','P','E'};
     static const WCHAR link_mailslotW[] = {'M','A','I','L','S','L','O','T'};
-    static const WCHAR link_coninW[]  = {'C','O','N','I','N','$'};
-    static const WCHAR link_conoutW[] = {'C','O','N','O','U','T','$'};
-    static const WCHAR link_conW[]    = {'C','O','N'};
-    static const WCHAR link_currentinW[]  = {'\\','D','e','v','i','c','e','\\','C','o','n','D','r','v',
-        '\\','C','u','r','r','e','n','t','I','n'};
-    static const WCHAR link_currentoutW[] = {'\\','D','e','v','i','c','e','\\','C','o','n','D','r','v',
-        '\\','C','u','r','r','e','n','t','O','u','t'};
-    static const WCHAR link_consoleW[]    = {'\\','D','e','v','i','c','e','\\','C','o','n','D','r','v',
-        '\\','C','o','n','s','o','l','e'};
     static const struct unicode_str link_dosdev_str = {link_dosdevW, sizeof(link_dosdevW)};
     static const struct unicode_str link_global_str = {link_globalW, sizeof(link_globalW)};
     static const struct unicode_str link_nul_str    = {link_nulW, sizeof(link_nulW)};
     static const struct unicode_str link_pipe_str   = {link_pipeW, sizeof(link_pipeW)};
     static const struct unicode_str link_mailslot_str = {link_mailslotW, sizeof(link_mailslotW)};
-    static const struct unicode_str link_con_str      = {link_conW, sizeof(link_conW)};
-    static const struct unicode_str link_conin_str    = {link_coninW, sizeof(link_coninW)};
-    static const struct unicode_str link_conout_str   = {link_conoutW, sizeof(link_conoutW)};
-    static const struct unicode_str link_currentin_str = {link_currentinW, sizeof(link_currentinW)};
-    static const struct unicode_str link_currentout_str = {link_currentoutW, sizeof(link_currentoutW)};
-    static const struct unicode_str link_console_str  = {link_consoleW, sizeof(link_consoleW)};
 
     /* devices */
     static const WCHAR named_pipeW[] = {'N','a','m','e','d','P','i','p','e'};
     static const WCHAR mailslotW[] = {'M','a','i','l','S','l','o','t'};
-    static const WCHAR condrvW[] = {'C','o','n','D','r','v'};
     static const WCHAR nullW[] = {'N','u','l','l'};
     static const struct unicode_str named_pipe_str = {named_pipeW, sizeof(named_pipeW)};
     static const struct unicode_str mailslot_str = {mailslotW, sizeof(mailslotW)};
-    static const struct unicode_str condrv_str = {condrvW, sizeof(condrvW)};
     static const struct unicode_str null_str = {nullW, sizeof(nullW)};
 
     /* events */
@@ -406,14 +393,9 @@ void init_directories(void)
     };
     static const struct unicode_str keyed_event_crit_sect_str = {keyed_event_crit_sectW, sizeof(keyed_event_crit_sectW)};
 
-    /* mappings */
-    static const WCHAR user_dataW[] = {'_','_','w','i','n','e','_','u','s','e','r','_','s','h','a','r','e','d','_','d','a','t','a'};
-    static const struct unicode_str user_data_str = {user_dataW, sizeof(user_dataW)};
-
     struct directory *dir_driver, *dir_device, *dir_global, *dir_kernel;
     struct object *link_dosdev, *link_global, *link_nul, *link_pipe, *link_mailslot;
-    struct object *link_conin, *link_conout, *link_con;
-    struct object *named_pipe_device, *mailslot_device, *null_device, *user_data_mapping, *console_device;
+    struct object *named_pipe_device, *mailslot_device, *null_device;
     struct keyed_event *keyed_event;
     unsigned int i;
 
@@ -430,12 +412,10 @@ void init_directories(void)
     /* devices */
     named_pipe_device = create_named_pipe_device( &dir_device->obj, &named_pipe_str );
     mailslot_device   = create_mailslot_device( &dir_device->obj, &mailslot_str );
-    console_device    = create_console_device( &dir_device->obj, &condrv_str );
     null_device       = create_unix_device( &dir_device->obj, &null_str, "/dev/null" );
     make_object_static( named_pipe_device );
     make_object_static( mailslot_device );
     make_object_static( null_device );
-    make_object_static( console_device );
 
     /* sessions */
     create_session( 0 );
@@ -447,17 +427,11 @@ void init_directories(void)
     link_nul       = create_obj_symlink( &dir_global->obj, &link_nul_str, 0, null_device, NULL );
     link_pipe      = create_obj_symlink( &dir_global->obj, &link_pipe_str, 0, named_pipe_device, NULL );
     link_mailslot  = create_obj_symlink( &dir_global->obj, &link_mailslot_str, 0, mailslot_device, NULL );
-    link_conin     = create_symlink( &dir_global->obj, &link_conin_str, 0, &link_currentin_str, NULL );
-    link_conout    = create_symlink( &dir_global->obj, &link_conout_str, 0, &link_currentout_str, NULL );
-    link_con       = create_symlink( &dir_global->obj, &link_con_str, 0, &link_console_str, NULL );
     make_object_static( link_dosdev );
     make_object_static( link_global );
     make_object_static( link_nul );
     make_object_static( link_pipe );
     make_object_static( link_mailslot );
-    make_object_static( link_conin );
-    make_object_static( link_conout );
-    make_object_static( link_con );
 
     /* events */
     for (i = 0; i < ARRAY_SIZE( kernel_events ); i++)
@@ -467,10 +441,6 @@ void init_directories(void)
     }
     keyed_event = create_keyed_event( &dir_kernel->obj, &keyed_event_crit_sect_str, 0, NULL );
     make_object_static( (struct object *)keyed_event );
-
-    /* user data mapping */
-    user_data_mapping = create_user_data_mapping( &dir_kernel->obj, &user_data_str, 0, NULL );
-    make_object_static( user_data_mapping );
 
     /* the objects hold references so we can release these directories */
     release_object( dir_global );
@@ -540,6 +510,18 @@ DECL_HANDLER(get_directory_entry)
             release_object( obj );
         }
         release_object( dir );
+    }
+}
+
+/* unlink a named object */
+DECL_HANDLER(unlink_object)
+{
+    struct object *obj = get_handle_obj( current->process, req->handle, 0, NULL );
+
+    if (obj)
+    {
+        unlink_named_object( obj );
+        release_object( obj );
     }
 }
 

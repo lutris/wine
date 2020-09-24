@@ -165,7 +165,7 @@
 @ stdcall ConvertThreadToFiber(ptr)
 @ stdcall ConvertThreadToFiberEx(ptr long)
 @ stdcall ConvertToAutoInheritPrivateObjectSecurity(ptr ptr ptr ptr long ptr)
-@ stdcall -arch=i386,x86_64 CopyContext(ptr long ptr)
+# @ stub CopyContext
 # @ stub CopyFile2
 @ stdcall CopyFileExW(wstr wstr ptr ptr ptr long)
 @ stdcall CopyFileW(wstr wstr long)
@@ -493,7 +493,7 @@
 # @ stub GetEffectivePackageStatusForUser
 # @ stub GetEightBitStringToUnicodeSizeRoutine
 # @ stub GetEightBitStringToUnicodeStringRoutine
-@ stdcall -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures()
+@ stdcall -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures() kernel32.GetEnabledXStateFeatures
 @ stdcall GetEnvironmentStrings() GetEnvironmentStringsA
 @ stdcall GetEnvironmentStringsA()
 @ stdcall GetEnvironmentStringsW()
@@ -766,7 +766,7 @@
 @ stdcall GetWriteWatch(long ptr long ptr ptr ptr)
 # @ stub GetWsChanges
 # @ stub GetWsChangesEx
-@ stdcall -arch=i386,x86_64 GetXStateFeaturesMask(ptr ptr)
+# @ stub GetXStateFeaturesMask
 @ stdcall GlobalAlloc(long long)
 @ stdcall GlobalFree(long)
 @ stdcall GlobalMemoryStatusEx(ptr)
@@ -801,8 +801,7 @@
 @ stdcall InitOnceInitialize(ptr) ntdll.RtlRunOnceInitialize
 @ stdcall InitializeAcl(ptr long long)
 @ stdcall InitializeConditionVariable(ptr) ntdll.RtlInitializeConditionVariable
-@ stdcall -arch=i386,x86_64 InitializeContext(ptr long ptr ptr)
-@ stdcall -arch=i386,x86_64 InitializeContext2(ptr long ptr ptr int64)
+# @ stub InitializeContext
 @ stdcall InitializeCriticalSection(ptr) ntdll.RtlInitializeCriticalSection
 @ stdcall InitializeCriticalSectionAndSpinCount(ptr long)
 @ stdcall InitializeCriticalSectionEx(ptr long long)
@@ -942,7 +941,7 @@
 @ stdcall LocalReAlloc(long long long)
 @ stdcall LocalUnlock(long)
 @ stdcall LocaleNameToLCID(wstr long)
-@ stdcall -arch=i386,x86_64 LocateXStateFeature(ptr long ptr)
+# @ stub LocateXStateFeature
 @ stdcall LockFile(long long long long long)
 @ stdcall LockFileEx(long long long long long ptr)
 @ stdcall LockResource(long)
@@ -1334,8 +1333,8 @@
 @ stdcall ReleaseSemaphoreWhenCallbackReturns(ptr long long) ntdll.TpCallbackReleaseSemaphoreOnCompletion
 # @ stub ReleaseStateLock
 @ stdcall RemapPredefinedHandleInternal(long long)
-@ stdcall RemoveDirectoryA(str)
-@ stdcall RemoveDirectoryW(wstr)
+@ stdcall RemoveDirectoryA(str) kernel32.RemoveDirectoryA
+@ stdcall RemoveDirectoryW(wstr) kernel32.RemoveDirectoryW
 @ stdcall RemoveDllDirectory(ptr)
 # @ stub RemovePackageStatus
 # @ stub RemovePackageStatusForUser
@@ -1510,7 +1509,7 @@
 @ stdcall SetUserGeoID(long)
 @ stdcall SetWaitableTimer(long ptr long ptr ptr long)
 @ stdcall SetWaitableTimerEx(long ptr long ptr ptr ptr long)
-@ stdcall -arch=i386,x86_64 SetXStateFeaturesMask(ptr int64)
+# @ stub SetXStateFeaturesMask
 @ stdcall SetupComm(long long long)
 # @ stub SharedLocalIsEnabled
 @ stdcall SignalObjectAndWait(long long long long)

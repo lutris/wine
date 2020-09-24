@@ -70,7 +70,6 @@ static const char * const FlagNames[] =
     "ordinal",     /* FLAG_ORDINAL */
     "thiscall",    /* FLAG_THISCALL */
     "fastcall",    /* FLAG_FASTCALL */
-    "syscall",     /* FLAG_SYSCALL */
     "import",      /* FLAG_IMPORT */
     NULL
 };
@@ -321,14 +320,6 @@ static int parse_spec_arguments( ORDDEF *odp, DLLSPEC *spec, int optional )
             return 0;
         }
     }
-    if (odp->flags & FLAG_SYSCALL)
-    {
-        if (odp->type != TYPE_STDCALL && odp->type != TYPE_CDECL)
-        {
-            error( "A syscall function must use either the stdcall or the cdecl convention\n" );
-            return 0;
-        }
-    }
     return 1;
 }
 
@@ -552,6 +543,24 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp )
 }
 
 
+static int needs_syscall( ORDDEF *odp, DLLSPEC *spec )
+{
+    if (target_cpu != CPU_x86 && target_cpu != CPU_x86_64)
+        return 0;
+    if (odp->flags & (FLAG_FORWARD | FLAG_REGISTER))
+        return 0;
+    if (odp->type != TYPE_STDCALL)
+        return 0;
+    if (!spec->dll_name || strcmp(spec->dll_name, "ntdll"))
+        return 0;
+    if (!odp->name)
+        return 0;
+    if (strncmp(odp->name, "Nt", 2) && strncmp(odp->name, "Zw", 2))
+        return 0;
+    return 1;
+}
+
+
 /*******************************************************************
  *         parse_spec_ordinal
  *
@@ -625,6 +634,14 @@ static int parse_spec_ordinal( int ordinal, DLLSPEC *spec )
         break;
     default:
         assert( 0 );
+    }
+
+    if (needs_syscall( odp, spec ))
+    {
+        char *link_name = strmake( "__syscall_%s", odp->link_name );
+        odp->impl_name = odp->link_name;
+        odp->link_name = link_name;
+        odp->flags |= FLAG_SYSCALL;
     }
 
     if ((odp->flags & FLAG_CPU_MASK) && !(odp->flags & FLAG_CPU(target_cpu)))
@@ -824,6 +841,37 @@ static void assign_ordinals( DLLSPEC *spec )
 }
 
 
+static int link_name_compare( const void *e1, const void *e2 )
+{
+    const ORDDEF *odp1 = *(const ORDDEF * const *)e1;
+    const ORDDEF *odp2 = *(const ORDDEF * const *)e2;
+    return strcmp(odp1->link_name, odp2->link_name);
+}
+
+
+static void assign_syscalls( DLLSPEC *spec )
+{
+    int i;
+
+    spec->syscalls = xmalloc( (spec->limit - spec->base + 1) * sizeof(*spec->syscalls) );
+    spec->nb_syscalls = 0;
+
+    for (i = 0; i <= spec->limit; i++)
+    {
+        ORDDEF *odp = spec->ordinals[i];
+        if (!odp || !(odp->flags & FLAG_SYSCALL)) continue;
+        spec->syscalls[spec->nb_syscalls++] = odp;
+    }
+
+    spec->nb_syscalls = sort_func_list( spec->syscalls, spec->nb_syscalls, link_name_compare );
+    if (!spec->nb_syscalls)
+    {
+        free( spec->syscalls );
+        spec->syscalls = NULL;
+    }
+}
+
+
 /*******************************************************************
  *         add_16bit_exports
  *
@@ -922,6 +970,8 @@ int parse_spec_file( FILE *file, DLLSPEC *spec )
     current_line = 0;  /* no longer parsing the input file */
     assign_names( spec );
     assign_ordinals( spec );
+    assign_syscalls( spec );
+
     return !nb_errors;
 }
 

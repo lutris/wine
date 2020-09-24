@@ -54,6 +54,10 @@ struct thread
     struct process        *process;
     thread_id_t            id;            /* thread id */
     struct list            mutex_list;    /* list of currently owned mutexes */
+    int                    esync_fd;      /* esync file descriptor (signalled on exit) */
+    int                    esync_apc_fd;  /* esync apc fd (signalled when APCs are present) */
+    unsigned int           fsync_idx;
+    unsigned int           fsync_apc_idx;
     struct debug_ctx      *debug_ctx;     /* debugger context if this thread is a debugger */
     unsigned int           system_regs;   /* which system regs have been set */
     struct msg_queue      *queue;         /* message queue */
@@ -82,7 +86,6 @@ struct thread
     affinity_t             affinity;      /* affinity mask */
     int                    priority;      /* priority level */
     int                    suspend;       /* suspend count */
-    int                    dbg_hidden;    /* hidden from debugger */
     obj_handle_t           desktop;       /* desktop handle */
     int                    desktop_users; /* number of objects using the thread desktop */
     timeout_t              creation_time; /* Thread creation time */
@@ -92,6 +95,15 @@ struct thread
     data_size_t            desc_len;      /* thread description length in bytes */
     WCHAR                 *desc;          /* thread description string */
     struct timeout_user   *exit_poll;     /* poll if the thread/process has exited already */
+    int                    shm_fd;        /* file descriptor for thread local shared memory */
+    shmlocal_t            *shm;           /* thread local shared memory pointer */
+};
+
+struct thread_snapshot
+{
+    struct thread  *thread;    /* thread ptr */
+    int             count;     /* thread refcount */
+    int             priority;  /* priority class */
 };
 
 extern struct thread *current;
@@ -119,6 +131,7 @@ extern int thread_queue_apc( struct process *process, struct thread *thread, str
 extern void thread_cancel_apc( struct thread *thread, struct object *owner, enum apc_type type );
 extern int thread_add_inflight_fd( struct thread *thread, int client, int server );
 extern int thread_get_inflight_fd( struct thread *thread, int client );
+extern struct thread_snapshot *thread_snap( int *count );
 extern struct token *thread_get_impersonation_token( struct thread *thread );
 extern int set_thread_affinity( struct thread *thread, affinity_t affinity );
 extern int is_cpu_supported( enum cpu_type cpu );
@@ -144,6 +157,8 @@ static inline void clear_error(void)             { set_error(0); }
 static inline void set_win32_error( unsigned int err ) { set_error( 0xc0010000 | err ); }
 
 static inline thread_id_t get_thread_id( struct thread *thread ) { return thread->id; }
+static inline int get_thread_unix_tid( struct thread *thread ) { return thread->unix_tid; }
+static inline timeout_t get_thread_creation_time( struct thread *thread ) { return thread->creation_time; }
 
 /* scheduler functions */
 

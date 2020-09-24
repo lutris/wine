@@ -19,10 +19,18 @@
  */
 
 #define NONAMELESSUNION
+#include "config.h"
+#include "wine/port.h"
 
+#include <locale.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
+
+#ifdef __APPLE__
+# include <CoreFoundation/CFLocale.h>
+# include <CoreFoundation/CFString.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -102,6 +110,7 @@ struct norm_table
 
 LCID user_lcid = 0, system_lcid = 0;
 
+static LANGID user_ui_language, system_ui_language;
 static NLSTABLEINFO nls_info;
 static HMODULE kernel32_handle;
 static CPTABLEINFO unix_table;
@@ -582,16 +591,16 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
         break;
     case NLS_SECTION_CASEMAP:
         if (id) return STATUS_UNSUCCESSFUL;
-        swprintf( buffer, ARRAY_SIZE(buffer), keyfmtW, langW );
-        swprintf( value, ARRAY_SIZE(value), langfmtW, LANGIDFROMLCID(system_lcid) );
+        NTDLL_swprintf( buffer, keyfmtW, langW );
+        NTDLL_swprintf( value, langfmtW, LANGIDFROMLCID(system_lcid) );
         break;
     case NLS_SECTION_CODEPAGE:
-        swprintf( buffer, ARRAY_SIZE(buffer), keyfmtW, cpW );
-        swprintf( value, ARRAY_SIZE(value), cpfmtW, id );
+        NTDLL_swprintf( buffer, keyfmtW, cpW );
+        NTDLL_swprintf( value, cpfmtW, id );
         break;
     case NLS_SECTION_NORMALIZE:
-        swprintf( buffer, ARRAY_SIZE(buffer), keyfmtW, normW );
-        swprintf( value, ARRAY_SIZE(value), normfmtW, id );
+        NTDLL_swprintf( buffer, keyfmtW, normW );
+        NTDLL_swprintf( value, normfmtW, id );
         break;
     default:
         return STATUS_INVALID_PARAMETER_1;
@@ -627,7 +636,7 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
             name = intlW;
             break;
         case NLS_SECTION_CODEPAGE:
-            swprintf( buffer, ARRAY_SIZE(buffer), cpdefaultW, id );
+            NTDLL_swprintf( buffer, cpdefaultW, id );
             name = buffer;
             break;
         case NLS_SECTION_NORMALIZE:
@@ -649,10 +658,9 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
     valueW.MaximumLength = (wcslen(name) + wcslen(dir) + 5) * sizeof(WCHAR);
     if (!(valueW.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, valueW.MaximumLength )))
         return STATUS_NO_MEMORY;
-    valueW.Length = swprintf( valueW.Buffer, valueW.MaximumLength/sizeof(WCHAR),
-                              pathfmtW, dir, name ) * sizeof(WCHAR);
+    valueW.Length = NTDLL_swprintf( valueW.Buffer, pathfmtW, dir, name ) * sizeof(WCHAR);
     InitializeObjectAttributes( &attr, &valueW, 0, 0, NULL );
-    status = NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
+    status = __syscall_NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
     if (!status) TRACE( "found %s\n", debugstr_w( valueW.Buffer ));
     RtlFreeUnicodeString( &valueW );
     if (status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND) return status;
@@ -676,7 +684,7 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
         wcscat( valueW.Buffer, name );
         valueW.Length = wcslen(valueW.Buffer) * sizeof(WCHAR);
         InitializeObjectAttributes( &attr, &valueW, 0, 0, NULL );
-        status = NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
+        status = __syscall_NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
         if (!status) TRACE( "found %s\n", debugstr_w( valueW.Buffer ));
     }
     RtlFreeUnicodeString( &valueW );
@@ -686,22 +694,83 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
 
 void init_unix_codepage(void)
 {
-    USHORT *data = unix_funcs->get_unix_codepage_data();
-    if (data) RtlInitCodePageTable( data, &unix_table );
+    unix_funcs->get_unix_codepage( &unix_table );
 }
 
-
-static LCID locale_to_lcid( WCHAR *win_name )
+/* Unix format is: lang[_country][.charset][@modifier]
+ * Windows format is: lang[-script][-country][_modifier] */
+static LCID unix_locale_to_lcid( const char *unix_name )
 {
-    WCHAR *p;
+    static const WCHAR sepW[] = {'_','.','@',0};
+    static const WCHAR posixW[] = {'P','O','S','I','X',0};
+    static const WCHAR cW[] = {'C',0};
+    static const WCHAR euroW[] = {'e','u','r','o',0};
+    static const WCHAR latinW[] = {'l','a','t','i','n',0};
+    static const WCHAR latnW[] = {'-','L','a','t','n',0};
+    WCHAR buffer[LOCALE_NAME_MAX_LENGTH], win_name[LOCALE_NAME_MAX_LENGTH];
+    WCHAR *p, *country = NULL, *modifier = NULL;
+    DWORD len;
     LCID lcid;
+
+    if (!unix_name || !unix_name[0] || !strcmp( unix_name, "C" ))
+    {
+        unix_name = getenv( "LC_ALL" );
+        if (!unix_name || !unix_name[0]) return 0;
+    }
+
+    len = ntdll_umbstowcs( unix_name, strlen(unix_name), buffer, ARRAY_SIZE(buffer) );
+    if (len == ARRAY_SIZE(buffer)) return 0;
+    buffer[len] = 0;
+
+    if (!(p = wcspbrk( buffer, sepW )))
+    {
+        if (!wcscmp( buffer, posixW ) || !wcscmp( buffer, cW ))
+            return MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
+        wcscpy( win_name, buffer );
+    }
+    else
+    {
+        if (*p == '_')
+        {
+            *p++ = 0;
+            country = p;
+            p = wcspbrk( p, sepW + 1 );
+        }
+        if (p && *p == '.')
+        {
+            *p++ = 0;
+            /* charset, ignore */
+            p = wcschr( p, '@' );
+        }
+        if (p)
+        {
+            *p++ = 0;
+            modifier = p;
+        }
+    }
+
+    /* rebuild a Windows name */
+
+    wcscpy( win_name, buffer );
+    if (modifier)
+    {
+        if (!wcscmp( modifier, latinW )) wcscat( win_name, latnW );
+        else if (!wcscmp( modifier, euroW )) {} /* ignore */
+        else return 0;
+    }
+    if (country)
+    {
+        p = win_name + wcslen(win_name);
+        *p++ = '-';
+        wcscpy( p, country );
+    }
 
     if (!RtlLocaleNameToLcid( win_name, &lcid, 0 )) return lcid;
 
     /* try neutral name */
-    if ((p = wcsrchr( win_name, '-' )))
+    if (country)
     {
-        *p = 0;
+        p[-1] = 0;
         if (!RtlLocaleNameToLcid( win_name, &lcid, 2 ))
         {
             if (SUBLANGID(lcid) == SUBLANG_NEUTRAL)
@@ -718,14 +787,75 @@ static LCID locale_to_lcid( WCHAR *win_name )
  */
 void init_locale( HMODULE module )
 {
-    WCHAR system_locale[LOCALE_NAME_MAX_LENGTH];
-    WCHAR user_locale[LOCALE_NAME_MAX_LENGTH];
+    LCID system_lcid, user_lcid;
 
     kernel32_handle = module;
 
-    unix_funcs->get_locales( system_locale, user_locale );
-    system_lcid = locale_to_lcid( system_locale );
-    user_lcid = locale_to_lcid( user_locale );
+    setlocale( LC_ALL, "" );
+
+    system_lcid = unix_locale_to_lcid( setlocale( LC_CTYPE, NULL ));
+    user_lcid = unix_locale_to_lcid( setlocale( LC_MESSAGES, NULL ));
+
+#ifdef __APPLE__
+    {
+        const struct norm_table *info;
+        load_norm_table( NormalizationC, &info );
+    }
+    if (!system_lcid)
+    {
+        char buffer[LOCALE_NAME_MAX_LENGTH];
+
+        CFLocaleRef locale = CFLocaleCopyCurrent();
+        CFStringRef lang = CFLocaleGetValue( locale, kCFLocaleLanguageCode );
+        CFStringRef country = CFLocaleGetValue( locale, kCFLocaleCountryCode );
+        CFStringRef locale_string;
+
+        if (country)
+            locale_string = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@_%@"), lang, country);
+        else
+            locale_string = CFStringCreateCopy(NULL, lang);
+
+        CFStringGetCString(locale_string, buffer, sizeof(buffer), kCFStringEncodingUTF8);
+        system_lcid = unix_locale_to_lcid( buffer );
+        CFRelease(locale);
+        CFRelease(locale_string);
+    }
+    if (!user_lcid)
+    {
+        /* Retrieve the preferred language as chosen in System Preferences. */
+        char buffer[LOCALE_NAME_MAX_LENGTH];
+        CFArrayRef preferred_langs = CFLocaleCopyPreferredLanguages();
+        if (preferred_langs && CFArrayGetCount( preferred_langs ))
+        {
+            CFStringRef preferred_lang = CFArrayGetValueAtIndex( preferred_langs, 0 );
+            CFDictionaryRef components = CFLocaleCreateComponentsFromLocaleIdentifier( NULL, preferred_lang );
+            if (components)
+            {
+                CFStringRef lang = CFDictionaryGetValue( components, kCFLocaleLanguageCode );
+                CFStringRef country = CFDictionaryGetValue( components, kCFLocaleCountryCode );
+                CFLocaleRef locale = NULL;
+                CFStringRef locale_string;
+
+                if (!country)
+                {
+                    locale = CFLocaleCopyCurrent();
+                    country = CFLocaleGetValue( locale, kCFLocaleCountryCode );
+                }
+                if (country)
+                    locale_string = CFStringCreateWithFormat( NULL, NULL, CFSTR("%@_%@"), lang, country );
+                else
+                    locale_string = CFStringCreateCopy( NULL, lang );
+                CFStringGetCString( locale_string, buffer, sizeof(buffer), kCFStringEncodingUTF8 );
+                CFRelease( locale_string );
+                if (locale) CFRelease( locale );
+                CFRelease( components );
+                user_lcid = unix_locale_to_lcid( buffer );
+            }
+        }
+        if (preferred_langs) CFRelease( preferred_langs );
+    }
+#endif
+
     if (!system_lcid) system_lcid = MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
     if (!user_lcid) user_lcid = system_lcid;
 
@@ -733,6 +863,8 @@ void init_locale( HMODULE module )
     NtSetDefaultLocale( TRUE, user_lcid );
     NtSetDefaultLocale( FALSE, system_lcid );
     TRACE( "system=%04x user=%04x\n", system_lcid, user_lcid );
+
+    setlocale( LC_NUMERIC, "C" );  /* FIXME: oleaut32 depends on this */
 }
 
 
@@ -747,7 +879,13 @@ DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen )
         RtlCustomCPToUnicodeN( &unix_table, dst, dstlen * sizeof(WCHAR), &reslen, src, srclen );
     else
         RtlUTF8ToUnicodeN( dst, dstlen * sizeof(WCHAR), &reslen, src, srclen );
-    return reslen / sizeof(WCHAR);
+
+    reslen /= sizeof(WCHAR);
+#ifdef __APPLE__  /* work around broken Mac OS X filesystem that enforces decomposed Unicode */
+    if (reslen && dst && norm_tables[NormalizationC])
+        reslen = compose_string( norm_tables[NormalizationC], dst, reslen );
+#endif
+    return reslen;
 }
 
 
@@ -812,6 +950,61 @@ UINT CDECL __wine_get_unix_codepage(void)
 }
 
 
+/**********************************************************************
+ *      NtQueryDefaultLocale  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQueryDefaultLocale( BOOLEAN user, LCID *lcid )
+{
+    *lcid = user ? user_lcid : system_lcid;
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *      NtSetDefaultLocale  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetDefaultLocale( BOOLEAN user, LCID lcid )
+{
+    if (user) user_lcid = lcid;
+    else
+    {
+        system_lcid = lcid;
+        system_ui_language = LANGIDFROMLCID(lcid); /* there is no separate call to set it */
+    }
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *      NtQueryDefaultUILanguage  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQueryDefaultUILanguage( LANGID *lang )
+{
+    *lang = user_ui_language;
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *      NtSetDefaultUILanguage  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetDefaultUILanguage( LANGID lang )
+{
+    user_ui_language = lang;
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *      NtQueryInstallUILanguage  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQueryInstallUILanguage( LANGID *lang )
+{
+    *lang = system_ui_language;
+    return STATUS_SUCCESS;
+}
+
+
 static NTSTATUS get_dummy_preferred_ui_language( DWORD flags, LANGID lang, ULONG *count,
                                                  WCHAR *buffer, ULONG *size )
 {
@@ -848,12 +1041,8 @@ static NTSTATUS get_dummy_preferred_ui_language( DWORD flags, LANGID lang, ULONG
  */
 NTSTATUS WINAPI RtlGetProcessPreferredUILanguages( DWORD flags, ULONG *count, WCHAR *buffer, ULONG *size )
 {
-    LANGID ui_language;
-
     FIXME( "%08x, %p, %p %p\n", flags, count, buffer, size );
-
-    NtQueryDefaultUILanguage( &ui_language );
-    return get_dummy_preferred_ui_language( flags, ui_language, count, buffer, size );
+    return get_dummy_preferred_ui_language( flags, user_ui_language, count, buffer, size );
 }
 
 
@@ -863,14 +1052,11 @@ NTSTATUS WINAPI RtlGetProcessPreferredUILanguages( DWORD flags, ULONG *count, WC
 NTSTATUS WINAPI RtlGetSystemPreferredUILanguages( DWORD flags, ULONG unknown, ULONG *count,
                                                   WCHAR *buffer, ULONG *size )
 {
-    LANGID ui_language;
-
     if (flags & ~(MUI_LANGUAGE_NAME | MUI_LANGUAGE_ID | MUI_MACHINE_LANGUAGE_SETTINGS)) return STATUS_INVALID_PARAMETER;
     if ((flags & MUI_LANGUAGE_NAME) && (flags & MUI_LANGUAGE_ID)) return STATUS_INVALID_PARAMETER;
     if (*size && !buffer) return STATUS_INVALID_PARAMETER;
 
-    NtQueryInstallUILanguage( &ui_language );
-    return get_dummy_preferred_ui_language( flags, ui_language, count, buffer, size );
+    return get_dummy_preferred_ui_language( flags, system_ui_language, count, buffer, size );
 }
 
 
@@ -879,12 +1065,8 @@ NTSTATUS WINAPI RtlGetSystemPreferredUILanguages( DWORD flags, ULONG unknown, UL
  */
 NTSTATUS WINAPI RtlGetThreadPreferredUILanguages( DWORD flags, ULONG *count, WCHAR *buffer, ULONG *size )
 {
-    LANGID ui_language;
-
     FIXME( "%08x, %p, %p %p\n", flags, count, buffer, size );
-
-    NtQueryDefaultUILanguage( &ui_language );
-    return get_dummy_preferred_ui_language( flags, ui_language, count, buffer, size );
+    return get_dummy_preferred_ui_language( flags, user_ui_language, count, buffer, size );
 }
 
 
@@ -894,14 +1076,11 @@ NTSTATUS WINAPI RtlGetThreadPreferredUILanguages( DWORD flags, ULONG *count, WCH
 NTSTATUS WINAPI RtlGetUserPreferredUILanguages( DWORD flags, ULONG unknown, ULONG *count,
                                                 WCHAR *buffer, ULONG *size )
 {
-    LANGID ui_language;
-
     if (flags & ~(MUI_LANGUAGE_NAME | MUI_LANGUAGE_ID)) return STATUS_INVALID_PARAMETER;
     if ((flags & MUI_LANGUAGE_NAME) && (flags & MUI_LANGUAGE_ID)) return STATUS_INVALID_PARAMETER;
     if (*size && !buffer) return STATUS_INVALID_PARAMETER;
 
-    NtQueryDefaultUILanguage( &ui_language );
-    return get_dummy_preferred_ui_language( flags, ui_language, count, buffer, size );
+    return get_dummy_preferred_ui_language( flags, user_ui_language, count, buffer, size );
 }
 
 
@@ -1425,7 +1604,7 @@ NTSTATUS WINAPI RtlUpcaseUnicodeToOemN( char *dst, DWORD dstlen, DWORD *reslen,
 /*********************************************************************
  *	towlower   (NTDLL.@)
  */
-WCHAR __cdecl towlower( WCHAR ch )
+WCHAR __cdecl NTDLL_towlower( WCHAR ch )
 {
     if (ch >= 0x100) return ch;
     return casemap( nls_info.LowerCaseTable, ch );
@@ -1435,7 +1614,7 @@ WCHAR __cdecl towlower( WCHAR ch )
 /*********************************************************************
  *           towupper    (NTDLL.@)
  */
-WCHAR __cdecl towupper( WCHAR ch )
+WCHAR __cdecl NTDLL_towupper( WCHAR ch )
 {
     if (nls_info.UpperCaseTable) return casemap( nls_info.UpperCaseTable, ch );
     return casemap_ascii( ch );

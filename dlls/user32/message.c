@@ -2271,11 +2271,12 @@ static void send_parent_notify( HWND hwnd, WORD event, WORD idChild, POINT pt )
  * Tell the server we have passed the message to the app
  * (even though we may end up dropping it later on)
  */
-static void accept_hardware_message( UINT hw_id )
+static void accept_hardware_message( UINT hw_id, BOOL remove )
 {
     SERVER_START_REQ( accept_hardware_message )
     {
-        req->hw_id = hw_id;
+        req->hw_id   = hw_id;
+        req->remove  = remove;
         if (wine_server_call( req ))
             FIXME("Failed to reply to MSG_HARDWARE message. Message may not be removed from queue.\n");
     }
@@ -2363,10 +2364,10 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
     {
         /* skip this message */
         HOOK_CallHooks( WH_CBT, HCBT_KEYSKIPPED, LOWORD(msg->wParam), msg->lParam, TRUE );
-        accept_hardware_message( hw_id );
+        accept_hardware_message( hw_id, TRUE );
         return FALSE;
     }
-    if (remove) accept_hardware_message( hw_id );
+    accept_hardware_message( hw_id, remove );
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
 
     if ( remove && msg->message == WM_KEYDOWN )
@@ -2421,7 +2422,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 
     if (!msg->hwnd || !WIN_IsCurrentThread( msg->hwnd ))
     {
-        accept_hardware_message( hw_id );
+        accept_hardware_message( hw_id, TRUE );
         return FALSE;
     }
 
@@ -2517,7 +2518,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
         hook.s.dwExtraInfo  = extra_info;
         hook.mouseData      = msg->wParam;
         HOOK_CallHooks( WH_CBT, HCBT_CLICKSKIPPED, message, (LPARAM)&hook, TRUE );
-        accept_hardware_message( hw_id );
+        accept_hardware_message( hw_id, TRUE );
         return FALSE;
     }
 
@@ -2525,11 +2526,11 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     {
         SendMessageW( msg->hwnd, WM_SETCURSOR, (WPARAM)msg->hwnd,
                       MAKELONG( hittest, msg->message ));
-        accept_hardware_message( hw_id );
+        accept_hardware_message( hw_id, TRUE );
         return FALSE;
     }
 
-    if (remove) accept_hardware_message( hw_id );
+    accept_hardware_message( hw_id, remove );
 
     if (!remove || info.hwndCapture)
     {
@@ -2657,6 +2658,18 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
     unsigned int hw_id = 0;  /* id of previous hardware message */
     void *buffer;
     size_t buffer_size = 256;
+    shmlocal_t *shm = wine_get_shmlocal();
+
+    /* From time to time we are forced to do a wineserver call in
+     * order to update last_msg_time stored for each server thread. */
+    if (shm && GetTickCount() - thread_info->last_get_msg < 500)
+    {
+        int filter = flags >> 16;
+        if (!filter) filter = QS_ALLINPUT;
+        filter |= QS_SENDMESSAGE;
+        if (filter & QS_INPUT) filter |= QS_INPUT;
+        if (!(shm->queue_bits & filter)) return FALSE;
+    }
 
     if (!(buffer = HeapAlloc( GetProcessHeap(), 0, buffer_size ))) return -1;
 
@@ -2670,6 +2683,8 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
         const message_data_t *msg_data = buffer;
 
         thread_info->msg_source = prev_source;
+
+        if (shm) thread_info->last_get_msg = GetTickCount();
 
         SERVER_START_REQ( get_message )
         {

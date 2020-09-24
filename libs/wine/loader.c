@@ -63,6 +63,7 @@ extern char **environ;
 #include "windef.h"
 #include "winbase.h"
 #include "wine/asm.h"
+#include "wine/library.h"
 
 /* argc/argv for the Windows application */
 int __wine_main_argc = 0;
@@ -91,7 +92,6 @@ static int nb_dlls;
 
 static const IMAGE_NT_HEADERS *main_exe;
 
-typedef void (*load_dll_callback_t)( void *, const char * );
 static load_dll_callback_t load_dll_callback;
 
 extern const char *build_dir;
@@ -100,9 +100,6 @@ static const char **dll_paths;
 static unsigned int nb_dll_paths;
 static int dll_path_maxlen;
 
-extern void *wine_anon_mmap( void *start, size_t size, int prot, int flags );
-extern void wine_init_argv0_path( const char *argv0 );
-extern void wine_init( int argc, char *argv[], char *error, int error_size );
 extern void mmap_init(void);
 extern const char *get_dlldir( const char **default_dlldir );
 
@@ -338,8 +335,12 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     assert( size <= page_size );
 
     /* module address must be aligned on 64K boundary */
-    addr = (BYTE *)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
-    if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
+    addr = *(BYTE **)&nt_descr->OptionalHeader.DataDirectory[15];
+    if (!addr || ((ULONG_PTR)addr & 0xffff) || mprotect( addr, page_size, PROT_READ | PROT_WRITE ))
+    {
+        addr = (BYTE *)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
+        if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
+    }
 
     dos    = (IMAGE_DOS_HEADER *)addr;
     nt     = (IMAGE_NT_HEADERS *)(dos + 1);
@@ -386,13 +387,22 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     nt->OptionalHeader.SizeOfImage                 = data_end;
     nt->OptionalHeader.ImageBase                   = (ULONG_PTR)addr;
 
+    /* Clear DataDirectory[15] */
+
+    nt->OptionalHeader.DataDirectory[15].VirtualAddress = 0;
+    nt->OptionalHeader.DataDirectory[15].Size = 0;
+
     /* Build the code section */
 
     memcpy( sec->Name, ".text", sizeof(".text") );
     sec->SizeOfRawData = code_end - code_start;
     sec->Misc.VirtualSize = sec->SizeOfRawData;
     sec->VirtualAddress   = code_start;
-    sec->PointerToRawData = code_start;
+#ifdef _WIN64
+    sec->PointerToRawData = 0x400; /* file alignment */
+#else
+    sec->PointerToRawData = 0x200; /* file alignment */
+#endif
     sec->Characteristics  = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
     sec++;
 

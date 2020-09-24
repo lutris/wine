@@ -21,6 +21,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -181,7 +184,7 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
     },
     /* WIN10 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 10, 0, 0x42EE, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 10, 0, 0x4563, VER_PLATFORM_WIN32_NT,
         {0}, 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
 
@@ -479,7 +482,7 @@ void version_init(void)
     const WCHAR *p, *appname = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
     WCHAR appversion[MAX_PATH+20];
 
-    current_version = &VersionData[WIN7];
+    current_version = &VersionData[WIN10];
 
     RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
     attr.Length = sizeof(attr);

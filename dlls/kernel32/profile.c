@@ -29,10 +29,9 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winerror.h"
-#include "winreg.h"
 #include "winternl.h"
-#include "shlwapi.h"
 #include "wine/unicode.h"
+#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(profile);
@@ -1017,312 +1016,6 @@ static BOOL PROFILE_SetString( LPCWSTR section_name, LPCWSTR key_name,
     return TRUE;
 }
 
-static HKEY open_file_mapping_key( const WCHAR *filename )
-{
-    static const WCHAR mapping_pathW[] = {'S','o','f','t','w','a','r','e',
-            '\\','M','i','c','r','o','s','o','f','t',
-            '\\','W','i','n','d','o','w','s',' ','N','T',
-            '\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n',
-            '\\','I','n','i','F','i','l','e','M','a','p','p','i','n','g',0};
-    static HKEY mapping_key;
-    HKEY key;
-
-    EnterCriticalSection( &PROFILE_CritSect );
-
-    if (!mapping_key && RegOpenKeyExW( HKEY_LOCAL_MACHINE, mapping_pathW, 0, KEY_WOW64_64KEY, &mapping_key ))
-        mapping_key = NULL;
-
-    LeaveCriticalSection( &PROFILE_CritSect );
-
-    if (mapping_key && !RegOpenKeyExW( mapping_key, PathFindFileNameW( filename ), 0, KEY_READ, &key ))
-        return key;
-    return NULL;
-}
-
-static WCHAR *enum_key( HKEY key, DWORD i )
-{
-    WCHAR *value, *new_value;
-    DWORD max = 256, len;
-    LSTATUS res;
-
-    if (!(value = HeapAlloc( GetProcessHeap(), 0, max * sizeof(WCHAR) ))) return NULL;
-    len = max;
-    while ((res = RegEnumValueW( key, i, value, &len, NULL, NULL, NULL, NULL )) == ERROR_MORE_DATA)
-    {
-        max *= 2;
-        if (!(new_value = HeapReAlloc( GetProcessHeap(), 0, value, max * sizeof(WCHAR) )))
-        {
-            HeapFree( GetProcessHeap(), 0, value );
-            return NULL;
-        }
-        value = new_value;
-        len = max;
-    }
-    if (!res) return value;
-    HeapFree( GetProcessHeap(), 0, value );
-    return NULL;
-}
-
-static WCHAR *get_key_value( HKEY key, const WCHAR *value )
-{
-    DWORD size = 0;
-    WCHAR *data;
-
-    if (RegGetValueW( key, NULL, value, RRF_RT_REG_SZ | RRF_NOEXPAND, NULL, NULL, &size )) return NULL;
-    if (!(data = HeapAlloc( GetProcessHeap(), 0, size ))) return NULL;
-    if (!RegGetValueW( key, NULL, value, RRF_RT_REG_SZ | RRF_NOEXPAND, NULL, (BYTE *)data, &size )) return data;
-    HeapFree( GetProcessHeap(), 0, data );
-    return NULL;
-}
-
-static HKEY open_mapped_key( const WCHAR *path, BOOL write )
-{
-    static const WCHAR softwareW[] = {'S','o','f','t','w','a','r','e','\\',0};
-    static const WCHAR usrW[] = {'U','S','R',':'};
-    static const WCHAR sysW[] = {'S','Y','S',':'};
-    WCHAR *combined_path;
-    const WCHAR *p;
-    LSTATUS res;
-    HKEY key;
-
-    TRACE("%s\n", debugstr_w( path ));
-
-    for (p = path; strchr("!#@", *p); p++)
-        FIXME("ignoring %c modifier\n", *p);
-
-    if (!strncmpW( p, usrW, ARRAY_SIZE( usrW ) ))
-    {
-        if (write)
-            res = RegCreateKeyExW( HKEY_CURRENT_USER, p + 4, 0, NULL, 0, KEY_READ | KEY_WRITE, NULL, &key, NULL );
-        else
-            res = RegOpenKeyExW( HKEY_CURRENT_USER, p + 4, 0, KEY_READ, &key );
-        return res ? NULL : key;
-    }
-
-    if (!strncmpW( p, sysW, ARRAY_SIZE( sysW ) ))
-    {
-        p += 4;
-        if (!(combined_path = HeapAlloc( GetProcessHeap(), 0,
-                                         (ARRAY_SIZE( softwareW ) + strlenW( p )) * sizeof(WCHAR) )))
-            return NULL;
-        strcpyW( combined_path, softwareW );
-        strcatW( combined_path, p );
-        if (write)
-            res = RegCreateKeyExW( HKEY_LOCAL_MACHINE, combined_path, 0, NULL,
-                                   0, KEY_READ | KEY_WRITE, NULL, &key, NULL );
-        else
-            res = RegOpenKeyExW( HKEY_LOCAL_MACHINE, combined_path, 0, KEY_READ, &key );
-        HeapFree( GetProcessHeap(), 0, combined_path );
-        return res ? NULL : key;
-    }
-
-    FIXME("unhandled path syntax %s\n", debugstr_w( path ));
-    return NULL;
-}
-
-/* returns TRUE if the given section + name is mapped */
-static BOOL get_mapped_section_key( const WCHAR *filename, const WCHAR *section,
-                                    const WCHAR *name, BOOL write, HKEY *ret_key )
-{
-    static const WCHAR backslashW[] = {'\\',0};
-    WCHAR *path = NULL, *combined_path;
-    HKEY key, subkey = NULL;
-
-    if (!(key = open_file_mapping_key( filename )))
-        return FALSE;
-
-    if (!RegOpenKeyExW( key, section, 0, KEY_READ, &subkey ))
-    {
-        if (!(path = get_key_value( subkey, name )))
-            path = get_key_value( subkey, NULL );
-        RegCloseKey( subkey );
-        RegCloseKey( key );
-        if (!path) return FALSE;
-    }
-    else
-    {
-        if (!(path = get_key_value( key, section )))
-        {
-            if ((path = get_key_value( key, NULL )))
-            {
-                if ((combined_path = HeapAlloc( GetProcessHeap(), 0,
-                                                (strlenW( path ) + strlenW( section ) + 2) * sizeof(WCHAR) )))
-                {
-                    strcpyW( combined_path, path );
-                    strcatW( combined_path, backslashW );
-                    strcatW( combined_path, section );
-                }
-                HeapFree( GetProcessHeap(), 0, path );
-                path = combined_path;
-            }
-        }
-        RegCloseKey( key );
-        if (!path) return FALSE;
-    }
-
-    *ret_key = open_mapped_key( path, write );
-    HeapFree( GetProcessHeap(), 0, path );
-    return TRUE;
-}
-
-static DWORD get_mapped_section( HKEY key, WCHAR *buffer, DWORD size, BOOL return_values )
-{
-    WCHAR *entry, *value;
-    DWORD i, ret = 0;
-
-    for (i = 0; (entry = enum_key( key, i )); ++i)
-    {
-        lstrcpynW( buffer + ret, entry, size - ret - 1 );
-        ret = min( ret + strlenW( entry ) + 1, size - 1 );
-        if (return_values && ret < size - 1 && (value = get_key_value( key, entry )))
-        {
-            buffer[ret - 1] = '=';
-            lstrcpynW( buffer + ret, value, size - ret - 1 );
-            ret = min( ret + strlenW( value ) + 1, size - 1 );
-            HeapFree( GetProcessHeap(), 0, value );
-        }
-        HeapFree( GetProcessHeap(), 0, entry );
-    }
-
-    return ret;
-}
-
-static DWORD get_section( const WCHAR *filename, const WCHAR *section,
-                          WCHAR *buffer, DWORD size, BOOL return_values )
-{
-    HKEY key, subkey, section_key;
-    BOOL use_ini = TRUE;
-    DWORD ret = 0;
-    WCHAR *path;
-
-    if ((key = open_file_mapping_key( filename )))
-    {
-        if (!RegOpenKeyExW( key, section, 0, KEY_READ, &subkey ))
-        {
-            WCHAR *entry, *value;
-            HKEY entry_key;
-            DWORD i;
-
-            for (i = 0; (entry = enum_key( subkey, i )); ++i)
-            {
-                if (!(path = get_key_value( subkey, entry )))
-                {
-                    HeapFree( GetProcessHeap(), 0, entry );
-                    continue;
-                }
-
-                entry_key = open_mapped_key( path, FALSE );
-                HeapFree( GetProcessHeap(), 0, path );
-                if (!entry_key)
-                {
-                    HeapFree( GetProcessHeap(), 0, entry );
-                    continue;
-                }
-
-                if (entry[0])
-                {
-                    if ((value = get_key_value( entry_key, entry )))
-                    {
-                        lstrcpynW( buffer + ret, entry, size - ret - 1 );
-                        ret = min( ret + strlenW( entry ) + 1, size - 1 );
-                        if (return_values && ret < size - 1)
-                        {
-                            buffer[ret - 1] = '=';
-                            lstrcpynW( buffer + ret, value, size - ret - 1 );
-                            ret = min( ret + strlenW( value ) + 1, size - 1 );
-                        }
-                        HeapFree( GetProcessHeap(), 0, value );
-                    }
-                }
-                else
-                {
-                    ret = get_mapped_section( entry_key, buffer, size, return_values );
-                    use_ini = FALSE;
-                }
-
-                HeapFree( GetProcessHeap(), 0, entry );
-                RegCloseKey( entry_key );
-            }
-
-            RegCloseKey( subkey );
-        }
-        else if (get_mapped_section_key( filename, section, NULL, FALSE, &section_key ))
-        {
-            ret = get_mapped_section( section_key, buffer, size, return_values );
-            use_ini = FALSE;
-            RegCloseKey( section_key );
-        }
-
-        RegCloseKey( key );
-    }
-
-    if (use_ini)
-        ret += PROFILE_GetSection( filename, section, buffer + ret, size - ret, return_values );
-
-    return ret;
-}
-
-static void delete_key_values( HKEY key )
-{
-    WCHAR *entry;
-
-    while ((entry = enum_key( key, 0 )))
-    {
-        RegDeleteValueW( key, entry );
-        HeapFree( GetProcessHeap(), 0, entry );
-    }
-}
-
-static BOOL delete_section( const WCHAR *filename, const WCHAR *section )
-{
-    HKEY key, subkey, section_key;
-
-    if ((key = open_file_mapping_key( filename )))
-    {
-        if (!RegOpenKeyExW( key, section, 0, KEY_READ, &subkey ))
-        {
-            WCHAR *entry, *path;
-            HKEY entry_key;
-            DWORD i;
-
-            for (i = 0; (entry = enum_key( subkey, i )); ++i)
-            {
-                if (!(path = get_key_value( subkey, entry )))
-                {
-                    HeapFree( GetProcessHeap(), 0, entry );
-                    continue;
-                }
-
-                entry_key = open_mapped_key( path, TRUE );
-                HeapFree( GetProcessHeap(), 0, path );
-                if (!entry_key)
-                {
-                    HeapFree( GetProcessHeap(), 0, entry );
-                    continue;
-                }
-
-                if (entry[0])
-                    RegDeleteValueW( entry_key, entry );
-                else
-                    delete_key_values( entry_key );
-
-                HeapFree( GetProcessHeap(), 0, entry );
-                RegCloseKey( entry_key );
-            }
-
-            RegCloseKey( subkey );
-        }
-        else if (get_mapped_section_key( filename, section, NULL, TRUE, &section_key ))
-        {
-            delete_key_values( section_key );
-            RegCloseKey( section_key );
-        }
-
-        RegCloseKey( key );
-    }
-
-    return PROFILE_DeleteSection( filename, section );
-}
 
 /********************* API functions **********************************/
 
@@ -1354,7 +1047,6 @@ INT WINAPI GetPrivateProfileStringW( LPCWSTR section, LPCWSTR entry,
     int		ret;
     LPWSTR	defval_tmp = NULL;
     const WCHAR *p;
-    HKEY key;
 
     TRACE("%s,%s,%s,%p,%u,%s\n", debugstr_w(section), debugstr_w(entry),
           debugstr_w(def_val), buffer, len, debugstr_w(filename));
@@ -1364,7 +1056,7 @@ INT WINAPI GetPrivateProfileStringW( LPCWSTR section, LPCWSTR entry,
     if (!section) return GetPrivateProfileSectionNamesW( buffer, len, filename );
     if (!entry)
     {
-        ret = get_section( filename, section, buffer, len, FALSE );
+        ret = PROFILE_GetSection( filename, section, buffer, len, FALSE );
         if (!buffer[0])
         {
             PROFILE_CopyEntry( buffer, def_val, len );
@@ -1388,46 +1080,22 @@ INT WINAPI GetPrivateProfileStringW( LPCWSTR section, LPCWSTR entry,
         def_val = defval_tmp;
     }
 
-    if (get_mapped_section_key( filename, section, entry, FALSE, &key ))
+    RtlEnterCriticalSection( &PROFILE_CritSect );
+
+    if (PROFILE_Open( filename, FALSE ))
     {
-        if (key)
-        {
-            WCHAR *value;
-
-            if ((value = get_key_value( key, entry )))
-            {
-                lstrcpynW( buffer, value, len );
-                HeapFree( GetProcessHeap(), 0, value );
-            }
-            else
-                lstrcpynW( buffer, def_val, len );
-
-            RegCloseKey( key );
-        }
-        else
-            lstrcpynW( buffer, def_val, len );
-
+        PROFILEKEY *key = PROFILE_Find( &CurProfile->section, section, entry, FALSE, FALSE );
+        PROFILE_CopyEntry( buffer, (key && key->value) ? key->value : def_val, len );
+        TRACE("-> %s\n", debugstr_w( buffer ));
         ret = strlenW( buffer );
     }
     else
     {
-        EnterCriticalSection( &PROFILE_CritSect );
-
-        if (PROFILE_Open( filename, FALSE ))
-        {
-            PROFILEKEY *key = PROFILE_Find( &CurProfile->section, section, entry, FALSE, FALSE );
-            PROFILE_CopyEntry( buffer, (key && key->value) ? key->value : def_val, len );
-            TRACE("-> %s\n", debugstr_w( buffer ));
-            ret = strlenW( buffer );
-        }
-        else
-        {
-           lstrcpynW( buffer, def_val, len );
-           ret = strlenW( buffer );
-        }
-
-        LeaveCriticalSection( &PROFILE_CritSect );
+       lstrcpynW( buffer, def_val, len );
+       ret = strlenW( buffer );
     }
+
+    RtlLeaveCriticalSection( &PROFILE_CritSect );
 
     HeapFree(GetProcessHeap(), 0, defval_tmp);
 
@@ -1580,7 +1248,7 @@ INT WINAPI GetPrivateProfileSectionW( LPCWSTR section, LPWSTR buffer,
 
     TRACE("(%s, %p, %d, %s)\n", debugstr_w(section), buffer, len, debugstr_w(filename));
 
-    return get_section( filename, section, buffer, len, TRUE );
+    return PROFILE_GetSection( filename, section, buffer, len, TRUE );
 }
 
 /***********************************************************************
@@ -1653,9 +1321,6 @@ BOOL WINAPI WritePrivateProfileStringW( LPCWSTR section, LPCWSTR entry,
 					LPCWSTR string, LPCWSTR filename )
 {
     BOOL ret = FALSE;
-    HKEY key;
-
-    TRACE("(%s, %s, %s, %s)\n", debugstr_w(section), debugstr_w(entry), debugstr_w(string), debugstr_w(filename));
 
     if (!section && !entry && !string) /* documented "file flush" case */
     {
@@ -1667,21 +1332,7 @@ BOOL WINAPI WritePrivateProfileStringW( LPCWSTR section, LPCWSTR entry,
         LeaveCriticalSection( &PROFILE_CritSect );
         return FALSE;
     }
-    if (!entry) return delete_section( filename, section );
-
-    if (get_mapped_section_key( filename, section, entry, TRUE, &key ))
-    {
-        LSTATUS res;
-
-        if (string)
-            res = RegSetValueExW( key, entry, 0, REG_SZ, (const BYTE *)string,
-                                  (strlenW( string ) + 1) * sizeof(WCHAR) );
-        else
-            res = RegDeleteValueW( key, entry );
-        RegCloseKey( key );
-        if (res) SetLastError( res );
-        return !res;
-    }
+    if (!entry) return PROFILE_DeleteSection( filename, section );
 
     EnterCriticalSection( &PROFILE_CritSect );
 
@@ -1733,7 +1384,6 @@ BOOL WINAPI WritePrivateProfileSectionW( LPCWSTR section,
 {
     BOOL ret = FALSE;
     LPWSTR p;
-    HKEY key, section_key;
 
     if (!section && !string)
     {
@@ -1745,47 +1395,7 @@ BOOL WINAPI WritePrivateProfileSectionW( LPCWSTR section,
         LeaveCriticalSection( &PROFILE_CritSect );
         return FALSE;
     }
-    if (!string) return delete_section( filename, section );
-
-    if ((key = open_file_mapping_key( filename )))
-    {
-        /* replace existing entries, but only if they are mapped, and do not
-         * delete any keys */
-
-        const WCHAR *entry, *p;
-
-        for (entry = string; *entry; entry += strlenW( entry ) + 1)
-        {
-            if ((p = strchrW( entry, '=' )))
-            {
-                WCHAR *entry_copy;
-                p++;
-                if (!(entry_copy = HeapAlloc( GetProcessHeap(), 0, (p - entry) * sizeof(WCHAR) )))
-                {
-                    SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-                    RegCloseKey( key );
-                    return FALSE;
-                }
-                lstrcpynW( entry_copy, entry, p - entry );
-                if (get_mapped_section_key( filename, section, entry_copy, TRUE, &section_key ))
-                {
-                    LSTATUS res = RegSetValueExW( section_key, entry_copy, 0, REG_SZ, (const BYTE *)p,
-                                                  (strlenW( p ) + 1) * sizeof(WCHAR) );
-                    RegCloseKey( section_key );
-                    if (res)
-                    {
-                        HeapFree( GetProcessHeap(), 0, entry_copy );
-                        SetLastError( res );
-                        RegCloseKey( key );
-                        return FALSE;
-                    }
-                }
-                HeapFree( GetProcessHeap(), 0, entry_copy );
-            }
-        }
-        RegCloseKey( key );
-        return TRUE;
-    }
+    if (!string) return PROFILE_DeleteSection( filename, section );
 
     EnterCriticalSection( &PROFILE_CritSect );
 
@@ -1907,27 +1517,11 @@ DWORD WINAPI GetPrivateProfileSectionNamesW( LPWSTR buffer, DWORD size,
 					     LPCWSTR filename)
 {
     DWORD ret = 0;
-    HKEY key;
-
-    if ((key = open_file_mapping_key( filename )))
-    {
-        WCHAR *section;
-        DWORD i;
-
-        for (i = 0; (section = enum_key( key, i )); ++i)
-        {
-            lstrcpynW( buffer + ret, section, size - ret - 1 );
-            ret = min( ret + strlenW( section ) + 1, size - 1 );
-            HeapFree( GetProcessHeap(), 0, section );
-        }
-
-        RegCloseKey( key );
-    }
 
     RtlEnterCriticalSection( &PROFILE_CritSect );
 
     if (PROFILE_Open( filename, FALSE ))
-        ret += PROFILE_GetSectionNames( buffer + ret, size - ret );
+        ret = PROFILE_GetSectionNames(buffer, size);
 
     RtlLeaveCriticalSection( &PROFILE_CritSect );
 

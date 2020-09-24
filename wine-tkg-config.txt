@@ -1,0 +1,50 @@
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Чт 24 сен 2020 23:02:35 MSK :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 5.17.r0.g01bacebba4
+Using wine-staging patchset (version 5.17.2.r0.gc35a3386)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Using VKD3D for d3d12 translation
+
+Done applying reverting hotfixes (if any) - list available in prepare.log
+
+Applied hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-93.mystagingpatch
+Applied hotfix 934a09585a15e8491e422b43624ffe632b02bd3c-3.mystagingpatch
+Applied hotfix ntdll-ForceBottomUpAlloc-97fbe3f.mystagingpatch
+Applied hotfix staging-rawinput-esync-nofshack-fix-2.mystagingpatch
+Applied hotfix 001-3a9edf9aad43c3e8ba724571da5381f821f1dc56.myearlypatch
+Applied hotfix 002-e0e3b6bc91f7db956e3a66f2938eea45d4055a39.myearlypatch
+Applied hotfix 003-1e7378d8-447bce41.myearlypatch
+use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
+FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
+childwindow.patch -- ( Applied child window for vk patch )
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: -W ntdll-SystemRoot_Symlink
+
+ffxiv-launcher-workaround.patch -- ( Applied Final Fantasy XIV Launcher fix )
+fsync-staging.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
+fsync-spincounts.patch -- ( Add a configurable spin count to fsync )
+
+LAA-staging.patch -- ( Applied large address aware override support )
+
+proton-winevulkan-nofshack.patch -- ( Using Proton winevulkan patches (nofshack) )
+msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
+josh-flat-theme-6456973.patch -- ( Add Josh's better-theme )
+proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
+
+Applied hotfix d8d6a6b2e639d2e29e166a3faf988b81388ae191.mypatch
+Applied hotfix origin_3078f10d_fix.mypatch
+Applied hotfix 8898a695-staging-noprotonify-fixup.mypatch
+Applied hotfix 001-SMBIOS-0720c6cf.mypatch
+Applied hotfix 002-SMBIOS-d29c33a3.mypatch
+Applied hotfix 001-8622eb326fb8120fc038e27947e61677d4124f15-staging.mypatch
+Applied your own patch ps0165-ntdll-Add-SIGQUIT-to-server-block-set.mypatch
+Applied your own patch ps0166-server-Don-t-send-SIGQUIT-during-normal-process-shutdown.mypatch
+Applied your own patch ps9999-winealsa_latency.mypatch
+Applied your own patch ps9999-winepulse_latency.mypatch
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

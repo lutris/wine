@@ -99,9 +99,12 @@ extern obj_handle_t lock_fd( struct fd *fd, file_pos_t offset, file_pos_t count,
 extern void unlock_fd( struct fd *fd, file_pos_t offset, file_pos_t count );
 extern void allow_fd_caching( struct fd *fd );
 extern void set_fd_signaled( struct fd *fd, int signaled );
+extern int is_fd_signaled( struct fd *fd );
 extern char *dup_fd_name( struct fd *root, const char *name );
 
 extern int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry );
+extern int default_fd_get_esync_fd( struct object *obj, enum esync_type *type );
+extern unsigned int default_fd_get_fsync_idx( struct object *obj, enum fsync_type *type );
 extern unsigned int default_fd_map_access( struct object *obj, unsigned int access );
 extern int default_fd_get_poll_events( struct fd *fd );
 extern void default_poll_event( struct fd *fd, int event );
@@ -170,21 +173,30 @@ extern struct security_descriptor *get_file_sd( struct object *obj, struct fd *f
 
 /* file mapping functions */
 
+extern struct mapping *get_mapping_obj( struct process *process, obj_handle_t handle,
+                                        unsigned int access );
 extern struct file *get_mapping_file( struct process *process, client_ptr_t base,
                                       unsigned int access, unsigned int sharing );
 extern const pe_image_info_t *get_mapping_image_info( struct process *process, client_ptr_t base );
 extern void free_mapped_views( struct process *process );
 extern int get_page_size(void);
-extern struct object *create_user_data_mapping( struct object *root, const struct unicode_str *name,
-                                                unsigned int attr, const struct security_descriptor *sd );
+
+extern void init_kusd_mapping( struct mapping *mapping );
 
 /* device functions */
 
 extern struct object *create_named_pipe_device( struct object *root, const struct unicode_str *name );
 extern struct object *create_mailslot_device( struct object *root, const struct unicode_str *name );
-extern struct object *create_console_device( struct object *root, const struct unicode_str *name );
 extern struct object *create_unix_device( struct object *root, const struct unicode_str *name,
                                           const char *unix_path );
+
+/* shared memory functions */
+
+extern int allocate_shared_memory( int *fd, void **memory, size_t size );
+extern void release_shared_memory( int fd, void *memory, size_t size );
+extern void init_shared_memory( void );
+extern shmglobal_t *shmglobal;
+extern int          shmglobal_fd;
 
 /* change notification functions */
 

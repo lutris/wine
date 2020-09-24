@@ -38,7 +38,6 @@
 #include "shlwapi.h"
 #include "ddk/ntddk.h"
 #include "ddk/ntddser.h"
-#include "ntifs.h"
 
 #include "kernelbase.h"
 #include "wine/exception.h"
@@ -474,12 +473,12 @@ DWORD file_name_WtoA( LPCWSTR src, INT srclen, LPSTR dest, INT destlen )
  */
 static BOOL is_same_file( HANDLE h1, HANDLE h2 )
 {
-    FILE_OBJECTID_BUFFER id1, id2;
+    FILE_ID_INFORMATION id1, id2;
     IO_STATUS_BLOCK io;
 
-    return (!NtFsControlFile( h1, 0, NULL, NULL, &io, FSCTL_GET_OBJECT_ID, NULL, 0, &id1, sizeof(id1) ) &&
-            !NtFsControlFile( h2, 0, NULL, NULL, &io, FSCTL_GET_OBJECT_ID, NULL, 0, &id2, sizeof(id2) ) &&
-            !memcmp( &id1.ObjectId, &id2.ObjectId, sizeof(id1.ObjectId) ));
+    return !NtQueryInformationFile( h1, &io, &id1, sizeof(id1), FileIdInformation ) &&
+           !NtQueryInformationFile( h2, &io, &id2, sizeof(id2), FileIdInformation ) &&
+           !memcmp( &id1, &id2, sizeof(FILE_ID_INFORMATION) );
 }
 
 
@@ -832,6 +831,13 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
            (sharing & FILE_SHARE_DELETE) ? "FILE_SHARE_DELETE " : "",
            creation, attributes);
 
+    /* Open a console for CONIN$ or CONOUT$ */
+
+    if (!wcsicmp( filename, L"CONIN$" ))
+        return open_console( FALSE, access, sa, creation ? OPEN_EXISTING : 0 );
+    if (!wcsicmp( filename, L"CONOUT$" ))
+        return open_console( TRUE, access, sa, creation ? OPEN_EXISTING : 0 );
+
     if (!wcsncmp( filename, L"\\\\.\\", 4 ))
     {
         if ((filename[4] && filename[5] == ':' && !filename[6]) ||
@@ -851,6 +857,24 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
         }
     }
     else dosdev = RtlIsDosDeviceName_U( filename );
+
+    if (dosdev)
+    {
+        if (LOWORD(dosdev) == 3 * sizeof(WCHAR) &&
+            !wcsnicmp( filename + HIWORD(dosdev)/sizeof(WCHAR), L"CON", 3 ))
+        {
+            switch (access & (GENERIC_READ|GENERIC_WRITE))
+            {
+            case GENERIC_READ:
+                return open_console( FALSE, access, sa, OPEN_EXISTING );
+            case GENERIC_WRITE:
+                return open_console( TRUE, access, sa, OPEN_EXISTING );
+            default:
+                SetLastError( ERROR_FILE_NOT_FOUND );
+                return INVALID_HANDLE_VALUE;
+            }
+        }
+    }
 
     if (creation < CREATE_NEW || creation > TRUNCATE_EXISTING)
     {
@@ -916,12 +940,6 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
     }
     else
     {
-        if (dosdev &&
-            ((LOWORD(dosdev) == 3 * sizeof(WCHAR) && !wcsnicmp( filename + HIWORD(dosdev)/sizeof(WCHAR), L"CON", 3 )) ||
-             (LOWORD(dosdev) == 6 * sizeof(WCHAR) && !wcsnicmp( filename + HIWORD(dosdev)/sizeof(WCHAR), L"CONIN$", 6 )) ||
-             (LOWORD(dosdev) == 7 * sizeof(WCHAR) && !wcsnicmp( filename + HIWORD(dosdev)/sizeof(WCHAR), L"CONOUT$", 7 ))))
-            ret = console_handle_map( ret );
-
         if ((creation == CREATE_ALWAYS && io.Information == FILE_OVERWRITTEN) ||
             (creation == OPEN_ALWAYS && io.Information == FILE_OPENED))
             SetLastError( ERROR_ALREADY_EXISTS );
@@ -1014,106 +1032,8 @@ done:
  */
 BOOLEAN WINAPI /* DECLSPEC_HOTPATCH */ CreateSymbolicLinkW( LPCWSTR link, LPCWSTR target, DWORD flags )
 {
-    static INT struct_size = offsetof(REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer.PathBuffer[0]);
-    static INT header_size = offsetof(REPARSE_DATA_BUFFER, GenericReparseBuffer);
-    INT buffer_size, data_size, string_len, prefix_len;
-    WCHAR *subst_dest, *print_dest, *string;
-    REPARSE_DATA_BUFFER *buffer;
-    LPWSTR target_path = NULL;
-    BOOL is_relative, is_dir;
-    int target_path_len = 0;
-    UNICODE_STRING nt_name;
-    BOOLEAN bret = FALSE;
-    NTSTATUS status;
-    HANDLE hlink;
-    DWORD dwret;
-
-    TRACE( "(%s %s %d): stub\n", debugstr_w(link), debugstr_w(target), flags );
-
-    is_relative = (RtlDetermineDosPathNameType_U( target ) == RELATIVE_PATH);
-    is_dir = (flags & SYMBOLIC_LINK_FLAG_DIRECTORY);
-    if (is_dir && !CreateDirectoryW( link, NULL ))
-        return FALSE;
-    hlink = CreateFileW( link, GENERIC_READ | GENERIC_WRITE, 0, 0,
-                         is_dir ? OPEN_EXISTING : CREATE_NEW,
-                         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0 );
-    if (hlink == INVALID_HANDLE_VALUE)
-        goto cleanup;
-    if (is_relative)
-    {
-        UNICODE_STRING nt_path;
-        int len;
-
-        status = RtlDosPathNameToNtPathName_U_WithStatus( link, &nt_path, NULL, NULL );
-        if (status != STATUS_SUCCESS)
-        {
-            SetLastError( RtlNtStatusToDosError(status) );
-            goto cleanup;
-        }
-        /* obtain the path of the link */
-        for (; nt_path.Length > 0; nt_path.Length -= sizeof(WCHAR))
-        {
-            WCHAR c = nt_path.Buffer[nt_path.Length/sizeof(WCHAR)];
-            if (c == '/' || c == '\\')
-            {
-                nt_path.Length += sizeof(WCHAR);
-                break;
-            }
-        }
-        /* append the target to the link path */
-        target_path_len = nt_path.Length / sizeof(WCHAR);
-        len = target_path_len + (lstrlenW( target ) + 1);
-        target_path = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, len*sizeof(WCHAR) );
-        lstrcpynW( target_path, nt_path.Buffer, target_path_len+1 );
-        target_path[target_path_len+1] = 0;
-        lstrcatW( target_path, target );
-        RtlFreeUnicodeString( &nt_path );
-    }
-    else
-        target_path = (LPWSTR)target;
-    status = RtlDosPathNameToNtPathName_U_WithStatus( target_path, &nt_name, NULL, NULL );
-    if (status != STATUS_SUCCESS)
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        goto cleanup;
-    }
-    if (is_relative && _wcsnicmp( target_path, nt_name.Buffer, target_path_len ) != 0)
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        goto cleanup;
-    }
-    prefix_len = is_relative ? 0 : strlen("\\??\\");
-    string = &nt_name.Buffer[target_path_len];
-    string_len = lstrlenW( &string[prefix_len] );
-    data_size = (prefix_len + 2 * string_len + 2) * sizeof(WCHAR);
-    buffer_size = struct_size + data_size;
-    buffer = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_size );
-    buffer->ReparseTag = IO_REPARSE_TAG_SYMLINK;
-    buffer->ReparseDataLength = struct_size - header_size + data_size;
-    buffer->SymbolicLinkReparseBuffer.SubstituteNameLength = (prefix_len + string_len) * sizeof(WCHAR);
-    buffer->SymbolicLinkReparseBuffer.PrintNameOffset = (prefix_len + string_len + 1) * sizeof(WCHAR);
-    buffer->SymbolicLinkReparseBuffer.PrintNameLength = string_len * sizeof(WCHAR);
-    buffer->SymbolicLinkReparseBuffer.Flags = is_relative ? SYMLINK_FLAG_RELATIVE : 0;
-    subst_dest = &buffer->SymbolicLinkReparseBuffer.PathBuffer[0];
-    print_dest = &buffer->SymbolicLinkReparseBuffer.PathBuffer[prefix_len + string_len + 1];
-    lstrcpyW( subst_dest, string );
-    lstrcpyW( print_dest, &string[prefix_len] );
-    RtlFreeUnicodeString( &nt_name );
-    bret = DeviceIoControl( hlink, FSCTL_SET_REPARSE_POINT, (LPVOID)buffer, buffer_size, NULL, 0,
-                            &dwret, 0 );
-    HeapFree( GetProcessHeap(), 0, buffer );
-
-cleanup:
-    CloseHandle( hlink );
-    if (!bret)
-    {
-        if (is_dir)
-            RemoveDirectoryW( link );
-        else
-            DeleteFileW( link );
-    }
-    if (is_relative) HeapFree( GetProcessHeap(), 0, target_path );
-    return bret;
+    FIXME( "(%s %s %d): stub\n", debugstr_w(link), debugstr_w(target), flags );
+    return TRUE;
 }
 
 
@@ -1589,27 +1509,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH FindNextFileW( HANDLE handle, WIN32_FIND_DATAW *da
 
         memcpy( data->cFileName, dir_info->FileName, dir_info->FileNameLength );
         data->cFileName[dir_info->FileNameLength/sizeof(WCHAR)] = 0;
-
-        /* get reparse tag */
-        if (dir_info->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-        {
-            REPARSE_DATA_BUFFER *buffer = NULL;
-            INT buffer_len;
-            HANDLE hlink;
-            DWORD dwret;
-            BOOL bret;
-
-            hlink = CreateFileW( data->cFileName, GENERIC_READ | GENERIC_WRITE, 0, 0,
-                                 OPEN_EXISTING,
-                                 FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0 );
-            buffer_len = sizeof(*buffer) + 2*MAX_PATH*sizeof(WCHAR);
-            buffer = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_len );
-            bret = DeviceIoControl( hlink, FSCTL_GET_REPARSE_POINT, NULL, 0, (LPVOID)buffer,
-                                    buffer_len, &dwret, 0 );
-            if (bret) data->dwReserved0 = buffer->ReparseTag;
-            HeapFree( GetProcessHeap(), 0, buffer );
-            CloseHandle( hlink );
-        }
 
         if (info->level != FindExInfoBasic)
         {
@@ -3670,50 +3569,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadFileScatter( HANDLE file, FILE_SEGMENT_ELEMENT
 
     return set_ntstatus( NtReadFileScatter( file, overlapped->hEvent, NULL, cvalue, io,
                                             segments, count, &offset, NULL ));
-}
-
-
-/***********************************************************************
- *	RemoveDirectoryA   (kernelbase.@)
- */
-BOOL WINAPI DECLSPEC_HOTPATCH RemoveDirectoryA( LPCSTR path )
-{
-    WCHAR *pathW;
-
-    if (!(pathW = file_name_AtoW( path, FALSE ))) return FALSE;
-    return RemoveDirectoryW( pathW );
-}
-
-
-/***********************************************************************
- *	RemoveDirectoryW   (kernelbase.@)
- */
-BOOL WINAPI DECLSPEC_HOTPATCH RemoveDirectoryW( LPCWSTR path )
-{
-    OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING nt_name;
-    IO_STATUS_BLOCK io;
-    NTSTATUS status;
-    HANDLE handle;
-
-    TRACE( "%s\n", debugstr_w(path) );
-
-    status = RtlDosPathNameToNtPathName_U_WithStatus( path, &nt_name, NULL, NULL );
-    if (!set_ntstatus( status )) return FALSE;
-
-    InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
-    status = NtOpenFile( &handle, DELETE | SYNCHRONIZE, &attr, &io,
-                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                         FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
-    RtlFreeUnicodeString( &nt_name );
-
-    if (!status)
-    {
-        FILE_DISPOSITION_INFORMATION info = { TRUE };
-        status = NtSetInformationFile( handle, &io, &info, sizeof(info), FileDispositionInformation );
-        NtClose( handle );
-    }
-    return set_ntstatus( status );
 }
 
 

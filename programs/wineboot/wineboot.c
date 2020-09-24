@@ -60,12 +60,8 @@
 #include <intrin.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include <ntstatus.h>
-#define WIN32_NO_STATUS
 #include <windows.h>
 #include <winternl.h>
-#include <ddk/wdm.h>
 #include <sddl.h>
 #include <wine/svcctl.h>
 #include <wine/asm.h>
@@ -191,153 +187,6 @@ static DWORD set_reg_value( HKEY hkey, const WCHAR *name, const WCHAR *value )
 static DWORD set_reg_value_dword( HKEY hkey, const WCHAR *name, DWORD value )
 {
     return RegSetValueExW( hkey, name, 0, REG_DWORD, (const BYTE *)&value, sizeof(value) );
-}
-
-#if defined(__i386__) || defined(__x86_64__)
-
-static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
-{
-    XSTATE_CONFIGURATION *xstate = &data->XState;
-    unsigned int i;
-    int regs[4];
-
-    if (!data->ProcessorFeatures[PF_AVX_INSTRUCTIONS_AVAILABLE])
-        return;
-
-    __cpuidex(regs, 0, 0);
-
-    TRACE("Max cpuid level %#x.\n", regs[0]);
-    if (regs[0] < 0xd)
-        return;
-
-    __cpuidex(regs, 1, 0);
-    TRACE("CPU features %#x, %#x, %#x, %#x.\n", regs[0], regs[1], regs[2], regs[3]);
-    if (!(regs[2] & (0x1 << 27))) /* xsave OS enabled */
-        return;
-
-    __cpuidex(regs, 0xd, 0);
-    TRACE("XSAVE details %#x, %#x, %#x, %#x.\n", regs[0], regs[1], regs[2], regs[3]);
-    if (!(regs[0] & XSTATE_AVX))
-        return;
-
-    xstate->EnabledFeatures = (1 << XSTATE_LEGACY_FLOATING_POINT) | (1 << XSTATE_LEGACY_SSE) | (1 << XSTATE_AVX);
-    xstate->EnabledVolatileFeatures = xstate->EnabledFeatures;
-    xstate->Size = sizeof(XSAVE_FORMAT) + sizeof(XSTATE);
-    xstate->AllFeatureSize = regs[1];
-    xstate->AllFeatures[0] = offsetof(XSAVE_FORMAT, XmmRegisters);
-    xstate->AllFeatures[1] = sizeof(M128A) * 16;
-    xstate->AllFeatures[2] = sizeof(YMMCONTEXT);
-
-    for (i = 0; i < 3; ++i)
-        xstate->Features[i].Size = xstate->AllFeatures[i];
-
-    xstate->Features[1].Offset = xstate->Features[0].Size;
-    xstate->Features[2].Offset = sizeof(XSAVE_FORMAT) + offsetof(XSTATE, YmmContext);
-
-    __cpuidex(regs, 0xd, 1);
-    xstate->OptimizedSave = regs[0] & 1;
-    xstate->CompactionEnabled = !!(regs[0] & 2);
-
-    __cpuidex(regs, 0xd, 2);
-    TRACE("XSAVE feature 2 %#x, %#x, %#x, %#x.\n", regs[0], regs[1], regs[2], regs[3]);
-}
-
-#else
-
-static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
-{
-}
-
-#endif
-
-static void create_user_shared_data(void)
-{
-    struct _KUSER_SHARED_DATA *data;
-    RTL_OSVERSIONINFOEXW version;
-    SYSTEM_CPU_INFORMATION sci;
-    SYSTEM_BASIC_INFORMATION sbi;
-    BOOLEAN *features;
-    OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    UNICODE_STRING name;
-    NTSTATUS status;
-    HANDLE handle;
-
-    RtlInitUnicodeString( &name, L"\\KernelObjects\\__wine_user_shared_data" );
-    InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
-    if ((status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr )))
-    {
-        ERR( "cannot open __wine_user_shared_data: %x\n", status );
-        return;
-    }
-    data = MapViewOfFile( handle, FILE_MAP_WRITE, 0, 0, sizeof(*data) );
-    CloseHandle( handle );
-    if (!data)
-    {
-        ERR( "cannot map __wine_user_shared_data\n" );
-        return;
-    }
-
-    version.dwOSVersionInfoSize = sizeof(version);
-    RtlGetVersion( &version );
-    NtQuerySystemInformation( SystemBasicInformation, &sbi, sizeof(sbi), NULL );
-    NtQuerySystemInformation( SystemCpuInformation, &sci, sizeof(sci), NULL );
-
-    data->TickCountMultiplier         = 1 << 24;
-    data->LargePageMinimum            = 2 * 1024 * 1024;
-    data->NtBuildNumber               = version.dwBuildNumber;
-    data->NtProductType               = version.wProductType;
-    data->ProductTypeIsValid          = TRUE;
-    data->NativeProcessorArchitecture = sci.Architecture;
-    data->NtMajorVersion              = version.dwMajorVersion;
-    data->NtMinorVersion              = version.dwMinorVersion;
-    data->SuiteMask                   = version.wSuiteMask;
-    data->NumberOfPhysicalPages       = sbi.MmNumberOfPhysicalPages;
-    wcscpy( data->NtSystemRoot, L"C:\\windows" );
-
-    features = data->ProcessorFeatures;
-    switch (sci.Architecture)
-    {
-    case PROCESSOR_ARCHITECTURE_INTEL:
-    case PROCESSOR_ARCHITECTURE_AMD64:
-        features[PF_COMPARE_EXCHANGE_DOUBLE]              = !!(sci.FeatureSet & CPU_FEATURE_CX8);
-        features[PF_MMX_INSTRUCTIONS_AVAILABLE]           = !!(sci.FeatureSet & CPU_FEATURE_MMX);
-        features[PF_XMMI_INSTRUCTIONS_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_SSE);
-        features[PF_3DNOW_INSTRUCTIONS_AVAILABLE]         = !!(sci.FeatureSet & CPU_FEATURE_3DNOW);
-        features[PF_RDTSC_INSTRUCTION_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_TSC);
-        features[PF_PAE_ENABLED]                          = !!(sci.FeatureSet & CPU_FEATURE_PAE);
-        features[PF_XMMI64_INSTRUCTIONS_AVAILABLE]        = !!(sci.FeatureSet & CPU_FEATURE_SSE2);
-        features[PF_SSE3_INSTRUCTIONS_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_SSE3);
-        features[PF_SSSE3_INSTRUCTIONS_AVAILABLE]         = !!(sci.FeatureSet & CPU_FEATURE_SSSE3);
-        features[PF_XSAVE_ENABLED]                        = !!(sci.FeatureSet & CPU_FEATURE_XSAVE);
-        features[PF_COMPARE_EXCHANGE128]                  = !!(sci.FeatureSet & CPU_FEATURE_CX128);
-        features[PF_SSE_DAZ_MODE_AVAILABLE]               = !!(sci.FeatureSet & CPU_FEATURE_DAZ);
-        features[PF_NX_ENABLED]                           = !!(sci.FeatureSet & CPU_FEATURE_NX);
-        features[PF_SECOND_LEVEL_ADDRESS_TRANSLATION]     = !!(sci.FeatureSet & CPU_FEATURE_2NDLEV);
-        features[PF_VIRT_FIRMWARE_ENABLED]                = !!(sci.FeatureSet & CPU_FEATURE_VIRT);
-        features[PF_RDWRFSGSBASE_AVAILABLE]               = !!(sci.FeatureSet & CPU_FEATURE_RDFS);
-        features[PF_FASTFAIL_AVAILABLE]                   = TRUE;
-        features[PF_SSE4_1_INSTRUCTIONS_AVAILABLE]        = !!(sci.FeatureSet & CPU_FEATURE_SSE41);
-        features[PF_SSE4_2_INSTRUCTIONS_AVAILABLE]        = !!(sci.FeatureSet & CPU_FEATURE_SSE42);
-        features[PF_AVX_INSTRUCTIONS_AVAILABLE]           = !!(sci.FeatureSet & CPU_FEATURE_AVX);
-        features[PF_AVX2_INSTRUCTIONS_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_AVX2);
-        break;
-    case PROCESSOR_ARCHITECTURE_ARM:
-        features[PF_ARM_VFP_32_REGISTERS_AVAILABLE]       = !!(sci.FeatureSet & CPU_FEATURE_ARM_VFP_32);
-        features[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE]      = !!(sci.FeatureSet & CPU_FEATURE_ARM_NEON);
-        features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = (sci.Level >= 8);
-        break;
-    case PROCESSOR_ARCHITECTURE_ARM64:
-        features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = TRUE;
-        features[PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE]  = !!(sci.FeatureSet & CPU_FEATURE_ARM_V8_CRC32);
-        features[PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE] = !!(sci.FeatureSet & CPU_FEATURE_ARM_V8_CRYPTO);
-        break;
-    }
-    data->ActiveProcessorCount = NtCurrentTeb()->Peb->NumberOfProcessors;
-    data->ActiveGroupCount = 1;
-
-    initialize_xstate_features( data );
-
-    UnmapViewOfFile( data );
 }
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -1589,6 +1438,43 @@ static void update_user_profile(void)
     LocalFree(sid);
 }
 
+static void update_win_version(void)
+{
+    static const WCHAR win10_buildW[] = L"17763";
+
+    HKEY cv_h;
+    DWORD type, sz;
+    WCHAR current_version[256];
+
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_ALL_ACCESS, &cv_h) == ERROR_SUCCESS){
+        /* get the current windows version */
+        sz = sizeof(current_version);
+        if(RegQueryValueExW(cv_h, L"CurrentVersion", NULL, &type, (BYTE *)current_version, &sz) == ERROR_SUCCESS &&
+                type == REG_SZ){
+            if(!wcscmp(current_version, L"10.0")){
+                RegSetValueExW(cv_h, L"CurrentBuild", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+                RegSetValueExW(cv_h, L"CurrentBuildNumber", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+            }
+        }
+        RegCloseKey(cv_h);
+    }
+
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_ALL_ACCESS, &cv_h) == ERROR_SUCCESS){
+        /* get the current windows version */
+        sz = sizeof(current_version);
+        if(RegQueryValueExW(cv_h, L"CurrentVersion", NULL, &type, (BYTE *)current_version, &sz) == ERROR_SUCCESS &&
+                type == REG_SZ){
+            if(!wcscmp(current_version, L"10.0")){
+                RegSetValueExW(cv_h, L"CurrentBuild", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+                RegSetValueExW(cv_h, L"CurrentBuildNumber", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+            }
+        }
+        RegCloseKey(cv_h);
+    }
+}
+
 /* execute rundll32 on the wine.inf file if necessary */
 static void update_wineprefix( BOOL force )
 {
@@ -1635,6 +1521,7 @@ static void update_wineprefix( BOOL force )
         install_root_pnp_devices();
         update_user_profile();
         create_etc_stub_files();
+        update_win_version();
 
         WINE_MESSAGE( "wine: configuration in %s has been updated.\n", debugstr_w(prettyprint_configdir()) );
     }
@@ -1828,7 +1715,6 @@ int __cdecl main( int argc, char *argv[] )
 
     ResetEvent( event );  /* in case this is a restart */
 
-    create_user_shared_data();
     create_disk_serial_number();
     create_hardware_registry_keys();
     create_dynamic_registry_keys();

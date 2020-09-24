@@ -163,18 +163,27 @@ extern DWORD __cdecl __wine_finally_ctx_handler( EXCEPTION_RECORD *record,
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
-#define __EXCEPT_HANDLER(handler) \
+/* convenience handler for page fault exceptions */
+#define __EXCEPT_PAGE_FAULT \
              } while(0); \
              __wine_pop_frame( &__f.frame ); \
              break; \
          } else { \
-             __f.frame.Handler = (handler); \
+             __f.frame.Handler = __wine_exception_handler_page_fault; \
              if (__wine_setjmpex( &__f.jmp, &__f.frame )) { \
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
-#define __EXCEPT_PAGE_FAULT __EXCEPT_HANDLER(__wine_exception_handler_page_fault)
-#define __EXCEPT_ALL        __EXCEPT_HANDLER(__wine_exception_handler_all)
+/* convenience handler for all exceptions */
+#define __EXCEPT_ALL \
+             } while(0); \
+             __wine_pop_frame( &__f.frame ); \
+             break; \
+         } else { \
+             __f.frame.Handler = __wine_exception_handler_all; \
+             if (__wine_setjmpex( &__f.jmp, &__f.frame )) { \
+                 const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
+                 do {
 
 #define __ENDTRY \
                  } while (0); \

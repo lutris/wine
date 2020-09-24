@@ -34,6 +34,7 @@
 #endif
 
 #include "wine/debug.h"
+#include "wine/library.h"
 
 struct __wine_debug_functions
 {
