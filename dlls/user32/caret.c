@@ -30,6 +30,8 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "user_private.h"
+
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -277,6 +279,7 @@ BOOL WINAPI SetCaretPos( INT x, INT y )
         r.left = x;
         r.top = y;
         CARET_DisplayCaret( hwnd, &r );
+        USER_Driver->pUpdateCandidatePos( hwnd, &r );
         SetSystemTimer( hwnd, TIMERID, Caret.timeout, CARET_Callback );
     }
     return ret;
@@ -355,6 +358,7 @@ BOOL WINAPI ShowCaret( HWND hwnd )
     if (ret && (hidden == 1))  /* hidden was 1 so it's now 0 */
     {
         CARET_DisplayCaret( hwnd, &r );
+        USER_Driver->pUpdateCandidatePos( hwnd, &r );
         SetSystemTimer( hwnd, TIMERID, Caret.timeout, CARET_Callback );
     }
     return ret;

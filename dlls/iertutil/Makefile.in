@@ -1,0 +1,4 @@
+MODULE    = iertutil.dll
+
+C_SRCS = \
+	main.c

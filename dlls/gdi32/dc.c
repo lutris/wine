@@ -148,11 +148,9 @@ DC *alloc_dc_ptr( WORD magic )
     }
     dc->nulldrv.hdc = dc->hSelf;
 
-    if (font_driver && !font_driver->pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL ))
-    {
-        free_dc_ptr( dc );
-        return NULL;
-    }
+    if (font_driver)
+        font_driver->pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL );
+
     return dc;
 }
 

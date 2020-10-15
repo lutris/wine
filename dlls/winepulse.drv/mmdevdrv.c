@@ -43,6 +43,7 @@
 #include "wine/list.h"
 
 #include "ole2.h"
+#include "mimeole.h"
 #include "dshow.h"
 #include "dsound.h"
 #include "propsys.h"
@@ -79,11 +80,26 @@ static pthread_mutex_t pulse_lock;
 static pthread_cond_t pulse_cond = PTHREAD_COND_INITIALIZER;
 static struct list g_sessions = LIST_INIT(g_sessions);
 
-static UINT g_phys_speakers_mask = 0;
+typedef struct _PhysDevice {
+    struct list entry;
+    GUID guid;
+    EndpointFormFactor form;
+    DWORD channel_mask;
+    WCHAR device[128];
+    WCHAR name[0];
+} PhysDevice;
+
+static struct list g_phys_speakers = LIST_INIT(g_phys_speakers);
+static struct list g_phys_sources = LIST_INIT(g_phys_sources);
 
 /* Mixer format + period times */
 static WAVEFORMATEXTENSIBLE pulse_fmt[2];
 static REFERENCE_TIME pulse_min_period[2], pulse_def_period[2];
+
+static const WCHAR drv_key_devicesW[] = {'S','o','f','t','w','a','r','e','\\',
+    'W','i','n','e','\\','D','r','i','v','e','r','s','\\',
+    'w','i','n','e','p','u','l','s','e','.','d','r','v','\\','d','e','v','i','c','e','s',0};
+static const WCHAR guidW[] = {'g','u','i','d',0};
 
 static GUID pulse_render_guid =
 { 0xfd47d9cc, 0x4218, 0x4135, { 0x9c, 0xe2, 0x0c, 0x19, 0x5c, 0x87, 0x40, 0x5b } };
@@ -106,6 +122,13 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, void *reserved)
         if (pthread_mutex_init(&pulse_lock, &attr) != 0)
             pthread_mutex_init(&pulse_lock, NULL);
     } else if (reason == DLL_PROCESS_DETACH) {
+        PhysDevice *dev, *dev_next;
+
+        LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, &g_phys_speakers, PhysDevice, entry)
+            HeapFree(GetProcessHeap(), 0, dev);
+        LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, &g_phys_sources, PhysDevice, entry)
+            HeapFree(GetProcessHeap(), 0, dev);
+
         if (pulse_thread)
            SetThreadPriority(pulse_thread, 0);
         if (pulse_ctx) {
@@ -167,18 +190,22 @@ struct ACImpl {
     IMMDevice *parent;
     struct list entry;
     float vol[PA_CHANNELS_MAX];
+    char device[256];
 
     LONG ref;
     EDataFlow dataflow;
     DWORD flags;
     AUDCLNT_SHAREMODE share;
-    HANDLE event;
+    HANDLE event, timer;
 
     INT32 locked;
-    UINT32 bufsize_frames, bufsize_bytes, capture_period, pad, started, peek_ofs, wri_offs_bytes, lcl_offs_bytes;
-    UINT32 tmp_buffer_bytes, held_bytes, peek_len, peek_buffer_len;
+    UINT32 bufsize_frames, real_bufsize_bytes, period_bytes;
+    UINT32 started, peek_ofs, read_offs_bytes, lcl_offs_bytes, pa_offs_bytes;
+    UINT32 tmp_buffer_bytes, held_bytes, peek_len, peek_buffer_len, pa_held_bytes;
     BYTE *local_buffer, *tmp_buffer, *peek_buffer;
     void *locked_ptr;
+    BOOL please_quit, just_started, just_underran;
+    pa_usec_t last_time, mmdev_period_usec;
 
     pa_stream *stream;
     pa_sample_spec ss;
@@ -192,8 +219,6 @@ struct ACImpl {
     struct list packet_free_head;
     struct list packet_filled_head;
 };
-
-static const WCHAR defaultW[] = {'P','u','l','s','e','a','u','d','i','o',0};
 
 static const IAudioClientVtbl AudioClient_Vtbl;
 static const IAudioRenderClientVtbl AudioRenderClient_Vtbl;
@@ -457,7 +482,7 @@ static void convert_channel_map(const pa_channel_map *pa_map, WAVEFORMATEXTENSIB
     fmt->dwChannelMask = pa_mask;
 }
 
-static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
+static void pulse_probe_settings(pa_mainloop *ml, pa_context *ctx, int render, WAVEFORMATEXTENSIBLE *fmt) {
     WAVEFORMATEX *wfx = &fmt->Format;
     pa_stream *stream;
     pa_channel_map map;
@@ -476,7 +501,7 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
     attr.minreq = attr.fragsize = pa_frame_size(&ss);
     attr.prebuf = 0;
 
-    stream = pa_stream_new(pulse_ctx, "format test stream", &ss, &map);
+    stream = pa_stream_new(ctx, "format test stream", &ss, &map);
     if (stream)
         pa_stream_set_state_callback(stream, pulse_stream_state, NULL);
     if (!stream)
@@ -487,7 +512,7 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
     else
         ret = pa_stream_connect_record(stream, NULL, &attr, PA_STREAM_START_CORKED|PA_STREAM_FIX_RATE|PA_STREAM_FIX_CHANNELS|PA_STREAM_EARLY_REQUESTS);
     if (ret >= 0) {
-        while (pa_mainloop_iterate(pulse_ml, 1, &ret) >= 0 &&
+        while (pa_mainloop_iterate(ml, 1, &ret) >= 0 &&
                 pa_stream_get_state(stream) == PA_STREAM_CREATING)
         {}
         if (pa_stream_get_state(stream) == PA_STREAM_READY) {
@@ -498,7 +523,7 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
             else
                 length = pa_stream_get_buffer_attr(stream)->fragsize;
             pa_stream_disconnect(stream);
-            while (pa_mainloop_iterate(pulse_ml, 1, &ret) >= 0 &&
+            while (pa_mainloop_iterate(ml, 1, &ret) >= 0 &&
                     pa_stream_get_state(stream) == PA_STREAM_READY)
             {}
         }
@@ -535,6 +560,109 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
         fmt->SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
 }
 
+typedef struct tagLANGANDCODEPAGE
+{
+  WORD wLanguage;
+  WORD wCodePage;
+} LANGANDCODEPAGE;
+
+static BOOL query_productname(void *data, LANGANDCODEPAGE *lang, LPVOID *buffer, DWORD *len)
+{
+    static const WCHAR productnameW[] = {'\\','S','t','r','i','n','g','F','i','l','e','I','n','f','o',
+                                         '\\','%','0','4','x','%','0','4','x',
+                                         '\\','P','r','o','d','u','c','t','N','a','m','e',0};
+    WCHAR pn[37];
+    sprintfW(pn, productnameW, lang->wLanguage, lang->wCodePage);
+    return VerQueryValueW(data, pn, buffer, len) && *len;
+}
+
+static char* get_programname(WCHAR *path)
+{
+    static const WCHAR translationW[] = {'\\','V','a','r','F','i','l','e','I','n','f','o',
+                                         '\\','T','r','a','n','s','l','a','t','i','o','n',0};
+    UINT translate_size, productname_size;
+    LANGANDCODEPAGE *translate;
+    LPVOID productname;
+    BOOL found = FALSE;
+    void *data = NULL;
+    char *ret = NULL;
+    unsigned int i;
+    LCID locale;
+    DWORD size;
+
+    size = GetFileVersionInfoSizeW(path, NULL);
+    if (!size)
+        goto out;
+
+    data = HeapAlloc(GetProcessHeap(), 0, size);
+    if (!data)
+        goto out;
+
+    if (!GetFileVersionInfoW(path, 0, size, data))
+        goto out;
+
+    if (!VerQueryValueW(data, translationW, (LPVOID *)&translate, &translate_size))
+        goto out;
+
+    /* no translations found */
+    if (translate_size < sizeof(LANGANDCODEPAGE))
+        goto out;
+
+    /* The following code will try to find the best translation. We first search for an
+     * exact match of the language, then a match of the language PRIMARYLANGID, then we
+     * search for a LANG_NEUTRAL match, and if that still doesn't work we pick the
+     * first entry which contains a proper productname. */
+
+    locale = GetThreadLocale();
+
+    for (i = 0; i < translate_size / sizeof(LANGANDCODEPAGE); i++) {
+        if (translate[i].wLanguage == locale &&
+                query_productname(data, &translate[i], &productname, &productname_size)) {
+            found = TRUE;
+            break;
+        }
+    }
+
+    if (!found) {
+        for (i = 0; i < translate_size / sizeof(LANGANDCODEPAGE); i++) {
+            if (PRIMARYLANGID(translate[i].wLanguage) == PRIMARYLANGID(locale) &&
+                    query_productname(data, &translate[i], &productname, &productname_size)) {
+                found = TRUE;
+                break;
+            }
+        }
+    }
+
+    if (!found) {
+        for (i = 0; i < translate_size / sizeof(LANGANDCODEPAGE); i++) {
+            if (PRIMARYLANGID(translate[i].wLanguage) == LANG_NEUTRAL &&
+                    query_productname(data, &translate[i], &productname, &productname_size)) {
+                found = TRUE;
+                break;
+            }
+        }
+    }
+
+    if (!found) {
+        for (i = 0; i < translate_size / sizeof(LANGANDCODEPAGE); i++) {
+            if (query_productname(data, &translate[i], &productname, &productname_size)) {
+                found = TRUE;
+                break;
+            }
+        }
+    }
+
+    if (found) {
+        int len = WideCharToMultiByte(CP_UTF8, 0, productname, -1, NULL, 0, NULL, NULL);
+        ret = pa_xmalloc(len);
+        if (ret) WideCharToMultiByte(CP_UTF8, 0, productname, -1, ret, len, NULL, NULL);
+    }
+
+out:
+    HeapFree(GetProcessHeap(), 0, data);
+    return ret;
+}
+
 static HRESULT pulse_connect(void)
 {
     int len;
@@ -558,14 +686,18 @@ static HRESULT pulse_connect(void)
         pa_context_unref(pulse_ctx);
 
     GetModuleFileNameW(NULL, path, ARRAY_SIZE(path));
-    name = strrchrW(path, '\\');
-    if (!name)
-        name = path;
-    else
-        name++;
-    len = WideCharToMultiByte(CP_UNIXCP, 0, name, -1, NULL, 0, NULL, NULL);
-    str = pa_xmalloc(len);
-    WideCharToMultiByte(CP_UNIXCP, 0, name, -1, str, len, NULL, NULL);
+    str = get_programname(path);
+    if (!str) {
+        name = strrchrW(path, '\\');
+        if (!name)
+            name = path;
+        else
+            name++;
+        len = WideCharToMultiByte(CP_UNIXCP, 0, name, -1, NULL, 0, NULL, NULL);
+        str = pa_xmalloc(len);
+        WideCharToMultiByte(CP_UNIXCP, 0, name, -1, str, len, NULL, NULL);
+    }
+
     TRACE("Name: %s\n", str);
     pulse_ctx = pa_context_new(pa_mainloop_get_api(pulse_ml), str);
     pa_xfree(str);
@@ -602,12 +734,161 @@ fail:
     return E_FAIL;
 }
 
-/* For default PulseAudio render device, OR together all of the
- * PKEY_AudioEndpoint_PhysicalSpeakers values of the sinks. */
+static BOOL get_device_guid(EDataFlow flow, const char *device, GUID *guid)
+{
+    HKEY key, dev_key;
+    DWORD type, size = sizeof(*guid);
+    WCHAR key_name[258];
+
+    key_name[0] = (flow == eCapture) ? '1' : '0';
+    key_name[1] = ',';
+    if (!MultiByteToWideChar(CP_UTF8, 0, device, -1, key_name + 2,
+            (sizeof(key_name) / sizeof(*key_name)) - 2))
+        return FALSE;
+
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, drv_key_devicesW, 0, NULL, 0,
+            KEY_WRITE|KEY_READ, NULL, &key, NULL) != ERROR_SUCCESS){
+        ERR("Failed to open registry key %s\n", debugstr_w(drv_key_devicesW));
+        return FALSE;
+    }
+
+    if (RegCreateKeyExW(key, key_name, 0, NULL, 0, KEY_WRITE|KEY_READ,
+            NULL, &dev_key, NULL) != ERROR_SUCCESS){
+        ERR("Failed to open registry key for device %s\n", debugstr_w(key_name));
+        RegCloseKey(key);
+        return FALSE;
+    }
+
+    if (RegQueryValueExW(dev_key, guidW, 0, &type, (BYTE *)guid,
+            &size) == ERROR_SUCCESS){
+        if (type == REG_BINARY && size == sizeof(*guid)){
+            RegCloseKey(dev_key);
+            RegCloseKey(key);
+            return TRUE;
+        }
+
+        ERR("Invalid type for device %s GUID: %u; ignoring and overwriting\n",
+                wine_dbgstr_w(key_name), type);
+    }
+
+    /* generate new GUID for this device */
+    CoCreateGuid(guid);
+
+    if (RegSetValueExW(dev_key, guidW, 0, REG_BINARY, (BYTE *)guid,
+            sizeof(GUID)) != ERROR_SUCCESS)
+        ERR("Failed to store device GUID for %s to registry\n", device);
+
+    RegCloseKey(dev_key);
+    RegCloseKey(key);
+    return TRUE;
+}
+
+static BOOL get_device_path(pa_proplist *p, int index, GUID *guid, WCHAR path[128])
+{
+    static const WCHAR usbformatW[] = { '{','1','}','.','U','S','B','\\','V','I','D','_',
+        '%','0','4','X','&','P','I','D','_','%','0','4','X','\\',
+        '%','u','&','%','0','8','X',0 }; /* "{1}.USB\VID_%04X&PID_%04X\%u&%08X" */
+    static const WCHAR pciformatW[] = { '{','1','}','.','H','D','A','U','D','I','O','\\','F','U','N','C','_','0','1','&',
+        'V','E','N','_','%','0','4','X','&','D','E','V','_',
+        '%','0','4','X','\\','%','u','&','%','0','8','X',0 }; /* "{1}.HDAUDIO\FUNC_01&VEN_%04X&DEV_%04X\%u&%08X" */
+
+    USHORT vendor_id, product_id;
+    const char *buffer;
+    UINT serial_number;
+    BOOL is_usb;
+
+    buffer = pa_proplist_gets(p, PA_PROP_DEVICE_BUS);
+    if (!buffer)
+        return FALSE;
+
+    if (!strcmp(buffer,"usb"))
+        is_usb = TRUE;
+    else if (!strcmp(buffer,"pci"))
+        is_usb = FALSE;
+    else
+        return FALSE;
+
+    buffer = pa_proplist_gets(p, PA_PROP_DEVICE_VENDOR_ID);
+    if (buffer)
+        vendor_id = strtol(buffer, NULL, 16);
+    else
+        return FALSE;
+
+    buffer = pa_proplist_gets(p, PA_PROP_DEVICE_PRODUCT_ID);
+    if (buffer)
+        product_id = strtol(buffer, NULL, 16);
+    else
+        return FALSE;
+
+    /* As hardly any audio devices have serial numbers, Windows instead
+    appears to use a persistent random number. We emulate this here
+    by instead using the last 8 hex digits of the GUID. */
+    serial_number = (guid->Data4[4] << 24) | (guid->Data4[5] << 16) | (guid->Data4[6] << 8) | guid->Data4[7];
+
+    if (is_usb)
+        sprintfW( path, usbformatW, vendor_id, product_id, index, serial_number);
+    else
+        sprintfW( path, pciformatW, vendor_id, product_id, index, serial_number);
+
+    return TRUE;
+}
+
+static void pulse_add_device(struct list *list, GUID *guid, EndpointFormFactor form, DWORD channel_mask,
+                             WCHAR device[128], const char *name)
+{
+    static const WCHAR emptyW[] = {0};
+    int len = MultiByteToWideChar(CP_UNIXCP, 0, name, -1, NULL, 0);
+    if (len) {
+        PhysDevice *dev = HeapAlloc(GetProcessHeap(), 0, offsetof(PhysDevice, name[len]));
+        if (dev) {
+            dev->guid = *guid;
+            dev->form = form;
+            dev->channel_mask = channel_mask;
+            strcpyW(dev->device, device ? device : emptyW);
+            MultiByteToWideChar(CP_UNIXCP, 0, name, -1, dev->name, len);
+            list_add_tail(list, &dev->entry);
+        }
+    }
+}
+
 static void pulse_phys_speakers_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
 {
-    if (i)
-        g_phys_speakers_mask |= pulse_channel_map_to_channel_mask(&i->channel_map);
+    struct list *speaker;
+    DWORD channel_mask;
+    WCHAR device[128];
+    GUID guid;
+
+    if (i) {
+        channel_mask = pulse_channel_map_to_channel_mask(&i->channel_map);
+
+        /* For default PulseAudio render device, OR together all of the
+         * PKEY_AudioEndpoint_PhysicalSpeakers values of the sinks. */
+        speaker = list_head(&g_phys_speakers);
+        if (speaker)
+            LIST_ENTRY(speaker, PhysDevice, entry)->channel_mask |= channel_mask;
+
+        if (!get_device_guid(eRender, i->name, &guid))
+            CoCreateGuid(&guid);
+        if (!get_device_path(i->proplist, i->index, &guid, device))
+            device[0] = 0;
+        pulse_add_device(&g_phys_speakers, &guid, Speakers, channel_mask, device, i->description);
+    }
+}
+
+static void pulse_phys_sources_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata)
+{
+    EndpointFormFactor form;
+    WCHAR device[128];
+    GUID guid;
+
+    if (i) {
+        form = (i->monitor_of_sink == PA_INVALID_INDEX) ? Microphone : LineLevel;
+        if (!get_device_guid(eCapture, i->name, &guid))
+            CoCreateGuid(&guid);
+        if (!get_device_path(i->proplist, i->index, &guid, device))
+            device[0] = 0;
+        pulse_add_device(&g_phys_sources, &guid, form, 0, device, i->description);
+    }
 }
 
 /* some poorly-behaved applications call audio functions during DllMain, so we
@@ -620,10 +901,16 @@ static HRESULT pulse_test_connect(void)
     WCHAR path[MAX_PATH], *name;
     char *str;
     pa_operation *o;
+    pa_mainloop *ml;
+    pa_context *ctx;
 
-    pulse_ml = pa_mainloop_new();
+    /* Make sure we never run this function twice accidentially */
+    if (!list_empty(&g_phys_speakers))
+        return S_OK;
 
-    pa_mainloop_set_poll_func(pulse_ml, pulse_poll_func, NULL);
+    ml = pa_mainloop_new();
+
+    pa_mainloop_set_poll_func(ml, pulse_poll_func, NULL);
 
     GetModuleFileNameW(NULL, path, ARRAY_SIZE(path));
     name = strrchrW(path, '\\');
@@ -635,24 +922,23 @@ static HRESULT pulse_test_connect(void)
     str = pa_xmalloc(len);
     WideCharToMultiByte(CP_UNIXCP, 0, name, -1, str, len, NULL, NULL);
     TRACE("Name: %s\n", str);
-    pulse_ctx = pa_context_new(pa_mainloop_get_api(pulse_ml), str);
+    ctx = pa_context_new(pa_mainloop_get_api(ml), str);
     pa_xfree(str);
-    if (!pulse_ctx) {
+    if (!ctx) {
         ERR("Failed to create context\n");
-        pa_mainloop_free(pulse_ml);
-        pulse_ml = NULL;
+        pa_mainloop_free(ml);
         return E_FAIL;
     }
 
-    pa_context_set_state_callback(pulse_ctx, pulse_contextcallback, NULL);
+    pa_context_set_state_callback(ctx, pulse_contextcallback, NULL);
 
-    TRACE("libpulse protocol version: %u. API Version %u\n", pa_context_get_protocol_version(pulse_ctx), PA_API_VERSION);
-    if (pa_context_connect(pulse_ctx, NULL, 0, NULL) < 0)
+    TRACE("libpulse protocol version: %u. API Version %u\n", pa_context_get_protocol_version(ctx), PA_API_VERSION);
+    if (pa_context_connect(ctx, NULL, 0, NULL) < 0)
         goto fail;
 
     /* Wait for connection */
-    while (pa_mainloop_iterate(pulse_ml, 1, &ret) >= 0) {
-        pa_context_state_t state = pa_context_get_state(pulse_ctx);
+    while (pa_mainloop_iterate(ml, 1, &ret) >= 0) {
+        pa_context_state_t state = pa_context_get_state(ctx);
 
         if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED)
             goto fail;
@@ -661,38 +947,42 @@ static HRESULT pulse_test_connect(void)
             break;
     }
 
-    if (pa_context_get_state(pulse_ctx) != PA_CONTEXT_READY)
+    if (pa_context_get_state(ctx) != PA_CONTEXT_READY)
         goto fail;
 
     TRACE("Test-connected to server %s with protocol version: %i.\n",
-        pa_context_get_server(pulse_ctx),
-        pa_context_get_server_protocol_version(pulse_ctx));
+        pa_context_get_server(ctx),
+        pa_context_get_server_protocol_version(ctx));
 
-    pulse_probe_settings(1, &pulse_fmt[0]);
-    pulse_probe_settings(0, &pulse_fmt[1]);
+    pulse_probe_settings(ml, ctx, 1, &pulse_fmt[0]);
+    pulse_probe_settings(ml, ctx, 0, &pulse_fmt[1]);
 
-    g_phys_speakers_mask = 0;
-    o = pa_context_get_sink_info_list(pulse_ctx, &pulse_phys_speakers_cb, NULL);
+    pulse_add_device(&g_phys_speakers, &pulse_render_guid, Speakers, 0, NULL, "Pulseaudio");
+    pulse_add_device(&g_phys_sources, &pulse_capture_guid, Microphone, 0, NULL, "Pulseaudio");
+
+    o = pa_context_get_sink_info_list(ctx, &pulse_phys_speakers_cb, NULL);
     if (o) {
-        while (pa_mainloop_iterate(pulse_ml, 1, &ret) >= 0 &&
+        while (pa_mainloop_iterate(ml, 1, &ret) >= 0 &&
                 pa_operation_get_state(o) == PA_OPERATION_RUNNING)
         {}
         pa_operation_unref(o);
     }
 
-    pa_context_unref(pulse_ctx);
-    pulse_ctx = NULL;
-    pa_mainloop_free(pulse_ml);
-    pulse_ml = NULL;
+    o = pa_context_get_source_info_list(ctx, &pulse_phys_sources_cb, NULL);
+    if (o) {
+        while (pa_mainloop_iterate(ml, 1, &ret) >= 0 &&
+                pa_operation_get_state(o) == PA_OPERATION_RUNNING)
+        {}
+        pa_operation_unref(o);
+    }
 
+    pa_context_unref(ctx);
+    pa_mainloop_free(ml);
     return S_OK;
 
 fail:
-    pa_context_unref(pulse_ctx);
-    pulse_ctx = NULL;
-    pa_mainloop_free(pulse_ml);
-    pulse_ml = NULL;
-
+    pa_context_unref(ctx);
+    pa_mainloop_free(ml);
     return E_FAIL;
 }
 
@@ -709,18 +999,7 @@ static void silence_buffer(pa_sample_format_t format, BYTE *buffer, UINT32 bytes
     memset(buffer, format == PA_SAMPLE_U8 ? 0x80 : 0, bytes);
 }
 
-static void pulse_free_noop(void *buf)
-{
-}
-
-enum write_buffer_flags
-{
-    WINEPULSE_WRITE_NOFREE = 0x01,
-    WINEPULSE_WRITE_SILENT = 0x02
-};
-
-static int write_buffer(const ACImpl *This, BYTE *buffer, UINT32 bytes,
-                        enum write_buffer_flags flags)
+static int write_buffer(const ACImpl *This, BYTE *buffer, UINT32 bytes)
 {
     float vol[PA_CHANNELS_MAX];
     BOOL adjust = FALSE;
@@ -728,7 +1007,7 @@ static int write_buffer(const ACImpl *This, BYTE *buffer, UINT32 bytes,
     BYTE *end;
 
     if (!bytes) return 0;
-    if (This->session->mute || (flags & WINEPULSE_WRITE_SILENT))
+    if (This->session->mute)
     {
         silence_buffer(This->ss.format, buffer, bytes);
         goto write;
@@ -855,9 +1134,7 @@ static int write_buffer(const ACImpl *This, BYTE *buffer, UINT32 bytes,
     }
 
 write:
-    return pa_stream_write(This->stream, buffer, bytes,
-                           (flags & WINEPULSE_WRITE_NOFREE) ? pulse_free_noop : NULL,
-                           0, PA_SEEK_RELATIVE);
+    return pa_stream_write(This->stream, buffer, bytes, NULL, 0, PA_SEEK_RELATIVE);
 }
 
 static void dump_attr(const pa_buffer_attr *attr) {
@@ -880,147 +1157,129 @@ static void pulse_attr_update(pa_stream *s, void *user) {
     dump_attr(attr);
 }
 
-/* Here's the buffer setup:
- *
- *  vvvvvvvv sent to HW already
- *          vvvvvvvv in Pulse buffer but rewindable
- * [dddddddddddddddd] Pulse buffer
- *         [dddddddddddddddd--------] mmdevapi buffer
- *          ^^^^^^^^^^^^^^^^ pad
- *                  ^ lcl_offs_bytes
- *                  ^^^^^^^^^ held_bytes
- *                          ^ wri_offs_bytes
- *
- * GetCurrentPadding is pad
- *
- * During pulse_wr_callback, we decrement pad, fill Pulse buffer, and move
- *   lcl_offs forward
- *
- * During Stop, we flush the Pulse buffer
- */
-static void pulse_wr_callback(pa_stream *s, size_t bytes, void *userdata)
+static void pulse_write(ACImpl *This)
 {
-    ACImpl *This = userdata;
-    UINT32 oldpad = This->pad;
+    /* write as much data to PA as we can */
+    UINT32 to_write;
+    BYTE *buf = This->local_buffer + This->pa_offs_bytes;
+    UINT32 bytes = pa_stream_writable_size(This->stream);
 
-    if(This->local_buffer){
-        UINT32 to_write;
-        BYTE *buf = This->local_buffer + This->lcl_offs_bytes;
-
-        if(This->pad > bytes){
-            This->clock_written += bytes;
-            This->pad -= bytes;
-        }else{
-            This->clock_written += This->pad;
-            This->pad = 0;
+    if(This->just_underran){
+        /* prebuffer with silence if needed */
+        if(This->pa_held_bytes < bytes){
+            to_write = bytes - This->pa_held_bytes;
+            TRACE("prebuffering %u frames of silence\n",
+                    (int)(to_write / pa_frame_size(&This->ss)));
+            buf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, to_write);
+            pa_stream_write(This->stream, buf, to_write, NULL, 0, PA_SEEK_RELATIVE);
+            HeapFree(GetProcessHeap(), 0, buf);
         }
 
-        bytes = min(bytes, This->held_bytes);
-
-        if(This->lcl_offs_bytes + bytes > This->bufsize_bytes){
-            to_write = This->bufsize_bytes - This->lcl_offs_bytes;
-            TRACE("writing small chunk of %u bytes\n", to_write);
-            write_buffer(This, buf, to_write, 0);
-            This->held_bytes -= to_write;
-            to_write = bytes - to_write;
-            This->lcl_offs_bytes = 0;
-            buf = This->local_buffer;
-        }else
-            to_write = bytes;
-
-        TRACE("writing main chunk of %u bytes\n", to_write);
-        write_buffer(This, buf, to_write, 0);
-        This->lcl_offs_bytes += to_write;
-        This->lcl_offs_bytes %= This->bufsize_bytes;
-        This->held_bytes -= to_write;
-    }else{
-        if (bytes < This->bufsize_bytes)
-            This->pad = This->bufsize_bytes - bytes;
-        else
-            This->pad = 0;
-
-        if (oldpad == This->pad)
-            return;
-
-        assert(oldpad > This->pad);
-
-        This->clock_written += oldpad - This->pad;
-        TRACE("New pad: %zu (-%zu)\n", This->pad / pa_frame_size(&This->ss), (oldpad - This->pad) / pa_frame_size(&This->ss));
+        This->just_underran = FALSE;
     }
 
-    if (This->event)
-        SetEvent(This->event);
+    buf = This->local_buffer + This->pa_offs_bytes;
+    TRACE("held: %u, avail: %u\n",
+            This->pa_held_bytes, bytes);
+    bytes = min(This->pa_held_bytes, bytes);
+
+    if(This->pa_offs_bytes + bytes > This->real_bufsize_bytes){
+        to_write = This->real_bufsize_bytes - This->pa_offs_bytes;
+        TRACE("writing small chunk of %u bytes\n", to_write);
+        write_buffer(This, buf, to_write);
+        This->pa_held_bytes -= to_write;
+        to_write = bytes - to_write;
+        This->pa_offs_bytes = 0;
+        buf = This->local_buffer;
+    }else
+        to_write = bytes;
+
+    TRACE("writing main chunk of %u bytes\n", to_write);
+    write_buffer(This, buf, to_write);
+    This->pa_offs_bytes += to_write;
+    This->pa_offs_bytes %= This->real_bufsize_bytes;
+    This->pa_held_bytes -= to_write;
 }
 
 static void pulse_underflow_callback(pa_stream *s, void *userdata)
 {
-    WARN("Underflow\n");
-}
-
-/* Latency is periodically updated even when nothing is played,
- * because of PA_STREAM_AUTO_TIMING_UPDATE so use it as timer
- *
- * Perfect for passing all tests :)
- */
-static void pulse_latency_callback(pa_stream *s, void *userdata)
-{
     ACImpl *This = userdata;
-    if (!This->pad && This->event)
-        SetEvent(This->event);
+    WARN("%p: Underflow\n", userdata);
+    This->just_underran = TRUE;
+    /* re-sync */
+    This->pa_offs_bytes = This->lcl_offs_bytes;
+    This->pa_held_bytes = This->held_bytes;
 }
 
 static void pulse_started_callback(pa_stream *s, void *userdata)
 {
-    TRACE("(Re)started playing\n");
+    TRACE("%p: (Re)started playing\n", userdata);
 }
 
-static void pulse_rd_loop(ACImpl *This, size_t bytes)
+static void pulse_read(ACImpl *This)
 {
-    while (bytes >= This->capture_period) {
-        ACPacket *p, *next;
-        LARGE_INTEGER stamp, freq;
-        BYTE *dst, *src;
-        size_t src_len, copy, rem = This->capture_period;
-        if (!(p = (ACPacket*)list_head(&This->packet_free_head))) {
-            p = (ACPacket*)list_head(&This->packet_filled_head);
-            if (!p->discont) {
-                next = (ACPacket*)p->entry.next;
-                next->discont = 1;
-            } else
-                p = (ACPacket*)list_tail(&This->packet_filled_head);
-            assert(This->pad == This->bufsize_bytes);
-        } else {
-            assert(This->pad < This->bufsize_bytes);
-            This->pad += This->capture_period;
-            assert(This->pad <= This->bufsize_bytes);
-        }
-        QueryPerformanceCounter(&stamp);
-        QueryPerformanceFrequency(&freq);
-        p->qpcpos = (stamp.QuadPart * (INT64)10000000) / freq.QuadPart;
-        p->discont = 0;
-        list_remove(&p->entry);
-        list_add_tail(&This->packet_filled_head, &p->entry);
+    size_t bytes = pa_stream_readable_size(This->stream);
 
-        dst = p->data;
+    TRACE("Readable total: %zu, fragsize: %u\n", bytes, pa_stream_get_buffer_attr(This->stream)->fragsize);
+
+    bytes += This->peek_len - This->peek_ofs;
+
+    while (bytes >= This->period_bytes) {
+        BYTE *dst = NULL, *src;
+        size_t src_len, copy, rem = This->period_bytes;
+
+        if (This->started) {
+            LARGE_INTEGER stamp, freq;
+            ACPacket *p, *next;
+
+            if (!(p = (ACPacket*)list_head(&This->packet_free_head))) {
+                p = (ACPacket*)list_head(&This->packet_filled_head);
+                if (!p) return;
+                if (!p->discont) {
+                    next = (ACPacket*)p->entry.next;
+                    next->discont = 1;
+                } else
+                    p = (ACPacket*)list_tail(&This->packet_filled_head);
+            } else {
+                This->held_bytes += This->period_bytes;
+            }
+            QueryPerformanceCounter(&stamp);
+            QueryPerformanceFrequency(&freq);
+            p->qpcpos = (stamp.QuadPart * (INT64)10000000) / freq.QuadPart;
+            p->discont = 0;
+            list_remove(&p->entry);
+            list_add_tail(&This->packet_filled_head, &p->entry);
+
+            dst = p->data;
+        }
+
         while (rem) {
             if (This->peek_len) {
                 copy = min(rem, This->peek_len - This->peek_ofs);
 
-                memcpy(dst, This->peek_buffer + This->peek_ofs, copy);
+                if (dst) {
+                    memcpy(dst, This->peek_buffer + This->peek_ofs, copy);
+                    dst += copy;
+                }
 
                 rem -= copy;
-                dst += copy;
                 This->peek_ofs += copy;
                 if(This->peek_len == This->peek_ofs)
-                    This->peek_len = 0;
-            } else {
-                pa_stream_peek(This->stream, (const void**)&src, &src_len);
+                    This->peek_len = This->peek_ofs = 0;
+
+            } else if (pa_stream_peek(This->stream, (const void**)&src, &src_len) == 0 && src_len) {
 
                 copy = min(rem, src_len);
 
-                memcpy(dst, src, rem);
+                if (dst) {
+                    if(src)
+                        memcpy(dst, src, copy);
+                    else
+                        silence_buffer(This->ss.format, dst, copy);
 
-                dst += copy;
+                    dst += copy;
+                }
+
                 rem -= copy;
 
                 if (copy < src_len) {
@@ -1030,7 +1289,11 @@ static void pulse_rd_loop(ACImpl *This, size_t bytes)
                         This->peek_buffer_len = src_len;
                     }
 
-                    memcpy(This->peek_buffer, src + copy, src_len - copy);
+                    if(src)
+                        memcpy(This->peek_buffer, src + copy, src_len - copy);
+                    else
+                        silence_buffer(This->ss.format, This->peek_buffer, src_len - copy);
+
                     This->peek_len = src_len - copy;
                     This->peek_ofs = 0;
                 }
@@ -1039,56 +1302,100 @@ static void pulse_rd_loop(ACImpl *This, size_t bytes)
             }
         }
 
-        bytes -= This->capture_period;
+        bytes -= This->period_bytes;
     }
 }
 
-static void pulse_rd_drop(ACImpl *This, size_t bytes)
+static DWORD WINAPI pulse_timer_cb(void *user)
 {
-    while (bytes >= This->capture_period) {
-        size_t src_len, copy, rem = This->capture_period;
-        while (rem) {
-            const void *src;
-            pa_stream_peek(This->stream, &src, &src_len);
-            assert(src_len);
-            assert(This->peek_ofs < src_len);
-            src_len -= This->peek_ofs;
-            assert(src_len <= bytes);
+    DWORD delay;
+    UINT32 adv_bytes;
+    ACImpl *This = user;
+    int success;
+    pa_operation *o;
 
-            copy = rem;
-            if (copy > src_len)
-                copy = src_len;
+    pthread_mutex_lock(&pulse_lock);
+    delay = This->mmdev_period_usec / 1000;
+    pa_stream_get_time(This->stream, &This->last_time);
+    pthread_mutex_unlock(&pulse_lock);
 
-            src_len -= copy;
-            rem -= copy;
+    while(!This->please_quit){
+        pa_usec_t now, adv_usec = 0;
+        int err;
 
-            if (!src_len) {
-                This->peek_ofs = 0;
-                pa_stream_drop(This->stream);
-            } else
-                This->peek_ofs += copy;
-            bytes -= copy;
+        Sleep(delay);
+
+        pthread_mutex_lock(&pulse_lock);
+
+        delay = This->mmdev_period_usec / 1000;
+
+        o = pa_stream_update_timing_info(This->stream, pulse_op_cb, &success);
+        if (o)
+        {
+            while (pa_operation_get_state(o) == PA_OPERATION_RUNNING)
+                pthread_cond_wait(&pulse_cond, &pulse_lock);
+            pa_operation_unref(o);
         }
+        err = pa_stream_get_time(This->stream, &now);
+        if(err == 0){
+            TRACE("got now: %s, last time: %s\n", wine_dbgstr_longlong(now), wine_dbgstr_longlong(This->last_time));
+            if(This->started && (This->dataflow == eCapture || This->held_bytes)){
+                if(This->just_underran){
+                    This->last_time = now;
+                    This->just_started = TRUE;
+                }
+
+                if(This->just_started){
+                    /* let it play out a period to absorb some latency and get accurate timing */
+                    pa_usec_t diff = now - This->last_time;
+
+                    if(diff > This->mmdev_period_usec){
+                        This->just_started = FALSE;
+                        This->last_time = now;
+                    }
+                }else{
+                    INT32 adjust = This->last_time + This->mmdev_period_usec - now;
+
+                    adv_usec = now - This->last_time;
+
+                    if(adjust > ((INT32)(This->mmdev_period_usec / 2)))
+                        adjust = This->mmdev_period_usec / 2;
+                    else if(adjust < -((INT32)(This->mmdev_period_usec / 2)))
+                        adjust = -1 * This->mmdev_period_usec / 2;
+
+                    delay = (This->mmdev_period_usec + adjust) / 1000;
+
+                    This->last_time += This->mmdev_period_usec;
+                }
+
+                if(This->dataflow == eRender){
+                    pulse_write(This);
+
+                    /* regardless of what PA does, advance one period */
+                    adv_bytes = min(This->period_bytes, This->held_bytes);
+                    This->lcl_offs_bytes += adv_bytes;
+                    This->lcl_offs_bytes %= This->real_bufsize_bytes;
+                    This->held_bytes -= adv_bytes;
+                }else if(This->dataflow == eCapture){
+                    pulse_read(This);
+                }
+            }else{
+                This->last_time = now;
+                delay = This->mmdev_period_usec / 1000;
+            }
+        }
+
+        if (This->event)
+            SetEvent(This->event);
+
+        TRACE("%p after update, adv usec: %d, held: %u, delay: %u\n",
+                This, (int)adv_usec,
+                (int)(This->held_bytes/ pa_frame_size(&This->ss)), delay);
+
+        pthread_mutex_unlock(&pulse_lock);
     }
-}
 
-static void pulse_rd_callback(pa_stream *s, size_t bytes, void *userdata)
-{
-    ACImpl *This = userdata;
-
-    TRACE("Readable total: %zu, fragsize: %u\n", bytes, pa_stream_get_buffer_attr(s)->fragsize);
-    assert(bytes >= This->peek_ofs);
-    bytes -= This->peek_ofs;
-    if (bytes < This->capture_period)
-        return;
-
-    if (This->started)
-        pulse_rd_loop(This, bytes);
-    else
-        pulse_rd_drop(This, bytes);
-
-    if (This->event)
-        SetEvent(This->event);
+    return 0;
 }
 
 static HRESULT pulse_stream_connect(ACImpl *This, UINT32 period_bytes) {
@@ -1096,6 +1403,8 @@ static HRESULT pulse_stream_connect(ACImpl *This, UINT32 period_bytes) {
     char buffer[64];
     static LONG number;
     pa_buffer_attr attr;
+    int moving = 0;
+
     if (This->stream) {
         pa_stream_disconnect(This->stream);
         while (pa_stream_get_state(This->stream) == PA_STREAM_READY)
@@ -1117,15 +1426,22 @@ static HRESULT pulse_stream_connect(ACImpl *This, UINT32 period_bytes) {
 
     /* PulseAudio will fill in correct values */
     attr.minreq = attr.fragsize = period_bytes;
-    attr.maxlength = attr.tlength = This->bufsize_bytes;
+    attr.tlength = period_bytes * 3;
+    attr.maxlength = This->bufsize_frames * pa_frame_size(&This->ss);
     attr.prebuf = pa_frame_size(&This->ss);
     dump_attr(&attr);
+
+    /* If device name is given use exactly the specified device */
+    if (This->device[0]){
+        moving = PA_STREAM_DONT_MOVE;
+    }
+
     if (This->dataflow == eRender)
         ret = pa_stream_connect_playback(This->stream, NULL, &attr,
-        PA_STREAM_START_CORKED|PA_STREAM_START_UNMUTED|PA_STREAM_AUTO_TIMING_UPDATE|PA_STREAM_INTERPOLATE_TIMING|PA_STREAM_EARLY_REQUESTS, NULL, NULL);
+        PA_STREAM_START_CORKED|PA_STREAM_START_UNMUTED|PA_STREAM_ADJUST_LATENCY|moving, NULL, NULL);
     else
         ret = pa_stream_connect_record(This->stream, NULL, &attr,
-        PA_STREAM_START_CORKED|PA_STREAM_START_UNMUTED|PA_STREAM_AUTO_TIMING_UPDATE|PA_STREAM_INTERPOLATE_TIMING|PA_STREAM_EARLY_REQUESTS);
+        PA_STREAM_START_CORKED|PA_STREAM_START_UNMUTED|PA_STREAM_ADJUST_LATENCY|moving);
     if (ret < 0) {
         WARN("Returns %i\n", ret);
         return AUDCLNT_E_ENDPOINT_CREATE_FAILED;
@@ -1136,47 +1452,59 @@ static HRESULT pulse_stream_connect(ACImpl *This, UINT32 period_bytes) {
         return AUDCLNT_E_ENDPOINT_CREATE_FAILED;
 
     if (This->dataflow == eRender) {
-        pa_stream_set_write_callback(This->stream, pulse_wr_callback, This);
         pa_stream_set_underflow_callback(This->stream, pulse_underflow_callback, This);
         pa_stream_set_started_callback(This->stream, pulse_started_callback, This);
-    } else
-        pa_stream_set_read_callback(This->stream, pulse_rd_callback, This);
+    }
     return S_OK;
 }
 
-HRESULT WINAPI AUDDRV_GetEndpointIDs(EDataFlow flow, const WCHAR ***ids, GUID **keys,
+HRESULT WINAPI AUDDRV_GetEndpointIDs(EDataFlow flow, WCHAR ***ids, GUID **keys,
         UINT *num, UINT *def_index)
 {
+    struct list *list = (flow == eRender) ? &g_phys_speakers : &g_phys_sources;
+    PhysDevice *dev;
+    DWORD count;
     WCHAR *id;
 
     TRACE("%d %p %p %p\n", flow, ids, num, def_index);
 
-    *num = 1;
+    *num = count = list_count(list);
     *def_index = 0;
 
-    *ids = HeapAlloc(GetProcessHeap(), 0, sizeof(**ids));
-    *keys = NULL;
-    if (!*ids)
-        return E_OUTOFMEMORY;
-
-    (*ids)[0] = id = HeapAlloc(GetProcessHeap(), 0, sizeof(defaultW));
-    *keys = HeapAlloc(GetProcessHeap(), 0, sizeof(**keys));
-    if (!*keys || !id) {
-        HeapFree(GetProcessHeap(), 0, id);
-        HeapFree(GetProcessHeap(), 0, *keys);
-        HeapFree(GetProcessHeap(), 0, *ids);
+    if (!count) {
         *ids = NULL;
         *keys = NULL;
-        return E_OUTOFMEMORY;
+        return E_FAIL;
     }
-    memcpy(id, defaultW, sizeof(defaultW));
 
-    if (flow == eRender)
-        (*keys)[0] = pulse_render_guid;
-    else
-        (*keys)[0] = pulse_capture_guid;
+    *ids = HeapAlloc(GetProcessHeap(), 0, count * sizeof(**ids));
+    *keys = HeapAlloc(GetProcessHeap(), 0, count * sizeof(**keys));
+    if (!*ids || !*keys) {
+        count = 0;
+        goto err;
+    }
+
+    count = 0;
+    LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
+        id = HeapAlloc(GetProcessHeap(), 0, (strlenW(dev->name) + 1) * sizeof(WCHAR));
+        if (!id)
+            goto err;
+        (*ids)[count] = id;
+        (*keys)[count] = dev->guid;
+        strcpyW(id, dev->name);
+        count++;
+    }
 
     return S_OK;
+
+err:
+    while (count)
+        HeapFree(GetProcessHeap(), 0, (*ids)[--count]);
+    HeapFree(GetProcessHeap(), 0, *keys);
+    HeapFree(GetProcessHeap(), 0, *ids);
+    *ids = NULL;
+    *keys = NULL;
+    return E_OUTOFMEMORY;
 }
 
 int WINAPI AUDDRV_GetPriority(void)
@@ -1188,20 +1516,79 @@ int WINAPI AUDDRV_GetPriority(void)
     return SUCCEEDED(hr) ? Priority_Preferred : Priority_Unavailable;
 }
 
+static BOOL get_pulse_name_by_guid(const GUID *guid, char *name, DWORD name_size, EDataFlow *flow)
+{
+    HKEY key;
+    DWORD index = 0;
+    WCHAR key_name[258];
+    DWORD key_name_size;
+
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, drv_key_devicesW, 0, KEY_READ,
+            &key) != ERROR_SUCCESS){
+        ERR("No devices found in registry?\n");
+        return FALSE;
+    }
+
+    while(1){
+        HKEY dev_key;
+        DWORD size, type;
+        GUID reg_guid;
+
+        key_name_size = sizeof(key_name)/sizeof(WCHAR);
+        if(RegEnumKeyExW(key, index++, key_name, &key_name_size, NULL,
+                NULL, NULL, NULL) != ERROR_SUCCESS)
+            break;
+
+        if (RegOpenKeyExW(key, key_name, 0, KEY_READ, &dev_key) != ERROR_SUCCESS){
+            ERR("Couldn't open key: %s\n", wine_dbgstr_w(key_name));
+            continue;
+        }
+
+        size = sizeof(reg_guid);
+        if (RegQueryValueExW(dev_key, guidW, 0, &type, (BYTE *)&reg_guid, &size) == ERROR_SUCCESS){
+            if (type == REG_BINARY && size == sizeof(reg_guid) && IsEqualGUID(&reg_guid, guid)){
+                RegCloseKey(dev_key);
+                RegCloseKey(key);
+
+                TRACE("Found matching device key: %s\n", wine_dbgstr_w(key_name));
+
+                if (key_name[0] == '0')
+                    *flow = eRender;
+                else if (key_name[0] == '1')
+                    *flow = eCapture;
+                else{
+                    ERR("Unknown device type: %c\n", key_name[0]);
+                    return FALSE;
+                }
+
+                return WideCharToMultiByte(CP_UNIXCP, 0, key_name + 2, -1, name, name_size, NULL, NULL);
+            }
+        }
+
+        RegCloseKey(dev_key);
+    }
+
+    RegCloseKey(key);
+    WARN("No matching device in registry for GUID %s\n", debugstr_guid(guid));
+    return FALSE;
+}
+
 HRESULT WINAPI AUDDRV_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient **out)
 {
+    char pulse_name[256] = {0};
     ACImpl *This;
     int i;
     EDataFlow dataflow;
     HRESULT hr;
 
     TRACE("%s %p %p\n", debugstr_guid(guid), dev, out);
+
     if (IsEqualGUID(guid, &pulse_render_guid))
         dataflow = eRender;
     else if (IsEqualGUID(guid, &pulse_capture_guid))
         dataflow = eCapture;
-    else
-        return E_UNEXPECTED;
+    else if(!get_pulse_name_by_guid(guid, pulse_name, sizeof(pulse_name), &dataflow))
+        return AUDCLNT_E_DEVICE_INVALIDATED;
 
     *out = NULL;
 
@@ -1219,6 +1606,7 @@ HRESULT WINAPI AUDDRV_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient 
     This->parent = dev;
     for (i = 0; i < PA_CHANNELS_MAX; ++i)
         This->vol[i] = 1.f;
+    strcpy(This->device, pulse_name);
 
     hr = CoCreateFreeThreadedMarshaler((IUnknown*)&This->IAudioClient_iface, &This->marshal);
     if (hr) {
@@ -1275,6 +1663,11 @@ static ULONG WINAPI AudioClient_Release(IAudioClient *iface)
     TRACE("(%p) Refcount now %u\n", This, ref);
     if (!ref) {
         if (This->stream) {
+            if(This->timer){
+                This->please_quit = TRUE;
+                WaitForSingleObject(This->timer, INFINITE);
+                CloseHandle(This->timer);
+            }
             pthread_mutex_lock(&pulse_lock);
             if (PA_STREAM_IS_GOOD(pa_stream_get_state(This->stream))) {
                 pa_stream_disconnect(This->stream);
@@ -1570,7 +1963,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
 {
     ACImpl *This = impl_from_IAudioClient(iface);
     HRESULT hr = S_OK;
-    UINT period_bytes;
+    UINT32 bufsize_bytes;
 
     TRACE("(%p)->(%x, %x, %s, %s, %p, %s)\n", This, mode, flags,
           wine_dbgstr_longlong(duration), wine_dbgstr_longlong(period), fmt, debugstr_guid(sessionguid));
@@ -1615,38 +2008,19 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
     if (FAILED(hr))
         goto exit;
 
-    if (mode == AUDCLNT_SHAREMODE_SHARED) {
-        REFERENCE_TIME def = pulse_def_period[This->dataflow == eCapture];
-        REFERENCE_TIME min = pulse_min_period[This->dataflow == eCapture];
+    period = pulse_def_period[This->dataflow == eCapture];
+    if (duration < 3 * period)
+        duration = 3 * period;
 
-        /* Switch to low latency mode if below 2 default periods,
-         * which is 20 ms by default, this will increase the amount
-         * of interrupts but allows very low latency. In dsound I
-         * managed to get a total latency of ~8ms, which is well below
-         * default
-         */
-        if (duration < 2 * def)
-            period = min;
-        else
-            period = def;
-        if (duration < 2 * period)
-            duration = 2 * period;
+    This->period_bytes = pa_frame_size(&This->ss) * MulDiv(period, This->ss.rate, 10000000);
 
-        /* Uh oh, really low latency requested.. */
-        if (duration <= 2 * period)
-            period /= 2;
-    }
-    period_bytes = pa_frame_size(&This->ss) * MulDiv(period, This->ss.rate, 10000000);
-
-    if (duration < 20000000)
-        This->bufsize_frames = ceil((duration / 10000000.) * fmt->nSamplesPerSec);
-    else
-        This->bufsize_frames = 2 * fmt->nSamplesPerSec;
-    This->bufsize_bytes = This->bufsize_frames * pa_frame_size(&This->ss);
+    This->bufsize_frames = ceil((duration / 10000000.) * fmt->nSamplesPerSec);
+    bufsize_bytes = This->bufsize_frames * pa_frame_size(&This->ss);
+    This->mmdev_period_usec = period / 10;
 
     This->share = mode;
     This->flags = flags;
-    hr = pulse_stream_connect(This, period_bytes);
+    hr = pulse_stream_connect(This, This->period_bytes);
     if (SUCCEEDED(hr)) {
         UINT32 unalign;
         const pa_buffer_attr *attr = pa_stream_get_buffer_attr(This->stream);
@@ -1654,39 +2028,34 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
         /* Update frames according to new size */
         dump_attr(attr);
         if (This->dataflow == eRender) {
-            if (attr->tlength < This->bufsize_bytes) {
-                TRACE("PulseAudio buffer too small (%u < %u), using tmp buffer\n", attr->tlength, This->bufsize_bytes);
-
-                This->local_buffer = HeapAlloc(GetProcessHeap(), 0, This->bufsize_bytes);
-                if(!This->local_buffer)
-                    hr = E_OUTOFMEMORY;
-            }
+            This->real_bufsize_bytes = This->bufsize_frames * 2 * pa_frame_size(&This->ss);
+            This->local_buffer = HeapAlloc(GetProcessHeap(), 0, This->real_bufsize_bytes);
+            if(!This->local_buffer)
+                hr = E_OUTOFMEMORY;
         } else {
             UINT32 i, capture_packets;
 
-            This->capture_period = period_bytes = attr->fragsize;
-            if ((unalign = This->bufsize_bytes % period_bytes))
-                This->bufsize_bytes += period_bytes - unalign;
-            This->bufsize_frames = This->bufsize_bytes / pa_frame_size(&This->ss);
+            if ((unalign = bufsize_bytes % This->period_bytes))
+                bufsize_bytes += This->period_bytes - unalign;
+            This->bufsize_frames = bufsize_bytes / pa_frame_size(&This->ss);
+            This->real_bufsize_bytes = bufsize_bytes;
 
-            capture_packets = This->bufsize_bytes / This->capture_period;
+            capture_packets = This->real_bufsize_bytes / This->period_bytes;
 
-            This->local_buffer = HeapAlloc(GetProcessHeap(), 0, This->bufsize_bytes + capture_packets * sizeof(ACPacket));
+            This->local_buffer = HeapAlloc(GetProcessHeap(), 0, This->real_bufsize_bytes + capture_packets * sizeof(ACPacket));
             if (!This->local_buffer)
                 hr = E_OUTOFMEMORY;
             else {
-                ACPacket *cur_packet = (ACPacket*)((char*)This->local_buffer + This->bufsize_bytes);
+                ACPacket *cur_packet = (ACPacket*)((char*)This->local_buffer + This->real_bufsize_bytes);
                 BYTE *data = This->local_buffer;
-                silence_buffer(This->ss.format, This->local_buffer, This->bufsize_bytes);
+                silence_buffer(This->ss.format, This->local_buffer, This->real_bufsize_bytes);
                 list_init(&This->packet_free_head);
                 list_init(&This->packet_filled_head);
                 for (i = 0; i < capture_packets; ++i, ++cur_packet) {
                     list_add_tail(&This->packet_free_head, &cur_packet->entry);
                     cur_packet->data = data;
-                    data += This->capture_period;
+                    data += This->period_bytes;
                 }
-                assert(!This->capture_period || This->bufsize_bytes == This->capture_period * capture_packets);
-                assert(!capture_packets || data - This->bufsize_bytes == This->local_buffer);
             }
         }
     }
@@ -1751,12 +2120,12 @@ static HRESULT WINAPI AudioClient_GetStreamLatency(IAudioClient *iface,
     attr = pa_stream_get_buffer_attr(This->stream);
     if (This->dataflow == eRender){
         lat = attr->minreq / pa_frame_size(&This->ss);
-        lat += pulse_def_period[0];
     }else
         lat = attr->fragsize / pa_frame_size(&This->ss);
     *latency = 10000000;
     *latency *= lat;
     *latency /= This->ss.rate;
+    *latency += pulse_def_period[0];
     pthread_mutex_unlock(&pulse_lock);
     TRACE("Latency: %u ms\n", (DWORD)(*latency / 10000));
     return S_OK;
@@ -1764,7 +2133,7 @@ static HRESULT WINAPI AudioClient_GetStreamLatency(IAudioClient *iface,
 
 static void ACImpl_GetRenderPad(ACImpl *This, UINT32 *out)
 {
-    *out = This->pad / pa_frame_size(&This->ss);
+    *out = This->held_bytes / pa_frame_size(&This->ss);
 }
 
 static void ACImpl_GetCapturePad(ACImpl *This, UINT32 *out)
@@ -1776,7 +2145,7 @@ static void ACImpl_GetCapturePad(ACImpl *This, UINT32 *out)
         list_remove(&packet->entry);
     }
     if (out)
-        *out = This->pad / pa_frame_size(&This->ss);
+        *out = This->held_bytes / pa_frame_size(&This->ss);
 }
 
 static HRESULT WINAPI AudioClient_GetCurrentPadding(IAudioClient *iface,
@@ -2022,6 +2391,8 @@ static HRESULT WINAPI AudioClient_Start(IAudioClient *iface)
         return AUDCLNT_E_NOT_STOPPED;
     }
 
+    pulse_write(This);
+
     if (pa_stream_is_corked(This->stream)) {
         o = pa_stream_cork(This->stream, 0, pulse_op_cb, &success);
         if (o) {
@@ -2036,8 +2407,10 @@ static HRESULT WINAPI AudioClient_Start(IAudioClient *iface)
 
     if (SUCCEEDED(hr)) {
         This->started = TRUE;
-        if (This->dataflow == eRender && This->event)
-            pa_stream_set_latency_update_callback(This->stream, pulse_latency_callback, This);
+        This->just_started = TRUE;
+
+        if(!This->timer)
+            This->timer = CreateThread(NULL, 0, pulse_timer_cb, This, 0, NULL);
     }
     pthread_mutex_unlock(&pulse_lock);
     return hr;
@@ -2109,7 +2482,7 @@ static HRESULT WINAPI AudioClient_Reset(IAudioClient *iface)
     if (This->dataflow == eRender) {
         /* If there is still data in the render buffer it needs to be removed from the server */
         int success = 0;
-        if (This->pad) {
+        if (This->held_bytes) {
             pa_operation *o = pa_stream_flush(This->stream, pulse_op_cb, &success);
             if (o) {
                 while(pa_operation_get_state(o) == PA_OPERATION_RUNNING)
@@ -2117,14 +2490,14 @@ static HRESULT WINAPI AudioClient_Reset(IAudioClient *iface)
                 pa_operation_unref(o);
             }
         }
-        if (success || !This->pad){
-            This->clock_lastpos = This->clock_written = This->pad = 0;
-            This->wri_offs_bytes = This->lcl_offs_bytes = This->held_bytes = 0;
+        if (success || !This->held_bytes){
+            This->clock_lastpos = This->clock_written = 0;
+            This->pa_offs_bytes = This->lcl_offs_bytes = This->held_bytes = This->pa_held_bytes = 0;
         }
     } else {
         ACPacket *p;
-        This->clock_written += This->pad;
-        This->pad = 0;
+        This->clock_written += This->held_bytes;
+        This->held_bytes = 0;
 
         if ((p = This->locked_ptr)) {
             This->locked_ptr = NULL;
@@ -2290,10 +2663,9 @@ static HRESULT WINAPI AudioRenderClient_GetBuffer(IAudioRenderClient *iface,
         UINT32 frames, BYTE **data)
 {
     ACImpl *This = impl_from_IAudioRenderClient(iface);
-    size_t avail, req, bytes = frames * pa_frame_size(&This->ss);
-    UINT32 pad;
+    size_t bytes = frames * pa_frame_size(&This->ss);
     HRESULT hr = S_OK;
-    int ret = -1;
+    UINT32 wri_offs_bytes;
 
     TRACE("(%p)->(%u, %p)\n", This, frames, data);
 
@@ -2312,37 +2684,19 @@ static HRESULT WINAPI AudioRenderClient_GetBuffer(IAudioRenderClient *iface,
         return S_OK;
     }
 
-    ACImpl_GetRenderPad(This, &pad);
-    avail = This->bufsize_frames - pad;
-    if (avail < frames || bytes > This->bufsize_bytes) {
+    if(This->held_bytes / pa_frame_size(&This->ss) + frames > This->bufsize_frames){
         pthread_mutex_unlock(&pulse_lock);
-        WARN("Wanted to write %u, but only %zu available\n", frames, avail);
         return AUDCLNT_E_BUFFER_TOO_LARGE;
     }
 
-    if(This->local_buffer){
-        if(This->wri_offs_bytes + bytes > This->bufsize_bytes){
-            alloc_tmp_buffer(This, bytes);
-            *data = This->tmp_buffer;
-            This->locked = -frames;
-        }else{
-            *data = This->local_buffer + This->wri_offs_bytes;
-            This->locked = frames;
-        }
+    wri_offs_bytes = (This->lcl_offs_bytes + This->held_bytes) % This->real_bufsize_bytes;
+    if(wri_offs_bytes + bytes > This->real_bufsize_bytes){
+        alloc_tmp_buffer(This, bytes);
+        *data = This->tmp_buffer;
+        This->locked = -bytes;
     }else{
-        req = bytes;
-        ret = pa_stream_begin_write(This->stream, &This->locked_ptr, &req);
-        if (ret < 0 || req < bytes) {
-            FIXME("%p Not using pulse locked data: %i %zu/%u %u/%u\n", This, ret, req/pa_frame_size(&This->ss), frames, pad, This->bufsize_frames);
-            if (ret >= 0)
-                pa_stream_cancel_write(This->stream);
-            alloc_tmp_buffer(This, bytes);
-            *data = This->tmp_buffer;
-            This->locked_ptr = NULL;
-        } else
-            *data = This->locked_ptr;
-
-        This->locked = frames;
+        *data = This->local_buffer + wri_offs_bytes;
+        This->locked = bytes;
     }
 
     silence_buffer(This->ss.format, *data, bytes);
@@ -2354,12 +2708,13 @@ static HRESULT WINAPI AudioRenderClient_GetBuffer(IAudioRenderClient *iface,
 
 static void pulse_wrap_buffer(ACImpl *This, BYTE *buffer, UINT32 written_bytes)
 {
-    UINT32 chunk_bytes = This->bufsize_bytes - This->wri_offs_bytes;
+    UINT32 wri_offs_bytes = (This->lcl_offs_bytes + This->held_bytes) % This->real_bufsize_bytes;
+    UINT32 chunk_bytes = This->real_bufsize_bytes - wri_offs_bytes;
 
     if(written_bytes <= chunk_bytes){
-        memcpy(This->local_buffer + This->wri_offs_bytes, buffer, written_bytes);
+        memcpy(This->local_buffer + wri_offs_bytes, buffer, written_bytes);
     }else{
-        memcpy(This->local_buffer + This->wri_offs_bytes, buffer, chunk_bytes);
+        memcpy(This->local_buffer + wri_offs_bytes, buffer, chunk_bytes);
         memcpy(This->local_buffer, buffer + chunk_bytes,
                 written_bytes - chunk_bytes);
     }
@@ -2370,88 +2725,47 @@ static HRESULT WINAPI AudioRenderClient_ReleaseBuffer(
 {
     ACImpl *This = impl_from_IAudioRenderClient(iface);
     UINT32 written_bytes = written_frames * pa_frame_size(&This->ss);
+    BYTE *buffer;
 
     TRACE("(%p)->(%u, %x)\n", This, written_frames, flags);
 
     pthread_mutex_lock(&pulse_lock);
     if (!This->locked || !written_frames) {
-        if (This->locked_ptr)
-            pa_stream_cancel_write(This->stream);
         This->locked = 0;
-        This->locked_ptr = NULL;
         pthread_mutex_unlock(&pulse_lock);
         return written_frames ? AUDCLNT_E_OUT_OF_ORDER : S_OK;
     }
 
-    if (This->locked < written_frames) {
+    if(written_frames * pa_frame_size(&This->ss) > (This->locked >= 0 ? This->locked : -This->locked)){
         pthread_mutex_unlock(&pulse_lock);
         return AUDCLNT_E_INVALID_SIZE;
     }
 
-    if(This->local_buffer){
-        BYTE *buffer;
+    if(This->locked >= 0)
+        buffer = This->local_buffer + (This->lcl_offs_bytes + This->held_bytes) % This->real_bufsize_bytes;
+    else
+        buffer = This->tmp_buffer;
 
-        if(This->locked >= 0)
-            buffer = This->local_buffer + This->wri_offs_bytes;
-        else
-            buffer = This->tmp_buffer;
+    if(flags & AUDCLNT_BUFFERFLAGS_SILENT)
+        silence_buffer(This->ss.format, buffer, written_bytes);
 
-        if(flags & AUDCLNT_BUFFERFLAGS_SILENT)
-            silence_buffer(This->ss.format, buffer, written_bytes);
+    if(This->locked < 0)
+        pulse_wrap_buffer(This, buffer, written_bytes);
 
-        if(This->locked < 0)
-            pulse_wrap_buffer(This, buffer, written_bytes);
-
-        This->wri_offs_bytes += written_bytes;
-        This->wri_offs_bytes %= This->bufsize_bytes;
-
-        This->pad += written_bytes;
-        This->held_bytes += written_bytes;
-
-        if(This->held_bytes == This->pad){
-            int e;
-            UINT32 to_write = min(This->attr.tlength, written_bytes);
-
-            /* nothing in PA, so send data immediately */
-
-            TRACE("pre-writing %u bytes\n", to_write);
-
-            e = write_buffer(This, buffer, to_write, 0);
-            if(e)
-                ERR("pa_stream_write failed: 0x%x\n", e);
-
-            This->lcl_offs_bytes += to_write;
-            This->lcl_offs_bytes %= This->bufsize_bytes;
-            This->held_bytes -= to_write;
-        }
-
-    }else{
-        enum write_buffer_flags wr_flags = 0;
-
-        if (flags & AUDCLNT_BUFFERFLAGS_SILENT) wr_flags |= WINEPULSE_WRITE_SILENT;
-        if (!This->locked_ptr) wr_flags |= WINEPULSE_WRITE_NOFREE;
-
-        write_buffer(This, This->locked_ptr ? This->locked_ptr : This->tmp_buffer, written_bytes, wr_flags);
-        This->pad += written_bytes;
+    This->held_bytes += written_bytes;
+    This->pa_held_bytes += written_bytes;
+    if(This->pa_held_bytes > This->real_bufsize_bytes){
+        This->pa_offs_bytes += This->pa_held_bytes - This->real_bufsize_bytes;
+        This->pa_offs_bytes %= This->real_bufsize_bytes;
+        This->pa_held_bytes = This->real_bufsize_bytes;
     }
-
-    if (!pa_stream_is_corked(This->stream)) {
-        int success;
-        pa_operation *o;
-        o = pa_stream_trigger(This->stream, pulse_op_cb, &success);
-        if (o) {
-            while(pa_operation_get_state(o) == PA_OPERATION_RUNNING)
-                pthread_cond_wait(&pulse_cond, &pulse_lock);
-            pa_operation_unref(o);
-        }
-    }
-
+    This->clock_written += written_bytes;
     This->locked = 0;
-    This->locked_ptr = NULL;
-    TRACE("Released %u, pad %zu\n", written_frames, This->pad / pa_frame_size(&This->ss));
-    assert(This->pad <= This->bufsize_bytes);
+
+    TRACE("Released %u, held %zu\n", written_frames, This->held_bytes / pa_frame_size(&This->ss));
 
     pthread_mutex_unlock(&pulse_lock);
+
     return S_OK;
 }
 
@@ -2528,13 +2842,13 @@ static HRESULT WINAPI AudioCaptureClient_GetBuffer(IAudioCaptureClient *iface,
 
     ACImpl_GetCapturePad(This, NULL);
     if ((packet = This->locked_ptr)) {
-        *frames = This->capture_period / pa_frame_size(&This->ss);
+        *frames = This->period_bytes / pa_frame_size(&This->ss);
         *flags = 0;
         if (packet->discont)
             *flags |= AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY;
         if (devpos) {
             if (packet->discont)
-                *devpos = (This->clock_written + This->capture_period) / pa_frame_size(&This->ss);
+                *devpos = (This->clock_written + This->period_bytes) / pa_frame_size(&This->ss);
             else
                 *devpos = This->clock_written / pa_frame_size(&This->ss);
         }
@@ -2568,11 +2882,11 @@ static HRESULT WINAPI AudioCaptureClient_ReleaseBuffer(
     if (done) {
         ACPacket *packet = This->locked_ptr;
         This->locked_ptr = NULL;
-        This->pad -= This->capture_period;
+        This->held_bytes -= This->period_bytes;
         if (packet->discont)
-            This->clock_written += 2 * This->capture_period;
+            This->clock_written += 2 * This->period_bytes;
         else
-            This->clock_written += This->capture_period;
+            This->clock_written += This->period_bytes;
         list_add_tail(&This->packet_free_head, &packet->entry);
     }
     This->locked = 0;
@@ -2592,7 +2906,7 @@ static HRESULT WINAPI AudioCaptureClient_GetNextPacketSize(
     pthread_mutex_lock(&pulse_lock);
     ACImpl_GetCapturePad(This, NULL);
     if (This->locked_ptr)
-        *frames = This->capture_period / pa_frame_size(&This->ss);
+        *frames = This->period_bytes / pa_frame_size(&This->ss);
     else
         *frames = 0;
     pthread_mutex_unlock(&pulse_lock);
@@ -2684,7 +2998,7 @@ static HRESULT WINAPI AudioClock_GetPosition(IAudioClock *iface, UINT64 *pos,
         return hr;
     }
 
-    *pos = This->clock_written;
+    *pos = This->clock_written - This->held_bytes;
 
     if (This->share == AUDCLNT_SHAREMODE_EXCLUSIVE)
         *pos /= pa_frame_size(&This->ss);
@@ -3648,18 +3962,54 @@ HRESULT WINAPI AUDDRV_GetAudioSessionManager(IMMDevice *device,
     return S_OK;
 }
 
-HRESULT WINAPI AUDDRV_GetPropValue(GUID *guid, const PROPERTYKEY *prop, PROPVARIANT *out)
+static const PROPERTYKEY devicepath_key = { /* undocumented? - {b3f8fa53-0004-438e-9003-51a46e139bfc},2 */
+    {0xb3f8fa53, 0x0004, 0x438e, {0x90, 0x03, 0x51, 0xa4, 0x6e, 0x13, 0x9b, 0xfc}}, 2
+};
+
+static HRESULT pulse_device_get_prop_value(PhysDevice *dev, const PROPERTYKEY *prop, PROPVARIANT *out)
 {
-    TRACE("%s, (%s,%u), %p\n", wine_dbgstr_guid(guid), wine_dbgstr_guid(&prop->fmtid), prop->pid, out);
+    if (IsEqualPropertyKey(*prop, devicepath_key)) {
+        if (!dev->device[0])
+            return E_FAIL;
 
-    if (IsEqualGUID(guid, &pulse_render_guid) && IsEqualPropertyKey(*prop, PKEY_AudioEndpoint_PhysicalSpeakers)) {
+        out->vt = VT_LPWSTR;
+        out->u.pwszVal = CoTaskMemAlloc((strlenW(dev->device) + 1) * sizeof(WCHAR));
+        if (!out->u.pwszVal)
+            return E_OUTOFMEMORY;
+
+        strcpyW(out->u.pwszVal, dev->device);
+        return S_OK;
+    } else if (IsEqualPropertyKey(*prop, PKEY_AudioEndpoint_FormFactor)) {
         out->vt = VT_UI4;
-        out->u.ulVal = g_phys_speakers_mask;
-
+        out->u.ulVal = dev->form;
+        return S_OK;
+    } else if (IsEqualPropertyKey(*prop, PKEY_AudioEndpoint_PhysicalSpeakers)) {
+        out->vt = VT_UI4;
+        out->u.ulVal = dev->channel_mask;
         return out->u.ulVal ? S_OK : E_FAIL;
     }
 
     return E_NOTIMPL;
+}
+
+HRESULT WINAPI AUDDRV_GetPropValue(GUID *guid, const PROPERTYKEY *prop, PROPVARIANT *out)
+{
+    PhysDevice *dev;
+
+    TRACE("%s, (%s,%u), %p\n", wine_dbgstr_guid(guid), wine_dbgstr_guid(&prop->fmtid), prop->pid, out);
+
+    LIST_FOR_EACH_ENTRY(dev, &g_phys_speakers, PhysDevice, entry) {
+        if (IsEqualGUID(guid, &dev->guid))
+            return pulse_device_get_prop_value(dev, prop, out);
+    }
+
+    LIST_FOR_EACH_ENTRY(dev, &g_phys_sources, PhysDevice, entry) {
+        if (IsEqualGUID(guid, &dev->guid))
+            return pulse_device_get_prop_value(dev, prop, out);
+    }
+
+    WARN("Unknown GUID %s\n", debugstr_guid(guid));
+    return E_FAIL;
 }
 
 

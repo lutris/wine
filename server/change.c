@@ -115,6 +115,7 @@ static const struct object_ops dir_ops =
     add_queue,                /* add_queue */
     remove_queue,             /* remove_queue */
     default_fd_signaled,      /* signaled */
+    default_fd_get_esync_fd,  /* get_esync_fd */
     no_satisfied,             /* satisfied */
     no_signal,                /* signal */
     dir_get_fd,               /* get_fd */
@@ -126,6 +127,7 @@ static const struct object_ops dir_ops =
     NULL,                     /* unlink_name */
     no_open_file,             /* open_file */
     no_kernel_obj_list,       /* get_kernel_obj_list */
+    no_alloc_handle,          /* alloc_handle */
     dir_close_handle,         /* close_handle */
     dir_destroy               /* destroy */
 };
@@ -331,39 +333,17 @@ static struct fd *dir_get_fd( struct object *obj )
     return (struct fd *)grab_object( dir->fd );
 }
 
-static int get_dir_unix_fd( struct dir *dir )
-{
-    return get_unix_fd( dir->fd );
-}
-
 static struct security_descriptor *dir_get_sd( struct object *obj )
 {
     struct dir *dir = (struct dir *)obj;
-    int unix_fd;
-    struct stat st;
     struct security_descriptor *sd;
+    struct fd *fd;
+
     assert( obj->ops == &dir_ops );
 
-    unix_fd = get_dir_unix_fd( dir );
-
-    if (unix_fd == -1 || fstat( unix_fd, &st ) == -1)
-        return obj->sd;
-
-    /* mode and uid the same? if so, no need to re-generate security descriptor */
-    if (obj->sd &&
-        (st.st_mode & (S_IRWXU|S_IRWXO)) == (dir->mode & (S_IRWXU|S_IRWXO)) &&
-        (st.st_uid == dir->uid))
-        return obj->sd;
-
-    sd = mode_to_sd( st.st_mode,
-                     security_unix_uid_to_sid( st.st_uid ),
-                     token_get_primary_group( current->process->token ));
-    if (!sd) return obj->sd;
-
-    dir->mode = st.st_mode;
-    dir->uid = st.st_uid;
-    free( obj->sd );
-    obj->sd = sd;
+    fd = dir_get_fd( obj );
+    sd = get_file_sd( obj, fd, &dir->mode, &dir->uid );
+    release_object( fd );
     return sd;
 }
 
@@ -371,48 +351,15 @@ static int dir_set_sd( struct object *obj, const struct security_descriptor *sd,
                        unsigned int set_info )
 {
     struct dir *dir = (struct dir *)obj;
-    const SID *owner;
-    struct stat st;
-    mode_t mode;
-    int unix_fd;
+    struct fd *fd;
+    int ret;
 
     assert( obj->ops == &dir_ops );
 
-    unix_fd = get_dir_unix_fd( dir );
-
-    if (unix_fd == -1 || fstat( unix_fd, &st ) == -1) return 1;
-
-    if (set_info & OWNER_SECURITY_INFORMATION)
-    {
-        owner = sd_get_owner( sd );
-        if (!owner)
-        {
-            set_error( STATUS_INVALID_SECURITY_DESCR );
-            return 0;
-        }
-        if (!obj->sd || !security_equal_sid( owner, sd_get_owner( obj->sd ) ))
-        {
-            /* FIXME: get Unix uid and call fchown */
-        }
-    }
-    else if (obj->sd)
-        owner = sd_get_owner( obj->sd );
-    else
-        owner = token_get_user( current->process->token );
-
-    if (set_info & DACL_SECURITY_INFORMATION)
-    {
-        /* keep the bits that we don't map to access rights in the ACL */
-        mode = st.st_mode & (S_ISUID|S_ISGID|S_ISVTX);
-        mode |= sd_to_mode( sd, owner );
-
-        if (((st.st_mode ^ mode) & (S_IRWXU|S_IRWXG|S_IRWXO)) && fchmod( unix_fd, mode ) == -1)
-        {
-            file_set_error();
-            return 0;
-        }
-    }
-    return 1;
+    fd = dir_get_fd( obj );
+    ret = set_file_sd( obj, fd, &dir->mode, &dir->uid, sd, set_info );
+    release_object( fd );
+    return ret;
 }
 
 static struct change_record *get_first_change_record( struct dir *dir )
@@ -1130,7 +1077,8 @@ static int dir_add_to_existing_notify( struct dir *dir )
 
 #endif  /* HAVE_SYS_INOTIFY_H */
 
-struct object *create_dir_obj( struct fd *fd, unsigned int access, mode_t mode )
+struct object *create_dir_obj( struct fd *fd, unsigned int access, mode_t mode,
+                               const struct security_descriptor *sd )
 {
     struct dir *dir;
 
@@ -1149,6 +1097,11 @@ struct object *create_dir_obj( struct fd *fd, unsigned int access, mode_t mode )
     dir->uid  = ~(uid_t)0;
     dir->client_process = NULL;
     set_fd_user( fd, &dir_fd_ops, &dir->obj );
+
+    if (sd) dir_set_sd( &dir->obj, sd, OWNER_SECURITY_INFORMATION |
+                                       GROUP_SECURITY_INFORMATION |
+                                       DACL_SECURITY_INFORMATION |
+                                       SACL_SECURITY_INFORMATION );
 
     dir_add_to_existing_notify( dir );
 

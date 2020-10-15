@@ -1468,7 +1468,7 @@ static void test_echo_parameters(IDirectSoundBuffer8 *secondary8)
         DSFXEcho params;
 
         rc = IDirectSoundFXEcho_GetAllParameters(echo, &params);
-        todo_wine ok(rc == DS_OK, "Failed: %08x\n", rc);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
         if (rc == DS_OK )
         {
             ok(params.fWetDryMix == 50.0f, "got %f\n", params.fWetDryMix);
@@ -1480,6 +1480,38 @@ static void test_echo_parameters(IDirectSoundBuffer8 *secondary8)
 
         test_dsfx_interfaces("FXEcho", (IUnknown *)echo, &IID_IDirectSoundFXEcho);
 
+        rc = IDirectSoundFXEcho_SetAllParameters(echo, NULL);
+        ok(rc == E_POINTER, "got: %08x\n", rc);
+
+        /* Out of range Min */
+        params.fWetDryMix  = -1.0f;
+
+        rc = IDirectSoundFXEcho_SetAllParameters(echo, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        /* Out of range Max */
+        params.fWetDryMix  = 101.0f;
+
+        rc = IDirectSoundFXEcho_SetAllParameters(echo, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        params.fWetDryMix  = DSFXECHO_WETDRYMIX_MIN;
+
+        rc = IDirectSoundFXEcho_SetAllParameters(echo, &params);
+        ok(rc == S_OK, "Failed: %08x\n", rc);
+
+        rc = IDirectSoundFXEcho_GetAllParameters(echo, &params);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
+        if (rc == DS_OK )
+        {
+            ok(params.fWetDryMix == DSFXECHO_WETDRYMIX_MIN, "got %f\n", params.fWetDryMix);
+            ok(params.fFeedback == 50.0f, "got %f\n", params.fFeedback);
+            ok(params.fLeftDelay == 500.0f,"got %f\n", params.fLeftDelay);
+            ok(params.fRightDelay == 500.0f,"got %f\n", params.fRightDelay);
+            ok(params.lPanDelay == 0, "got %d\n", params.lPanDelay);
+        }
+
+
         IDirectSoundFXEcho_Release(echo);
     }
 }
@@ -1490,13 +1522,13 @@ static void test_gargle_parameters(IDirectSoundBuffer8 *secondary8)
     IDirectSoundFXGargle *gargle;
 
     rc = IDirectSoundBuffer8_GetObjectInPath(secondary8, &GUID_DSFX_STANDARD_GARGLE, 0, &IID_IDirectSoundFXGargle, (void**)&gargle);
-    todo_wine ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
+    ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
     if (rc == DS_OK)
     {
         DSFXGargle params;
 
         rc = IDirectSoundFXGargle_GetAllParameters(gargle, &params);
-        todo_wine ok(rc == DS_OK, "Failed: %08x\n", rc);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
         if (rc == DS_OK)
         {
             ok(params.dwRateHz == 20, "got %d\n", params.dwRateHz);
@@ -1504,6 +1536,34 @@ static void test_gargle_parameters(IDirectSoundBuffer8 *secondary8)
         }
 
         test_dsfx_interfaces("FXGargle", (IUnknown *)gargle, &IID_IDirectSoundFXGargle);
+
+        rc = IDirectSoundFXGargle_SetAllParameters(gargle, NULL);
+        ok(rc == E_POINTER, "got: %08x\n", rc);
+
+        /* Out of range Min */
+        params.dwRateHz    = 0;
+
+        rc = IDirectSoundFXGargle_SetAllParameters(gargle, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        /* Out of range Max */
+        params.dwRateHz    = 1001;
+        rc = IDirectSoundFXGargle_SetAllParameters(gargle, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        params.dwRateHz    = 800;
+        params.dwWaveShape = DSFXGARGLE_WAVE_SQUARE;
+        rc = IDirectSoundFXGargle_SetAllParameters(gargle, &params);
+        ok(rc == S_OK, "got: %08x\n", rc);
+
+        rc = IDirectSoundFXGargle_GetAllParameters(gargle, &params);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
+        if (rc == DS_OK)
+        {
+            ok(params.dwRateHz == 800, "got %d\n", params.dwRateHz);
+            ok(params.dwWaveShape == DSFXGARGLE_WAVE_SQUARE, "got %d\n", params.dwWaveShape);
+        }
+
 
         IDirectSoundFXGargle_Release(gargle);
     }
@@ -1515,13 +1575,13 @@ static void test_chorus_parameters(IDirectSoundBuffer8 *secondary8)
     IDirectSoundFXChorus *chorus;
 
     rc = IDirectSoundBuffer8_GetObjectInPath(secondary8, &GUID_DSFX_STANDARD_CHORUS, 0, &IID_IDirectSoundFXChorus,(void**)&chorus);
-    todo_wine ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
+    ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
     if (rc == DS_OK)
     {
         DSFXChorus params;
 
         rc = IDirectSoundFXChorus_GetAllParameters(chorus, &params);
-        todo_wine ok(rc == DS_OK, "Failed: %08x\n", rc);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
         if (rc == DS_OK)
         {
             ok(params.fWetDryMix == 50.0f, "got %f\n", params.fWetDryMix);
@@ -1535,6 +1595,38 @@ static void test_chorus_parameters(IDirectSoundBuffer8 *secondary8)
 
         test_dsfx_interfaces("FXChorus", (IUnknown *)chorus, &IID_IDirectSoundFXChorus);
 
+        rc = IDirectSoundFXChorus_SetAllParameters(chorus, NULL);
+        ok(rc == E_POINTER, "got: %08x\n", rc);
+
+        /* Out of range Min */
+        params.fWetDryMix = -1.0f;
+
+        rc = IDirectSoundFXChorus_SetAllParameters(chorus, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        /* Out of range Max */
+        params.fWetDryMix = 101.1f;
+        rc = IDirectSoundFXChorus_SetAllParameters(chorus, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        params.fWetDryMix = 80.1f;
+        rc = IDirectSoundFXChorus_SetAllParameters(chorus, &params);
+        ok(rc == S_OK, "got: %08x\n", rc);
+
+        rc = IDirectSoundFXChorus_GetAllParameters(chorus, &params);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
+        if (rc == DS_OK)
+        {
+            ok(params.fWetDryMix == 80.1f, "got %f\n", params.fWetDryMix);
+            ok(params.fDepth == 10.0f, "got %f\n", params.fDepth);
+            ok(params.fFeedback == 25.0f, "got %f\n", params.fFeedback);
+            ok(params.fFrequency == 1.1f, "got %f\n", params.fFrequency);
+            ok(params.lWaveform == DSFXCHORUS_WAVE_SIN, "got %d\n", params.lWaveform);
+            ok(params.fDelay == 16.0f, "got %f\n", params.fDelay);
+            ok(params.lPhase == 3, "got %d\n", params.lPhase);
+        }
+
+
         IDirectSoundFXChorus_Release(chorus);
     }
 }
@@ -1545,13 +1637,13 @@ static void test_flanger_parameters(IDirectSoundBuffer8 *secondary8)
     IDirectSoundFXFlanger *flanger;
 
     rc = IDirectSoundBuffer8_GetObjectInPath(secondary8, &GUID_DSFX_STANDARD_FLANGER, 0, &IID_IDirectSoundFXFlanger,(void**)&flanger);
-    todo_wine ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
+    ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
     if (rc == DS_OK)
     {
         DSFXFlanger params;
 
         rc = IDirectSoundFXFlanger_GetAllParameters(flanger, &params);
-        todo_wine ok(rc == DS_OK, "Failed: %08x\n", rc);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
         if (rc == DS_OK)
         {
             ok(params.fWetDryMix == 50.0f, "got %f\n", params.fWetDryMix);
@@ -1565,6 +1657,38 @@ static void test_flanger_parameters(IDirectSoundBuffer8 *secondary8)
 
         test_dsfx_interfaces("FXFlanger", (IUnknown *)flanger, &IID_IDirectSoundFXFlanger);
 
+        rc = IDirectSoundFXFlanger_SetAllParameters(flanger, NULL);
+        ok(rc == E_POINTER, "got: %08x\n", rc);
+
+        /* Out of range Min */
+        params.fWetDryMix = -1.0f;
+
+        rc = IDirectSoundFXFlanger_SetAllParameters(flanger, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        /* Out of range Max */
+        params.fWetDryMix = 101.1f;
+        rc = IDirectSoundFXFlanger_SetAllParameters(flanger, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        params.fWetDryMix = 80.1f;
+        rc = IDirectSoundFXFlanger_SetAllParameters(flanger, &params);
+        ok(rc == S_OK, "got: %08x\n", rc);
+
+        rc = IDirectSoundFXFlanger_GetAllParameters(flanger, &params);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
+        if (rc == DS_OK)
+        {
+            ok(params.fWetDryMix == 80.1f, "got %f\n", params.fWetDryMix);
+            ok(params.fDepth == 100.0f, "got %f\n", params.fDepth);
+            ok(params.fFeedback == -50.0f, "got %f\n", params.fFeedback);
+            ok(params.fFrequency == 0.25f, "got %f\n", params.fFrequency);
+            ok(params.lWaveform == DSFXFLANGER_WAVE_SIN, "got %d\n", params.lWaveform);
+            ok(params.fDelay == 2.0f, "got %f\n", params.fDelay);
+            ok(params.lPhase == 2, "got %d\n", params.lPhase);
+        }
+
+
         IDirectSoundFXFlanger_Release(flanger);
     }
 }
@@ -1575,13 +1699,13 @@ static void test_distortion_parameters(IDirectSoundBuffer8 *secondary8)
     IDirectSoundFXDistortion *distortion;
 
     rc = IDirectSoundBuffer8_GetObjectInPath(secondary8, &GUID_DSFX_STANDARD_DISTORTION, 0, &IID_IDirectSoundFXDistortion,(void**)&distortion);
-    todo_wine ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
+    ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
     if (rc == DS_OK)
     {
         DSFXDistortion params;
 
         rc = IDirectSoundFXDistortion_GetAllParameters(distortion, &params);
-        todo_wine ok(rc == DS_OK, "Failed: %08x\n", rc);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
         if (rc == DS_OK)
         {
             ok(params.fGain == -18.0f, "got %f\n", params.fGain);
@@ -1593,6 +1717,36 @@ static void test_distortion_parameters(IDirectSoundBuffer8 *secondary8)
 
         test_dsfx_interfaces("FXDistortion", (IUnknown *)distortion, &IID_IDirectSoundFXDistortion);
 
+        rc = IDirectSoundFXDistortion_SetAllParameters(distortion, NULL);
+        ok(rc == E_POINTER, "got: %08x\n", rc);
+
+        /* Out of range Min */
+        params.fGain = -61.0f;
+
+        rc = IDirectSoundFXDistortion_SetAllParameters(distortion, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        /* Out of range Max */
+        params.fGain = 1.1f;
+        rc = IDirectSoundFXDistortion_SetAllParameters(distortion, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        params.fGain = -20.0f;
+        rc = IDirectSoundFXDistortion_SetAllParameters(distortion, &params);
+        ok(rc == S_OK, "got: %08x\n", rc);
+
+        rc = IDirectSoundFXDistortion_GetAllParameters(distortion, &params);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
+        if (rc == DS_OK)
+        {
+            ok(params.fGain == -20.0f, "got %f\n", params.fGain);
+            ok(params.fEdge == 15.0f, "got %f\n", params.fEdge);
+            ok(params.fPostEQCenterFrequency == 2400.0f, "got %f\n", params.fPostEQCenterFrequency);
+            ok(params.fPostEQBandwidth == 2400.0f, "got %f\n", params.fPostEQBandwidth);
+            ok(params.fPreLowpassCutoff == 3675.0f, "got %f\n", params.fPreLowpassCutoff);
+        }
+
+
         IDirectSoundFXDistortion_Release(distortion);
     }
 }
@@ -1603,13 +1757,13 @@ static void test_compressor_parameters(IDirectSoundBuffer8 *secondary8)
     IDirectSoundFXCompressor *compressor;
 
     rc = IDirectSoundBuffer8_GetObjectInPath(secondary8, &GUID_DSFX_STANDARD_COMPRESSOR, 0, &IID_IDirectSoundFXCompressor,(void**)&compressor);
-    todo_wine ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
+    ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
     if (rc == DS_OK)
     {
         DSFXCompressor params;
 
         rc = IDirectSoundFXCompressor_GetAllParameters(compressor, &params);
-        todo_wine ok(rc == DS_OK, "Failed: %08x\n", rc);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
         if (rc == DS_OK)
         {
             ok(params.fGain == 0.0f, "got %f\n", params.fGain);
@@ -1621,6 +1775,36 @@ static void test_compressor_parameters(IDirectSoundBuffer8 *secondary8)
 
         test_dsfx_interfaces("FXCompressor", (IUnknown *)compressor, &IID_IDirectSoundFXCompressor);
 
+        rc = IDirectSoundFXCompressor_SetAllParameters(compressor, NULL);
+        ok(rc == E_POINTER, "got: %08x\n", rc);
+
+        /* Out of range Min */
+        params.fGain = -61.0f;
+        rc = IDirectSoundFXCompressor_SetAllParameters(compressor, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        /* Out of range Max */
+        params.fGain = 61.1f;
+        rc = IDirectSoundFXCompressor_SetAllParameters(compressor, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        params.fGain = -21.0f;
+        rc = IDirectSoundFXCompressor_SetAllParameters(compressor, &params);
+        ok(rc == S_OK, "got: %08x\n", rc);
+
+        params.fGain = -21.0f;
+        rc = IDirectSoundFXCompressor_GetAllParameters(compressor, &params);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
+        if (rc == DS_OK)
+        {
+            ok(params.fGain == -21.0f, "got %f\n", params.fGain);
+            ok(params.fAttack == 10.0f, "got %f\n", params.fAttack);
+            ok(params.fThreshold == -20.0f, "got %f\n", params.fThreshold);
+            ok(params.fRatio == 3.0f, "got %f\n", params.fRatio);
+            ok(params.fPredelay == 4.0f, "got %f\n", params.fPredelay);
+        }
+
+
         IDirectSoundFXCompressor_Release(compressor);
     }
 }
@@ -1631,13 +1815,13 @@ static void test_parameq_parameters(IDirectSoundBuffer8 *secondary8)
     IDirectSoundFXParamEq *parameq;
 
     rc = IDirectSoundBuffer8_GetObjectInPath(secondary8, &GUID_DSFX_STANDARD_PARAMEQ, 0, &IID_IDirectSoundFXParamEq,(void**)&parameq);
-    todo_wine ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
+    ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
     if (rc == DS_OK)
     {
         DSFXParamEq params;
 
         rc = IDirectSoundFXParamEq_GetAllParameters(parameq, &params);
-        todo_wine ok(rc == DS_OK, "Failed: %08x\n", rc);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
         if (rc == DS_OK)
         {
             ok(params.fCenter == 3675.0f, "got %f\n", params.fCenter);
@@ -1646,6 +1830,33 @@ static void test_parameq_parameters(IDirectSoundBuffer8 *secondary8)
         }
 
         test_dsfx_interfaces("FXParamEq", (IUnknown *)parameq, &IID_IDirectSoundFXParamEq);
+
+        rc = IDirectSoundFXParamEq_SetAllParameters(parameq, NULL);
+        ok(rc == E_POINTER, "got: %08x\n", rc);
+
+        /* Out of range Min */
+        params.fGain = -61.0f;
+        rc = IDirectSoundFXParamEq_SetAllParameters(parameq, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        /* Out of range Max */
+        params.fGain = 61.1f;
+        rc = IDirectSoundFXParamEq_SetAllParameters(parameq, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        params.fGain = -10.0f;
+        rc = IDirectSoundFXParamEq_SetAllParameters(parameq, &params);
+        ok(rc == S_OK, "got: %08x\n", rc);
+
+        rc = IDirectSoundFXParamEq_GetAllParameters(parameq, &params);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
+        if (rc == DS_OK)
+        {
+            ok(params.fCenter == 3675.0f, "got %f\n", params.fCenter);
+            ok(params.fBandwidth == 12.0f, "got %f\n", params.fBandwidth);
+            ok(params.fGain == -10.0f, "got %f\n", params.fGain);
+        }
+
 
         IDirectSoundFXParamEq_Release(parameq);
     }
@@ -1657,13 +1868,13 @@ static void test_reverb_parameters(IDirectSoundBuffer8 *secondary8)
     IDirectSoundFXI3DL2Reverb *reverb;
 
     rc = IDirectSoundBuffer8_GetObjectInPath(secondary8, &GUID_DSFX_STANDARD_I3DL2REVERB, 0, &IID_IDirectSoundFXI3DL2Reverb, (void**)&reverb);
-    todo_wine ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
+    ok(rc == DS_OK, "GetObjectInPath failed: %08x\n", rc);
     if (rc == DS_OK)
     {
         DSFXI3DL2Reverb params;
 
         rc = IDirectSoundFXI3DL2Reverb_GetAllParameters(reverb, &params);
-        todo_wine ok(rc == DS_OK, "Failed: %08x\n", rc);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
         if (rc == DS_OK)
         {
             ok(params.lRoom == -1000, "got %d\n", params.lRoom);
@@ -1679,6 +1890,40 @@ static void test_reverb_parameters(IDirectSoundBuffer8 *secondary8)
         }
 
         test_dsfx_interfaces("FXI3DL2Reverb", (IUnknown *)reverb, &IID_IDirectSoundFXI3DL2Reverb);
+
+        rc = IDirectSoundFXI3DL2Reverb_SetAllParameters(reverb, NULL);
+        ok(rc == E_POINTER, "got: %08x\n", rc);
+
+        /* Out of range Min */
+        params.lRoom = -10001;
+        rc = IDirectSoundFXI3DL2Reverb_SetAllParameters(reverb, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        /* Out of range Max */
+        params.lRoom = 1;
+        rc = IDirectSoundFXI3DL2Reverb_SetAllParameters(reverb, &params);
+        ok(rc == E_INVALIDARG, "got: %08x\n", rc);
+
+        params.lRoom = -900;
+        rc = IDirectSoundFXI3DL2Reverb_SetAllParameters(reverb, &params);
+        ok(rc == S_OK, "got: %08x\n", rc);
+
+        rc = IDirectSoundFXI3DL2Reverb_GetAllParameters(reverb, &params);
+        ok(rc == DS_OK, "Failed: %08x\n", rc);
+        if (rc == DS_OK)
+        {
+            ok(params.lRoom == -900, "got %d\n", params.lRoom);
+            ok(params.flRoomRolloffFactor == 0.0f, "got %f\n", params.flRoomRolloffFactor);
+            ok(params.flDecayTime == 1.49f, "got %f\n", params.flDecayTime);
+            ok(params.flDecayHFRatio == 0.83f, "got %f\n", params.flDecayHFRatio);
+            ok(params.lReflections == -2602, "got %d\n", params.lReflections);
+            ok(params.lReverb == 200, "got %d\n", params.lReverb);
+            ok(params.flReverbDelay == 0.011f, "got %f\n", params.flReverbDelay);
+            ok(params.flDiffusion == 100.0f, "got %f\n", params.flDiffusion);
+            ok(params.flDensity == 100.0f, "got %f\n", params.flDensity);
+            ok(params.flHFReference == 5000.0f, "got %f\n", params.flHFReference);
+        }
+
 
         IDirectSoundFXI3DL2Reverb_Release(reverb);
     }

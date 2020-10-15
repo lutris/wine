@@ -225,8 +225,8 @@ static void test_handles(void)
     memset( buffer, 0, sizeof(buffer) );
     ret = GetUserObjectInformationA( w2, UOI_NAME, buffer, sizeof(buffer), &size );
     ok( ret, "GetUserObjectInformationA failed with error %u\n", GetLastError() );
-    todo_wine ok( !memcmp(buffer, "Service-0x0-", 12), "unexpected window station name '%s'\n", buffer );
-    todo_wine ok( buffer[strlen(buffer) - 1] == '$', "unexpected window station name '%s'\n", buffer );
+    ok( !memcmp(buffer, "Service-0x0-", 12), "unexpected window station name '%s'\n", buffer );
+    ok( buffer[strlen(buffer) - 1] == '$', "unexpected window station name '%s'\n", buffer );
 
     SetLastError( 0xdeadbeef );
     w3 = OpenWindowStationA( "", TRUE, WINSTA_ALL_ACCESS );

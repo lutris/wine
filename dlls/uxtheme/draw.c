@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdlib.h>
 #include <stdarg.h>
 
@@ -53,6 +55,10 @@ HRESULT WINAPI EnableThemeDialogTexture(HWND hwnd, DWORD dwFlags)
     BOOL res;
 
     TRACE("(%p,0x%08x\n", hwnd, dwFlags);
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_EnableThemeDialogTexture(hwnd, dwFlags);
+
     res = SetPropW (hwnd, (LPCWSTR)MAKEINTATOM(atDialogThemeEnabled), 
                     UlongToHandle(dwFlags|0x80000000));
         /* 0x80000000 serves as a "flags set" flag */
@@ -71,6 +77,9 @@ BOOL WINAPI IsThemeDialogTextureEnabled(HWND hwnd)
 {
     DWORD dwDialogTextureFlags;
     TRACE("(%p)\n", hwnd);
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_IsThemeDialogTextureEnabled(hwnd);
 
     dwDialogTextureFlags = HandleToUlong( GetPropW( hwnd, (LPCWSTR)MAKEINTATOM(atDialogThemeEnabled) ));
     if (dwDialogTextureFlags == 0) 
@@ -1025,6 +1034,9 @@ HRESULT WINAPI DrawThemeBackgroundEx(HTHEME hTheme, HDC hdc, int iPartId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_DrawThemeBackgroundEx(hTheme, hdc, iPartId, iStateId, pRect, pOptions);
+
     GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_BGTYPE, &bgtype);
     if (bgtype == BT_NONE) return S_OK;
 
@@ -1668,6 +1680,10 @@ HRESULT WINAPI DrawThemeTextEx(HTHEME hTheme, HDC hdc, int iPartId, int iStateId
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_DrawThemeTextEx(hTheme, hdc, iPartId, iStateId,
+                pszText, iCharCount, flags, rect, options);
+
     if (options->dwFlags & ~DTT_TEXTCOLOR)
         FIXME("unsupported flags 0x%08x\n", options->dwFlags);
     
@@ -1930,6 +1946,9 @@ HRESULT WINAPI GetThemeBackgroundRegion(HTHEME hTheme, HDC hdc, int iPartId,
     if(!pRect || !pRegion)
         return E_POINTER;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeBackgroundRegion(hTheme, hdc, iPartId, iStateId, pRect, pRegion);
+
     GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_BGTYPE, &bgtype);
     if(bgtype == BT_IMAGEFILE) {
         hr = create_image_bg_region(hTheme, iPartId, iStateId, pRect, pRegion);
@@ -1981,6 +2000,9 @@ HRESULT WINAPI GetThemePartSize(HTHEME hTheme, HDC hdc, int iPartId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemePartSize(hTheme, hdc, iPartId, iStateId, prc, eSize, psz);
+
     GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_BGTYPE, &bgtype);
     if (bgtype == BT_NONE)
         /* do nothing */;
@@ -2016,6 +2038,10 @@ HRESULT WINAPI GetThemeTextExtent(HTHEME hTheme, HDC hdc, int iPartId,
     TRACE("%d %d\n", iPartId, iStateId);
     if(!hTheme)
         return E_HANDLE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeTextExtent(hTheme, hdc, iPartId, iStateId,
+                pszText, iCharCount, dwTextFlags, pBoundingRect, pExtentRect);
 
     if(pBoundingRect)
         rt = *pBoundingRect;
@@ -2054,6 +2080,9 @@ HRESULT WINAPI GetThemeTextMetrics(HTHEME hTheme, HDC hdc, int iPartId,
     if(!hTheme)
         return E_HANDLE;
 
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_GetThemeTextMetrics(hTheme, hdc, iPartId, iStateId, ptm);
+
     hr = GetThemeFont(hTheme, hdc, iPartId, iStateId, TMT_FONT, &logfont);
     if(SUCCEEDED(hr)) {
         hFont = CreateFontIndirectW(&logfont);
@@ -2091,6 +2120,9 @@ BOOL WINAPI IsThemeBackgroundPartiallyTransparent(HTHEME hTheme, int iPartId,
 
     if(!hTheme)
         return FALSE;
+
+    if (uxtheme_gtk_enabled())
+        return uxtheme_gtk_IsThemeBackgroundPartiallyTransparent(hTheme, iPartId, iStateId);
 
     GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_BGTYPE, &bgtype);
 

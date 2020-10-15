@@ -1296,4 +1296,13 @@ NTSTATUS key_destroy( struct key *key )
     heap_free( key );
     return STATUS_SUCCESS;
 }
+
+#ifndef SONAME_LIBGCRYPT
+NTSTATUS compute_secret_ecc (struct key *pubkey_in, struct key *privkey_in, struct secret *secret)
+{
+    ERR("support for secrets not available without gcrypt\n");
+    return STATUS_NOT_IMPLEMENTED;
+}
+#endif
+
 #endif
