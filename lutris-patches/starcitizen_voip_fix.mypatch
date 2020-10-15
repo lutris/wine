@@ -1,0 +1,29 @@
+diff --git a/dlls/winepulse.drv/mmdevdrv.c b/dlls/winepulse.drv/mmdevdrv.c
+index 463d3d5a71..bf23ddcd83 100644
+--- a/dlls/winepulse.drv/mmdevdrv.c
++++ b/dlls/winepulse.drv/mmdevdrv.c
+@@ -1590,7 +1590,9 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
+                 AUDCLNT_STREAMFLAGS_RATEADJUST |
+                 AUDCLNT_SESSIONFLAGS_EXPIREWHENUNOWNED |
+                 AUDCLNT_SESSIONFLAGS_DISPLAY_HIDE |
+-                AUDCLNT_SESSIONFLAGS_DISPLAY_HIDEWHENEXPIRED)) {
++                AUDCLNT_SESSIONFLAGS_DISPLAY_HIDEWHENEXPIRED |
++                AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY |
++                AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM)) {
+         TRACE("Unknown flags: %08x\n", flags);
+         return E_INVALIDARG;
+     }
+diff --git a/include/audiosessiontypes.h b/include/audiosessiontypes.h
+index 2f78574353..210f304b0d 100644
+--- a/include/audiosessiontypes.h
++++ b/include/audiosessiontypes.h
+@@ -34,6 +34,8 @@ typedef enum _AUDCLNT_SHAREMODE
+ #define AUDCLNT_STREAMFLAGS_EVENTCALLBACK 0x00040000
+ #define AUDCLNT_STREAMFLAGS_NOPERSIST 0x00080000
+ #define AUDCLNT_STREAMFLAGS_RATEADJUST 0x00100000
++#define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
++#define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000
+ #define AUDCLNT_SESSIONFLAGS_EXPIREWHENUNOWNED 0x10000000
+ #define AUDCLNT_SESSIONFLAGS_DISPLAY_HIDE 0x20000000
+ #define AUDCLNT_SESSIONFLAGS_DISPLAY_HIDEWHENEXPIRED 0x40000000
+ 

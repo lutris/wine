@@ -42,6 +42,7 @@
 #define MAX_SUBAUTH_COUNT 1
 
 const LUID SeIncreaseQuotaPrivilege        = {  5, 0 };
+const LUID SeTcbPrivilege                  = {  7, 0 };
 const LUID SeSecurityPrivilege             = {  8, 0 };
 const LUID SeTakeOwnershipPrivilege        = {  9, 0 };
 const LUID SeLoadDriverPrivilege           = { 10, 0 };
@@ -151,6 +152,7 @@ static const struct object_ops token_ops =
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */
     NULL,                      /* get_esync_fd */
+    NULL,                      /* get_fsync_idx */
     NULL,                      /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
@@ -881,6 +883,7 @@ struct token *token_create_admin( void )
         const LUID_AND_ATTRIBUTES admin_privs[] =
         {
             { SeChangeNotifyPrivilege        , SE_PRIVILEGE_ENABLED },
+            { SeTcbPrivilege                 , 0                    },
             { SeSecurityPrivilege            , 0                    },
             { SeBackupPrivilege              , 0                    },
             { SeRestorePrivilege             , 0                    },

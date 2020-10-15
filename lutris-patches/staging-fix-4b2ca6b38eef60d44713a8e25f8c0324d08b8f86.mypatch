@@ -1,0 +1,21 @@
+From b6ce132d75dfbbac881c12f2f7cce8be6eb9e840 Mon Sep 17 00:00:00 2001
+From: tannisroot <10602045+tannisroot@users.noreply.github.com>
+Date: Thu, 10 Sep 2020 12:30:43 +0300
+Subject: [PATCH] staging-fix (4b2ca6b38eef60d44713a8e25f8c0324d08b8f86)
+
+diff --git a/server/process.c b/server/process.c
+index 73984f363f5..1c171e7a330 100644
+--- a/server/process.c
++++ b/server/process.c
+@@ -641,7 +641,7 @@ static void process_dump( struct object *obj, int verbose )
+ 
+ static struct object_type *process_get_type( struct object *obj )
+ {
+-    static const struct unicode_str str = { type_Job, sizeof(type_Job) };
++    static const struct unicode_str str = { type_Process, sizeof(type_Process) };
+     return get_object_type( &str );
+ }
+ 
+-- 
+2.28.0
+

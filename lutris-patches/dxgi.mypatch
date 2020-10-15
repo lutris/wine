@@ -1,0 +1,235 @@
+From d788ab4c29c243aa3c960871702bebc4a02cebbb Mon Sep 17 00:00:00 2001
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Date: Wed, 13 May 2020 19:16:55 +0430
+Subject: [PATCH] dxgi: Implement IDXGIFactory6.
+
+Required by the d3d12 game "Delores: A Thimbleweed Park Mini-Adventure".
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Signed-off-by: Henri Verbeet <hverbeet@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/dxgi/factory.c       | 23 +++++++++++++++++++++++
+ include/wine/winedxgi.idl |  2 +-
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/dxgi/factory.c b/dlls/dxgi/factory.c
+index 39c9e10f7a4..c6acbaaf671 100644
+--- a/dlls/dxgi/factory.c
++++ b/dlls/dxgi/factory.c
+@@ -36,6 +36,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_QueryInterface(IWineDXGIFactory *i
+     TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
+ 
+     if (IsEqualGUID(iid, &IID_IWineDXGIFactory)
++            || IsEqualGUID(iid, &IID_IDXGIFactory6)
+             || IsEqualGUID(iid, &IID_IDXGIFactory5)
+             || IsEqualGUID(iid, &IID_IDXGIFactory4)
+             || IsEqualGUID(iid, &IID_IDXGIFactory3)
+@@ -462,6 +463,26 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_CheckFeatureSupport(IWineDXGIFacto
+     }
+ }
+ 
++static HRESULT STDMETHODCALLTYPE dxgi_factory_EnumAdapterByGpuPreference(IWineDXGIFactory *iface,
++        UINT adapter_idx, DXGI_GPU_PREFERENCE gpu_preference, REFIID iid, void **adapter)
++{
++    IDXGIAdapter1 *adapter_object;
++    HRESULT hr;
++
++    TRACE("iface %p, adapter_idx %u, gpu_preference %#x, iid %s, adapter %p.\n",
++            iface, adapter_idx, gpu_preference, debugstr_guid(iid), adapter);
++
++    if (gpu_preference != DXGI_GPU_PREFERENCE_UNSPECIFIED)
++        FIXME("Ignoring GPU preference %#x.\n", gpu_preference);
++
++    if (FAILED(hr = dxgi_factory_EnumAdapters1(iface, adapter_idx, &adapter_object)))
++        return hr;
++
++    hr = IDXGIAdapter1_QueryInterface(adapter_object, iid, adapter);
++    IDXGIAdapter1_Release(adapter_object);
++    return hr;
++}
++
+ static const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl =
+ {
+     dxgi_factory_QueryInterface,
+@@ -498,6 +519,8 @@ static const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl =
+     dxgi_factory_EnumWarpAdapter,
+     /* IDXIGFactory5 methods */
+     dxgi_factory_CheckFeatureSupport,
++    /* IDXGIFactory6 methods */
++    dxgi_factory_EnumAdapterByGpuPreference,
+ };
+ 
+ struct dxgi_factory *unsafe_impl_from_IDXGIFactory(IDXGIFactory *iface)
+diff --git a/include/wine/winedxgi.idl b/include/wine/winedxgi.idl
+index 070ac2fddaa..95c99b25355 100644
+--- a/include/wine/winedxgi.idl
++++ b/include/wine/winedxgi.idl
+@@ -89,6 +89,6 @@ interface IWineDXGIAdapter : IDXGIAdapter4
+     local,
+     uuid(ea02a0d1-4c95-488a-a82c-6034621e8c4f)
+ ]
+-interface IWineDXGIFactory : IDXGIFactory5
++interface IWineDXGIFactory : IDXGIFactory6
+ {
+ }
+
+From 6cd1139691be00e2fd747a47adad75d11cbc2149 Mon Sep 17 00:00:00 2001
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Date: Wed, 13 May 2020 19:16:57 +0430
+Subject: [PATCH] dxgi: Add stubs for IDXGIFactory7.
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Signed-off-by: Henri Verbeet <hverbeet@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/dxgi/factory.c       | 20 ++++++++++++++++++++
+ include/wine/winedxgi.idl |  2 +-
+ 2 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/dxgi/factory.c b/dlls/dxgi/factory.c
+index c6acbaaf671..6acce516de9 100644
+--- a/dlls/dxgi/factory.c
++++ b/dlls/dxgi/factory.c
+@@ -36,6 +36,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_QueryInterface(IWineDXGIFactory *i
+     TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
+ 
+     if (IsEqualGUID(iid, &IID_IWineDXGIFactory)
++            || IsEqualGUID(iid, &IID_IDXGIFactory7)
+             || IsEqualGUID(iid, &IID_IDXGIFactory6)
+             || IsEqualGUID(iid, &IID_IDXGIFactory5)
+             || IsEqualGUID(iid, &IID_IDXGIFactory4)
+@@ -483,6 +484,22 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_EnumAdapterByGpuPreference(IWineDX
+     return hr;
+ }
+ 
++static HRESULT STDMETHODCALLTYPE dxgi_factory_RegisterAdaptersChangedEvent(IWineDXGIFactory *iface,
++        HANDLE event, DWORD *cookie)
++{
++    FIXME("iface %p, event %p, cookie %p stub!\n", iface, event, cookie);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT STDMETHODCALLTYPE dxgi_factory_UnregisterAdaptersChangedEvent(IWineDXGIFactory *iface,
++        DWORD cookie)
++{
++    FIXME("iface %p, cookie %#x stub!\n", iface, cookie);
++
++    return E_NOTIMPL;
++}
++
+ static const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl =
+ {
+     dxgi_factory_QueryInterface,
+@@ -521,6 +538,9 @@ static const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl =
+     dxgi_factory_CheckFeatureSupport,
+     /* IDXGIFactory6 methods */
+     dxgi_factory_EnumAdapterByGpuPreference,
++    /* IDXGIFactory7 methods */
++    dxgi_factory_RegisterAdaptersChangedEvent,
++    dxgi_factory_UnregisterAdaptersChangedEvent,
+ };
+ 
+ struct dxgi_factory *unsafe_impl_from_IDXGIFactory(IDXGIFactory *iface)
+diff --git a/include/wine/winedxgi.idl b/include/wine/winedxgi.idl
+index 95c99b25355..83012047ea7 100644
+--- a/include/wine/winedxgi.idl
++++ b/include/wine/winedxgi.idl
+@@ -89,6 +89,6 @@ interface IWineDXGIAdapter : IDXGIAdapter4
+     local,
+     uuid(ea02a0d1-4c95-488a-a82c-6034621e8c4f)
+ ]
+-interface IWineDXGIFactory : IDXGIFactory6
++interface IWineDXGIFactory : IDXGIFactory7
+ {
+ }
+
+From 1a9830ade4d819082e62c3334032798c97086b3e Mon Sep 17 00:00:00 2001
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Date: Wed, 13 May 2020 19:16:54 +0430
+Subject: [PATCH] include: Add IDXGIFactory6.
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Signed-off-by: Henri Verbeet <hverbeet@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ include/dxgi1_6.idl | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/include/dxgi1_6.idl b/include/dxgi1_6.idl
+index 9dcf9f26b46..fba72d57604 100644
+--- a/include/dxgi1_6.idl
++++ b/include/dxgi1_6.idl
+@@ -34,6 +34,13 @@ typedef enum DXGI_HARDWARE_COMPOSITION_SUPPORT_FLAGS
+     DXGI_HARDWARE_COMPOSITION_SUPPORT_FLAG_CURSOR_STRETCHED = 0x4,
+ } DXGI_HARDWARE_COMPOSITION_SUPPORT_FLAGS;
+ 
++typedef enum DXGI_GPU_PREFERENCE
++{
++    DXGI_GPU_PREFERENCE_UNSPECIFIED = 0x0,
++    DXGI_GPU_PREFERENCE_MINIMUM_POWER = 0x1,
++    DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE = 0x2,
++} DXGI_GPU_PREFERENCE;
++
+ typedef struct DXGI_ADAPTER_DESC3
+ {
+     WCHAR Description[128];
+@@ -96,3 +103,19 @@ interface IDXGIOutput6 : IDXGIOutput5
+         [out] UINT *flags
+     );
+ }
++
++[
++    object,
++    uuid(c1b6694f-ff09-44a9-b03c-77900a0a1d17),
++    local,
++    pointer_default(unique)
++]
++interface IDXGIFactory6 : IDXGIFactory5
++{
++    HRESULT EnumAdapterByGpuPreference(
++        [in] UINT adapter_idx,
++        [in] DXGI_GPU_PREFERENCE gpu_preference,
++        [in] REFIID iid,
++        [out] void **adapter
++    );
++}
+
+From c7b8e799805ad578305b9018c2a85ca8c0924b6f Mon Sep 17 00:00:00 2001
+From: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Date: Wed, 13 May 2020 19:16:56 +0430
+Subject: [PATCH] include: Add IDXGIFactory7.
+
+Signed-off-by: Philip Rebohle <philip.rebohle@tu-dortmund.de>
+Signed-off-by: Henri Verbeet <hverbeet@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ include/dxgi1_6.idl | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/include/dxgi1_6.idl b/include/dxgi1_6.idl
+index fba72d57604..e24dd4b367a 100644
+--- a/include/dxgi1_6.idl
++++ b/include/dxgi1_6.idl
+@@ -119,3 +119,20 @@ interface IDXGIFactory6 : IDXGIFactory5
+         [out] void **adapter
+     );
+ }
++
++[
++    object,
++    uuid(a4966eed-76db-44da-84c1-ee9a7afb20a8),
++    local,
++    pointer_default(unique)
++]
++interface IDXGIFactory7 : IDXGIFactory6
++{
++    HRESULT RegisterAdaptersChangedEvent(
++        [in] HANDLE event,
++        [out] DWORD *cookie
++    );
++    HRESULT UnregisterAdaptersChangedEvent(
++        [in] DWORD cookie
++    );
++}
