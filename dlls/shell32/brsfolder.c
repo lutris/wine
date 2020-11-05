@@ -657,7 +657,7 @@ static LRESULT BrsFolder_Treeview_Keydown(browse_info *info, LPNMTVKEYDOWN keydo
                 return 0;
 
             /* perform the item deletion - tree view gets updated over shell notification */
-            ISFHelper_DeleteItems(psfhlp, 1, &item_id);
+            ISFHelper_DeleteItems(psfhlp, 1, &item_id, TRUE);
             ISFHelper_Release(psfhlp);
         }
         break;

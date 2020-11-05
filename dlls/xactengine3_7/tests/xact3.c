@@ -90,11 +90,71 @@ static void test_interfaces(void)
     }
 }
 
+static void test_global_properties(void)
+{
+    HRESULT hr;
+    IXACT3Engine *engine;
+    XACTVARIABLEINDEX index;
+    XACTVARIABLEVALUE value;
+    HRSRC res;
+    void *ptr;
+    XACT_RUNTIME_PARAMETERS xparams = {0};
+    WAVEFORMATEXTENSIBLE format;
+    X3DAUDIO_HANDLE instance = {0};
+
+    hr = CoCreateInstance(&CLSID_XACTEngine, NULL, CLSCTX_INPROC_SERVER, &IID_IXACT3Engine, (void**)&engine);
+
+    if (FAILED(hr))
+    {
+        win_skip("IXACT3Engine Unsupported.\n");
+        return;
+    }
+
+    index = IXACT3Engine_GetGlobalVariableIndex(engine, "SpeedOfSound");
+    ok(index == XACTVARIABLEINDEX_INVALID , "Found variable 0x%08x\n", index);
+
+    res = FindResourceW(NULL, L"globals.xgs", (LPCWSTR)RT_RCDATA);
+
+    ptr = LockResource(LoadResource(GetModuleHandleA(NULL), res));
+
+    xparams.lookAheadTime = 250;
+    xparams.globalSettingsBufferSize = SizeofResource( GetModuleHandleA(NULL), res);
+    xparams.pGlobalSettingsBuffer = ptr;
+    hr = IXACT3Engine_Initialize(engine, &xparams);
+    ok(hr == S_OK ||
+        hr == XAUDIO2_E_INVALID_CALL /* Vista */, "got 0x%08x\n", hr);
+    if (FAILED(hr))
+        goto end;
+
+    index = IXACT3Engine_GetGlobalVariableIndex(engine, "SpeedOfSound");
+    ok(index != XACTVARIABLEINDEX_INVALID, "Failed to find variable %d\n", index);
+
+    value = 0.1f;
+    hr = IXACT3Engine_GetGlobalVariable(engine, index, &value);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(value == 0.0f, "got %f\n", value);
+
+    hr = IXACT3Engine_GetFinalMixFormat(engine, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* Invalid SpeedOfSound value  */
+    X3DAudioInitialize(format.dwChannelMask, value, instance);
+    ok(instance[0] != 0, "got 0x%08x\n", instance[0]);
+
+    hr = IXACT3Engine_GetGlobalVariable(engine, index, &value);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(value == 0.0f, "got %f\n", value);
+
+end:
+    IXACT3Engine_Release(engine);
+}
+
 START_TEST(xact3)
 {
     CoInitialize(NULL);
 
     test_interfaces();
+    test_global_properties();
 
     CoUninitialize();
 }

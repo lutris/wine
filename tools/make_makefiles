@@ -230,14 +230,14 @@ sub parse_makefile($)
         {
             die "Configure substitution is not allowed in $file" unless $file eq "Makefile";
         }
-        if (/^\s*(MODULE|IMPORTLIB|TESTDLL|PARENTSRC|APPMODE|EXTRADLLFLAGS)\s*=\s*(.*)/)
+        if (/^\s*(MODULE|IMPORTLIB|TESTDLL|APPMODE|EXTRADLLFLAGS)\s*=\s*(.*)/)
         {
             my $var = $1;
             $make{$var} = $2;
             next;
         }
         my $source_vars_regexp = join "|", @source_vars;
-        if (/^\s*($source_vars_regexp|PROGRAMS|EXTRA_TARGETS|EXTRA_OBJS|INSTALL_LIB|INSTALL_DEV)\s*=\s*(.*)/)
+        if (/^\s*($source_vars_regexp|PROGRAMS|EXTRA_TARGETS|EXTRA_OBJS|INSTALL_LIB|INSTALL_DEV|PARENTSRC)\s*=\s*(.*)/)
         {
             my $var = $1;
             my @list = split(/\s+/, $2);
@@ -292,19 +292,27 @@ sub get_makedep_flags($)
     return %flags;
 }
 
-sub get_parent_makefile($)
+sub get_parent_makefiles($)
 {
     my $file = shift;
     my %make = %{$makefiles{$file}};
-    my $reldir = $make{"PARENTSRC"} || "";
-    return "" unless $reldir;
-    (my $path = $file) =~ s/\/Makefile$/\//;
-    while ($reldir =~ /^\.\.\//)
+    my $pointer = $make{"PARENTSRC"} || ();
+    return () unless $pointer;
+    my @reldirs = @{$pointer};
+    my @makefiles = ();
+    foreach my $reldir (@reldirs)
     {
-        $reldir =~ s/^\.\.\///;
-        $path =~ s/[^\/]+\/$//;
+        my $length = @reldirs;
+        (my $path = $file) =~ s/\/Makefile$/\//;
+        while ($reldir =~ /^\.\.\//)
+        {
+            $reldir =~ s/^\.\.\///;
+            $path =~ s/[^\/]+\/$//;
+        }
+        push @makefiles, "$path$reldir/Makefile";
     }
-    return "$path$reldir/Makefile";
+
+    return @makefiles
 }
 
 # preserve shared source files that are listed in the existing makefile
@@ -409,13 +417,16 @@ sub assign_sources_to_makefiles(@)
     foreach my $file (@makefiles)
     {
         my $make = $makefiles{$file};
-        my $parent = get_parent_makefile( $file );
-        next unless $parent;
-        preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "C_SRCS" );
-        preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "RC_SRCS" );
-        preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "IDL_SRCS" );
-        preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "LEX_SRCS" );
-        preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "BISON_SRCS" );
+        my @parents = get_parent_makefiles( $file );
+        next unless @parents;
+        foreach my $parent (@parents)
+        {
+            preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "C_SRCS" );
+            preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "RC_SRCS" );
+            preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "IDL_SRCS" );
+            preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "LEX_SRCS" );
+            preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "BISON_SRCS" );
+        }
     }
 }
 

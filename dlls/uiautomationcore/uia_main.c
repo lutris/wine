@@ -1,4 +1,5 @@
 /*
+ * Copyright 2016 Michael Müller
  * Copyright 2017 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -16,6 +17,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
 #include "uiautomation.h"
 
 #include "wine/debug.h"
@@ -37,12 +39,51 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, void *lpv)
     return TRUE;
 }
 
+static HRESULT WINAPI dummy_QueryInterface(IUnknown *iface, REFIID iid, void **ppv)
+{
+    TRACE("(%p, %s, %p)\n", iface, debugstr_guid(iid), ppv);
+
+    if (!ppv) return E_INVALIDARG;
+
+    if (!IsEqualIID(&IID_IUnknown, iid))
+    {
+        FIXME("Unknown interface: %s\n", debugstr_guid(iid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    *ppv = iface;
+    IUnknown_AddRef((IUnknown *)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI dummy_AddRef(IUnknown *iface)
+{
+    FIXME("(%p): stub\n", iface);
+    return 1;
+}
+
+static ULONG WINAPI dummy_Release(IUnknown *iface)
+{
+    FIXME("(%p): stub\n", iface);
+    return 1;
+}
+
+static const IUnknownVtbl dummy_Vtbl =
+{
+    dummy_QueryInterface,
+    dummy_AddRef,
+    dummy_Release,
+};
+
+static IUnknown dummy = { &dummy_Vtbl };
+
 /***********************************************************************
  *          UiaClientsAreListening (uiautomationcore.@)
  */
 BOOL WINAPI UiaClientsAreListening(void)
 {
-    FIXME("()\n");
+    FIXME("(): stub\n");
     return FALSE;
 }
 
@@ -51,8 +92,8 @@ BOOL WINAPI UiaClientsAreListening(void)
  */
 HRESULT WINAPI UiaGetReservedMixedAttributeValue(IUnknown **value)
 {
-    FIXME("(%p) stub!\n", value);
-    *value = NULL;
+    FIXME("(%p): stub!\n", value);
+    *value = &dummy;
     return S_OK;
 }
 
@@ -61,8 +102,8 @@ HRESULT WINAPI UiaGetReservedMixedAttributeValue(IUnknown **value)
  */
 HRESULT WINAPI UiaGetReservedNotSupportedValue(IUnknown **value)
 {
-    FIXME("(%p) stub!\n", value);
-    *value = NULL;
+    FIXME("(%p): stub!\n", value);
+    *value = &dummy;
     return S_OK;
 }
 
@@ -81,7 +122,7 @@ int WINAPI UiaLookupId(enum AutomationIdentifierType type, const GUID *guid)
 LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wParam,
         LPARAM lParam, IRawElementProviderSimple *elprov)
 {
-    FIXME("(%p, %lx, %lx, %p) stub!\n", hwnd, wParam, lParam, elprov);
+    FIXME("(%p, %lx, %lx, %p): stub!\n", hwnd, wParam, lParam, elprov);
     return 0;
 }
 

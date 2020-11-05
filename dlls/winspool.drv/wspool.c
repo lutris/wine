@@ -104,6 +104,43 @@ BOOL load_backend(void)
     return FALSE;
 }
 
+static void create_color_profiles(void)
+{
+    static const WCHAR color_dir[] = {'\\','s','p','o','o','l',
+                                      '\\','d','r','i','v','e','r','s',
+                                      '\\','c','o','l','o','r','\\',0};
+    static const WCHAR srgb_icm[] = {'s','R','G','B',' ',
+                                     'C','o','l','o','r',' ',
+                                     'S','p','a','c','e',' ',
+                                     'P','r','o','f','i','l','e','.','i','c','m',0};
+    WCHAR profile_path[MAX_PATH];
+    HANDLE file;
+    HRSRC res;
+    DWORD size, written;
+    char *data;
+    BOOL ret;
+
+    GetSystemDirectoryW(profile_path, ARRAY_SIZE(profile_path));
+    lstrcatW(profile_path, color_dir);
+    lstrcatW(profile_path, srgb_icm);
+
+    file = CreateFileW(profile_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+
+    ret = ((res = FindResourceA(WINSPOOL_hInstance, MAKEINTRESOURCEA(IDR_SRGB_ICM), (const char *)RT_RCDATA)) &&
+           (size = SizeofResource(WINSPOOL_hInstance, res)) &&
+           (data = LoadResource(WINSPOOL_hInstance, res)) &&
+           WriteFile(file, data, size, &written, NULL) &&
+           written == size);
+    CloseHandle(file);
+    if (!ret)
+    {
+        ERR("Failed to create %s\n", wine_dbgstr_w(profile_path));
+        DeleteFileW(profile_path);
+    }
+}
+
 /******************************************************************************
  *  DllMain
  *
@@ -118,6 +155,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD reason, LPVOID lpReserved)
       WINSPOOL_hInstance = hInstance;
       DisableThreadLibraryCalls(hInstance);
       WINSPOOL_LoadSystemPrinters();
+      create_color_profiles();
       break;
     }
     case DLL_PROCESS_DETACH:

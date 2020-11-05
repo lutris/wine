@@ -196,7 +196,7 @@ LPENUMFORMATETC IEnumFORMATETC_Constructor(UINT cfmt, const FORMATETC afmt[])
 */
 
 /* number of supported formats */
-#define MAX_FORMATS 4
+#define MAX_FORMATS 5
 
 typedef struct
 {
@@ -208,12 +208,13 @@ typedef struct
 	LPITEMIDLIST	pidl;
 	LPITEMIDLIST *	apidl;
 	UINT		cidl;
+    DWORD       dropEffect;
 
 	FORMATETC	pFormatEtc[MAX_FORMATS];
 	UINT		cfShellIDList;
 	UINT		cfFileNameA;
 	UINT		cfFileNameW;
-
+	UINT        cfDropEffect;
 } IDataObjectImpl;
 
 static inline IDataObjectImpl *impl_from_IDataObject(IDataObject *iface)
@@ -313,6 +314,10 @@ static HRESULT WINAPI IDataObject_fnGetData(IDataObject *iface, LPFORMATETC pfor
 	  if (This->cidl < 1) return(E_UNEXPECTED);
 	  pmedium->u.hGlobal = RenderFILENAMEW(This->pidl, This->apidl, This->cidl);
 	}
+    else if (pformatetcIn->cfFormat == This->cfDropEffect)
+    {
+        pmedium->u.hGlobal = RenderPREFERREDDROPEFFECT(This->dropEffect);
+    }
 	else
 	{
 	  FIXME("-- expected clipformat not implemented\n");
@@ -367,7 +372,17 @@ static HRESULT WINAPI IDataObject_fnGetCanonicalFormatEtc(IDataObject *iface, LP
 static HRESULT WINAPI IDataObject_fnSetData(IDataObject *iface, LPFORMATETC pformatetc, STGMEDIUM *pmedium, BOOL fRelease)
 {
 	IDataObjectImpl *This = impl_from_IDataObject(iface);
-	FIXME("(%p)->()\n", This);
+
+    FIXME("(%p)->(%p, %p, %u): semi-stub\n", This, pformatetc, pmedium, fRelease);
+
+    if (pformatetc->cfFormat == This->cfDropEffect)
+    {
+        if (pmedium->tymed == TYMED_HGLOBAL)
+            return GetPREFERREDDROPEFFECT(pmedium, &This->dropEffect);
+        else
+            return DV_E_TYMED;
+    }
+
 	return E_NOTIMPL;
 }
 
@@ -440,14 +455,17 @@ IDataObject* IDataObject_Constructor(HWND hwndOwner,
         dto->pidl = ILClone(pMyPidl);
         dto->apidl = _ILCopyaPidl(apidl, cidl);
         dto->cidl = cidl;
+        dto->dropEffect = 0;
 
         dto->cfShellIDList = RegisterClipboardFormatW(CFSTR_SHELLIDLISTW);
         dto->cfFileNameA = RegisterClipboardFormatA(CFSTR_FILENAMEA);
         dto->cfFileNameW = RegisterClipboardFormatW(CFSTR_FILENAMEW);
+        dto->cfDropEffect = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECTW);
         InitFormatEtc(dto->pFormatEtc[0], dto->cfShellIDList, TYMED_HGLOBAL);
         InitFormatEtc(dto->pFormatEtc[1], CF_HDROP, TYMED_HGLOBAL);
         InitFormatEtc(dto->pFormatEtc[2], dto->cfFileNameA, TYMED_HGLOBAL);
         InitFormatEtc(dto->pFormatEtc[3], dto->cfFileNameW, TYMED_HGLOBAL);
+        InitFormatEtc(dto->pFormatEtc[4], dto->cfDropEffect, TYMED_HGLOBAL);
     }
 
     TRACE("(%p)->(apidl=%p cidl=%u)\n",dto, apidl, cidl);

@@ -177,6 +177,8 @@ struct source
 static const WCHAR path_processor_time[] =
     {'\\','P','r','o','c','e','s','s','o','r','(','_','T','o','t','a','l',')',
      '\\','%',' ','P','r','o','c','e','s','s','o','r',' ','T','i','m','e',0};
+static const WCHAR path_processor[] =
+    {'\\','P','r','o','c','e','s','s','o','r',0};
 static const WCHAR path_uptime[] =
     {'\\','S','y','s','t','e','m', '\\', 'S','y','s','t','e','m',' ','U','p',' ','T','i','m','e',0};
 
@@ -203,6 +205,7 @@ static void CALLBACK collect_uptime( struct counter *counter )
 static const struct source counter_sources[] =
 {
     { 6,    path_processor_time,    collect_processor_time,     TYPE_PROCESSOR_TIME,    -5,     10000000 },
+    { 238,  path_processor,         NULL,                       0,                       0,     0 },
     { 674,  path_uptime,            collect_uptime,             TYPE_UPTIME,            -3,     1000 }
 };
 

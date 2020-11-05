@@ -2886,6 +2886,13 @@ INT WINAPI GetWindowTextA( HWND hwnd, LPSTR lpString, INT nMaxCount )
     return strlen(lpString);
 }
 
+/*******************************************************************
+ *		InternalGetWindowIcon (USER32.@)
+ */
+INT WINAPI InternalGetWindowIcon(HWND hwnd, UINT iconType )
+{
+    return NULL;
+}
 
 /*******************************************************************
  *		InternalGetWindowText (USER32.@)
@@ -3706,13 +3713,12 @@ BOOL WINAPI FlashWindowEx( PFLASHWINFO pfinfo )
         if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return FALSE;
         hwnd = wndPtr->obj.handle;  /* make it a full handle */
 
-        if (pfinfo->dwFlags) wparam = !(wndPtr->flags & WIN_NCACTIVATED);
-        else wparam = (hwnd == GetForegroundWindow());
+        wparam = (wndPtr->flags & WIN_NCACTIVATED) != 0;
 
         WIN_ReleasePtr( wndPtr );
         SendMessageW( hwnd, WM_NCACTIVATE, wparam, 0 );
         USER_Driver->pFlashWindowEx( pfinfo );
-        return wparam;
+        return (pfinfo->dwFlags & FLASHW_CAPTION) ? TRUE : wparam;
     }
 }
 

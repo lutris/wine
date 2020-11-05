@@ -218,13 +218,18 @@ unsigned short get_type_vt(type_t *t)
   case TYPE_MODULE:
   case TYPE_UNION:
   case TYPE_ENCAPSULATED_UNION:
+  case TYPE_RUNTIMECLASS:
+  case TYPE_DELEGATE:
     return VT_USERDEFINED;
 
   case TYPE_VOID:
     return VT_VOID;
 
   case TYPE_ALIAS:
-    /* aliases should be filtered out by the type_get_type call above */
+  case TYPE_APICONTRACT:
+  case TYPE_PARAMETERIZED_TYPE:
+  case TYPE_PARAMETER:
+    /* not supposed to be here */
     assert(0);
     break;
 
