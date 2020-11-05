@@ -327,7 +327,6 @@ struct x11drv_thread_data
     Display *display;
     XEvent  *current_event;        /* event currently being processed */
     HWND     grab_hwnd;            /* window that currently grabs the mouse */
-    HWND     active_window;        /* active window */
     HWND     last_focus;           /* last window that had focus */
     XIM      xim;                  /* input method */
     HWND     last_xic_hwnd;        /* last xic window */
@@ -439,13 +438,13 @@ enum x11drv_atoms
     XATOM_DndSelection,
     XATOM__ICC_PROFILE,
     XATOM__MOTIF_WM_HINTS,
-    XATOM__NET_ACTIVE_WINDOW,
     XATOM__NET_STARTUP_INFO_BEGIN,
     XATOM__NET_STARTUP_INFO,
     XATOM__NET_SUPPORTED,
     XATOM__NET_SYSTEM_TRAY_OPCODE,
     XATOM__NET_SYSTEM_TRAY_S0,
     XATOM__NET_SYSTEM_TRAY_VISUAL,
+    XATOM__NET_WM_BYPASS_COMPOSITOR,
     XATOM__NET_WM_ICON,
     XATOM__NET_WM_MOVERESIZE,
     XATOM__NET_WM_NAME,

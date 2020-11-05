@@ -49,6 +49,9 @@
 /* Define to 1 if you have the `atanhf' function. */
 #undef HAVE_ATANHF
 
+/* Define to 1 if you have the <attr/xattr.h> header file. */
+#undef HAVE_ATTR_XATTR_H
+
 /* Define to 1 if you have the <AudioToolbox/AudioConverter.h> header file. */
 #undef HAVE_AUDIOTOOLBOX_AUDIOCONVERTER_H
 
@@ -224,6 +227,9 @@
 
 /* Define to 1 if you have the `futimesat' function. */
 #undef HAVE_FUTIMESAT
+
+/* Define to 1 if you have the <gcrypt.h> header file. */
+#undef HAVE_GCRYPT_H
 
 /* Define to 1 if you have the `getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
@@ -483,6 +489,9 @@
 /* Define to 1 if you have the <linux/rtnetlink.h> header file. */
 #undef HAVE_LINUX_RTNETLINK_H
 
+/* Define to 1 if you have the <linux/seccomp.h> header file. */
+#undef HAVE_LINUX_SECCOMP_H
+
 /* Define to 1 if you have the <linux/serial.h> header file. */
 #undef HAVE_LINUX_SERIAL_H
 
@@ -737,6 +746,12 @@
 
 /* Define to 1 if you have the `remquof' function. */
 #undef HAVE_REMQUOF
+
+/* Define to 1 if you have the `renameat' function. */
+#undef HAVE_RENAMEAT
+
+/* Define to 1 if you have the `renameat2' function. */
+#undef HAVE_RENAMEAT2
 
 /* Define to 1 if the system has the type `request_sense'. */
 #undef HAVE_REQUEST_SENSE
@@ -1016,6 +1031,9 @@
 /* Define to 1 if you have the <sys/event.h> header file. */
 #undef HAVE_SYS_EVENT_H
 
+/* Define to 1 if you have the <sys/extattr.h> header file. */
+#undef HAVE_SYS_EXTATTR_H
+
 /* Define to 1 if you have the <sys/filio.h> header file. */
 #undef HAVE_SYS_FILIO_H
 
@@ -1150,6 +1168,9 @@
 
 /* Define to 1 if you have the <sys/wait.h> header file. */
 #undef HAVE_SYS_WAIT_H
+
+/* Define to 1 if you have the <sys/xattr.h> header file. */
+#undef HAVE_SYS_XATTR_H
 
 /* Define to 1 if you have the `tcdrain' function. */
 #undef HAVE_TCDRAIN
@@ -1346,6 +1367,9 @@
 /* Define to the soname of the libfreetype library. */
 #undef SONAME_LIBFREETYPE
 
+/* Define to the soname of the libgcrypt library. */
+#undef SONAME_LIBGCRYPT
+
 /* Define to the soname of the libGL library. */
 #undef SONAME_LIBGL
 
@@ -1390,6 +1414,9 @@
 
 /* Define to the soname of the libOSMesa library. */
 #undef SONAME_LIBOSMESA
+
+/* Define to the soname of the libpcap library. */
+#undef SONAME_LIBPCAP
 
 /* Define to the soname of the libpng library. */
 #undef SONAME_LIBPNG
@@ -1453,6 +1480,9 @@
 
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
+
+/* Define if xattr functions take additional arguments (Mac OS X) */
+#undef XATTR_ADDITIONAL_OPTIONS
 
 /* Define to 1 if the X Window System is missing or not being used. */
 #undef X_DISPLAY_MISSING

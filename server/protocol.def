@@ -3766,3 +3766,57 @@ enum esync_type
 /* Retrieve the fd to wait on for user APCs. */
 @REQ(get_esync_apc_fd)
 @END
+
+enum fsync_type
+{
+    FSYNC_SEMAPHORE = 1,
+    FSYNC_AUTO_EVENT,
+    FSYNC_MANUAL_EVENT,
+    FSYNC_MUTEX,
+    FSYNC_AUTO_SERVER,
+    FSYNC_MANUAL_SERVER,
+    FSYNC_QUEUE,
+};
+
+/* Create a new futex-based synchronization object */
+@REQ(create_fsync)
+    unsigned int access;        /* wanted access rights */
+    int low;                    /* initial value of low word */
+    int high;                   /* initial value of high word */
+    int type;                   /* type of fsync object */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the object */
+    int type;                   /* type of fsync object */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Open an fsync object */
+@REQ(open_fsync)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    int          type;          /* type of fsync object */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+    int          type;          /* type of fsync object */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Retrieve the shm index for an object. */
+@REQ(get_fsync_idx)
+    obj_handle_t handle;        /* handle to the object */
+@REPLY
+    int          type;
+    unsigned int shm_idx;
+@END
+
+@REQ(fsync_msgwait)
+    int          in_msgwait;    /* are we in a message wait? */
+@END
+
+@REQ(get_fsync_apc_idx)
+@REPLY
+    unsigned int shm_idx;
+@END

@@ -118,6 +118,12 @@ static NTSTATUS CDECL key_asymmetric_generate( struct key *key )
     return STATUS_NOT_IMPLEMENTED;
 }
 
+static NTSTATUS CDECL key_asymmetric_duplicate( struct key *key_orig, struct key *key_copy )
+{
+    FIXME( "not implemented\n" );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 static void CDECL key_asymmetric_destroy( struct key *key )
 {
     FIXME( "not implemented\n" );
@@ -141,6 +147,7 @@ static struct key_funcs key_funcs =
     key_symmetric_destroy,
     key_asymmetric_init,
     key_asymmetric_generate,
+    key_asymmetric_duplicate,
     key_asymmetric_sign,
     key_asymmetric_verify,
     key_asymmetric_destroy,
@@ -177,6 +184,7 @@ NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *p
         RESOLVE_FUNC(symmetric_destroy)
         RESOLVE_FUNC(asymmetric_init)
         RESOLVE_FUNC(asymmetric_generate)
+        RESOLVE_FUNC(asymmetric_duplicate)
         RESOLVE_FUNC(asymmetric_sign)
         RESOLVE_FUNC(asymmetric_verify)
         RESOLVE_FUNC(asymmetric_destroy)

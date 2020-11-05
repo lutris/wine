@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define _GNU_SOURCE
 #include "config.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -47,7 +48,7 @@
 # include <linux/input.h>
 # undef SW_MAX
 # if defined(EVIOCGBIT) && defined(EV_ABS) && defined(BTN_PINKIE)
-#  define HAS_PROPER_INPUT_HEADER
+//#  define HAS_PROPER_INPUT_HEADER
 # endif
 # ifndef SYN_DROPPED
 #  define SYN_DROPPED 3
@@ -98,6 +99,13 @@ static int deviceloop_control[2];
 static const WCHAR hidraw_busidW[] = {'H','I','D','R','A','W',0};
 static const WCHAR lnxev_busidW[] = {'L','N','X','E','V',0};
 
+struct vidpid {
+    WORD vid, pid;
+};
+
+/* the kernel is a great place to learn about these DS4 quirks */
+#define QUIRK_DS4_BT 0x1
+
 struct platform_private
 {
     struct udev_device *udev_device;
@@ -105,6 +113,12 @@ struct platform_private
 
     HANDLE report_thread;
     int control_pipe[2];
+
+    struct vidpid vidpid;
+
+    DWORD quirks;
+
+    DWORD bus_type;
 };
 
 static inline struct platform_private *impl_from_DEVICE_OBJECT(DEVICE_OBJECT *device)
@@ -647,6 +661,68 @@ static WCHAR *get_sysattr_string(struct udev_device *dev, const char *sysattr)
     return strdupAtoW(attr);
 }
 
+static void parse_uevent_info(const char *uevent, DWORD *bus_type, DWORD *vendor_id,
+                             DWORD *product_id, WORD *input, WCHAR **serial_number, WCHAR **product)
+{
+    char *tmp;
+    char *saveptr = NULL;
+    char *line;
+    char *key;
+    char *value;
+
+    tmp = heap_alloc(strlen(uevent) + 1);
+    strcpy(tmp, uevent);
+    line = strtok_r(tmp, "\n", &saveptr);
+    while (line != NULL)
+    {
+        /* line: "KEY=value" */
+        key = line;
+        value = strchr(line, '=');
+        if (!value)
+        {
+            goto next_line;
+        }
+        *value = '\0';
+        value++;
+
+        if (strcmp(key, "HID_ID") == 0)
+        {
+            /**
+             *        type vendor   product
+             * HID_ID=0003:000005AC:00008242
+             **/
+            sscanf(value, "%x:%x:%x", bus_type, vendor_id, product_id);
+        }
+        else if (strcmp(key, "HID_UNIQ") == 0)
+        {
+            /* The caller has to free the serial number */
+            if (*value)
+            {
+                *serial_number = strdupAtoW(value);
+            }
+        }
+        else if (product && strcmp(key, "HID_NAME") == 0)
+        {
+            /* The caller has to free the product name */
+            if (*value)
+            {
+                *product = strdupAtoW(value);
+            }
+        }
+        else if (strcmp(key, "HID_PHYS") == 0)
+        {
+            const char *input_no = strstr(value, "input");
+            if (input_no)
+                *input = atoi(input_no+5 );
+        }
+
+next_line:
+        line = strtok_r(NULL, "\n", &saveptr);
+    }
+
+    heap_free(tmp);
+}
+
 static int compare_platform_device(DEVICE_OBJECT *device, void *platform_dev)
 {
     struct udev_device *dev1 = impl_from_DEVICE_OBJECT(device)->udev_device;
@@ -688,12 +764,43 @@ static NTSTATUS hidraw_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer,
 
 static NTSTATUS hidraw_get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
 {
-    struct udev_device *usbdev;
+    struct udev_device *usbdev, *hiddev;
     struct platform_private *private = impl_from_DEVICE_OBJECT(device);
     WCHAR *str = NULL;
 
+    hiddev = udev_device_get_parent_with_subsystem_devtype(private->udev_device, "hid", NULL);
     usbdev = udev_device_get_parent_with_subsystem_devtype(private->udev_device, "usb", "usb_device");
-    if (usbdev)
+
+    if (private->bus_type == BUS_BLUETOOTH && hiddev)
+    {
+        DWORD bus_type, vid, pid;
+        WORD input;
+        WCHAR *serial = NULL, *product = NULL;
+
+        /* udev doesn't report this info, so we have to extract it from uevent property */
+
+        parse_uevent_info(udev_device_get_sysattr_value(hiddev, "uevent"),
+                &bus_type, &vid, &pid, &input, &serial, &product);
+
+        switch (index)
+        {
+            case HID_STRING_ID_IPRODUCT:
+                str = product;
+                HeapFree(GetProcessHeap(), 0, serial);
+                break;
+            case HID_STRING_ID_IMANUFACTURER:
+                /* TODO */
+                break;
+            case HID_STRING_ID_ISERIALNUMBER:
+                str = serial;
+                HeapFree(GetProcessHeap(), 0, product);
+                break;
+            default:
+                ERR("Unhandled string index %08x\n", index);
+                return STATUS_NOT_IMPLEMENTED;
+        }
+    }
+    else if (usbdev)
     {
         switch (index)
         {
@@ -783,7 +890,20 @@ static DWORD CALLBACK device_report_thread(void *args)
         else if (size == 0)
             TRACE_(hid_report)("Failed to read report\n");
         else
-            process_hid_report(device, report_buffer, size);
+        {
+            if(private->quirks & QUIRK_DS4_BT)
+            {
+                /* Following the kernel example, report 17 is the only type we care about for
+                 * DS4 over bluetooth. but it has two extra header bytes, so skip those. */
+                if(report_buffer[0] == 0x11)
+                {
+                    /* update report number to match windows */
+                    report_buffer[2] = 1;
+                    process_hid_report(device, report_buffer + 2, size - 2);
+                }
+            }else
+                process_hid_report(device, report_buffer, size);
+        }
     }
     return 0;
 }
@@ -1060,68 +1180,6 @@ static int check_same_device(DEVICE_OBJECT *device, void* context)
     return !compare_platform_device(device, context);
 }
 
-static int parse_uevent_info(const char *uevent, DWORD *vendor_id,
-                             DWORD *product_id, WORD *input, WCHAR **serial_number)
-{
-    DWORD bus_type;
-    char *tmp;
-    char *saveptr = NULL;
-    char *line;
-    char *key;
-    char *value;
-
-    int found_id = 0;
-    int found_serial = 0;
-
-    tmp = heap_alloc(strlen(uevent) + 1);
-    strcpy(tmp, uevent);
-    line = strtok_r(tmp, "\n", &saveptr);
-    while (line != NULL)
-    {
-        /* line: "KEY=value" */
-        key = line;
-        value = strchr(line, '=');
-        if (!value)
-        {
-            goto next_line;
-        }
-        *value = '\0';
-        value++;
-
-        if (strcmp(key, "HID_ID") == 0)
-        {
-            /**
-             *        type vendor   product
-             * HID_ID=0003:000005AC:00008242
-             **/
-            int ret = sscanf(value, "%x:%x:%x", &bus_type, vendor_id, product_id);
-            if (ret == 3)
-                found_id = 1;
-        }
-        else if (strcmp(key, "HID_UNIQ") == 0)
-        {
-            /* The caller has to free the serial number */
-            if (*value)
-            {
-                *serial_number = strdupAtoW(value);
-                found_serial = 1;
-            }
-        }
-        else if (strcmp(key, "HID_PHYS") == 0)
-        {
-            const char *input_no = strstr(value, "input");
-            if (input_no)
-                *input = atoi(input_no+5 );
-        }
-
-next_line:
-        line = strtok_r(NULL, "\n", &saveptr);
-    }
-
-    heap_free(tmp);
-    return (found_id && found_serial);
-}
-
 static DWORD a_to_bcd(const char *s)
 {
     DWORD r = 0;
@@ -1135,9 +1193,72 @@ static DWORD a_to_bcd(const char *s)
     return r;
 }
 
+static int check_for_vidpid(DEVICE_OBJECT *device, void* context)
+{
+    struct vidpid *vidpid = context;
+    struct platform_private *dev = impl_from_DEVICE_OBJECT(device);
+    return !(dev->vidpid.vid == vidpid->vid &&
+        dev->vidpid.pid == vidpid->pid);
+}
+
+BOOL is_already_opened_by_hidraw(DWORD vid, DWORD pid)
+{
+    struct vidpid vidpid = {vid, pid};
+    return bus_enumerate_hid_devices(&hidraw_vtbl, check_for_vidpid, &vidpid) != NULL;
+}
+
+static BOOL is_in_sdl_blacklist(DWORD vid, DWORD pid)
+{
+    char needle[16];
+    const char *blacklist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES");
+    const char *whitelist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
+
+    if (whitelist)
+    {
+        sprintf(needle, "0x%04x/0x%04x", vid, pid);
+
+        return strcasestr(whitelist, needle) == NULL;
+    }
+
+    if (!blacklist)
+        return FALSE;
+
+    sprintf(needle, "0x%04x/0x%04x", vid, pid);
+
+    return strcasestr(blacklist, needle) != NULL;
+}
+
+static void set_quirks(struct platform_private *private)
+{
+#define VID_SONY 0x054c
+#define PID_SONY_DUALSHOCK_4 0x05c4
+#define PID_SONY_DUALSHOCK_4_2 0x09cc
+#define PID_SONY_DUALSHOCK_4_DONGLE 0x0ba0
+
+    private->quirks = 0;
+
+    switch(private->vidpid.vid)
+    {
+    case VID_SONY:
+        switch(private->vidpid.pid)
+        {
+        case PID_SONY_DUALSHOCK_4:
+        case PID_SONY_DUALSHOCK_4_2:
+        case PID_SONY_DUALSHOCK_4_DONGLE:
+            if(private->bus_type == BUS_BLUETOOTH)
+                private->quirks |= QUIRK_DS4_BT;
+            break;
+        }
+        break;
+    }
+
+    TRACE("for %04x/%04x, quirks set to: 0x%x\n", private->vidpid.vid,
+            private->vidpid.pid, private->quirks);
+}
+
 static void try_add_device(struct udev_device *dev)
 {
-    DWORD vid = 0, pid = 0, version = 0;
+    DWORD vid = 0, pid = 0, version = 0, bus_type = 0;
     struct udev_device *hiddev = NULL, *walk_device;
     DEVICE_OBJECT *device = NULL;
     const char *subsystem;
@@ -1180,19 +1301,22 @@ static void try_add_device(struct udev_device *dev)
         }
 #endif
         parse_uevent_info(udev_device_get_sysattr_value(hiddev, "uevent"),
-                          &vid, &pid, &input, &serial);
+                          &bus_type, &vid, &pid, &input, &serial, NULL);
         if (serial == NULL)
             serial = strdupAtoW(base_serial);
 
-        walk_device = dev;
-        while (walk_device && !bcdDevice)
+        if(bus_type != BUS_BLUETOOTH)
         {
-            bcdDevice = udev_device_get_sysattr_value(walk_device, "bcdDevice");
-            walk_device = udev_device_get_parent(walk_device);
-        }
-        if (bcdDevice)
-        {
-            version = a_to_bcd(bcdDevice);
+            walk_device = dev;
+            while (walk_device && !bcdDevice)
+            {
+                bcdDevice = udev_device_get_sysattr_value(walk_device, "bcdDevice");
+                walk_device = udev_device_get_parent(walk_device);
+            }
+            if (bcdDevice)
+            {
+                version = a_to_bcd(bcdDevice);
+            }
         }
     }
 #ifdef HAS_PROPER_INPUT_HEADER
@@ -1210,14 +1334,28 @@ static void try_add_device(struct udev_device *dev)
         vid = device_id.vendor;
         pid = device_id.product;
         version = device_id.version;
+        bus_type = device_id.bustype;
     }
 #else
     else
         WARN("Could not get device to query VID, PID, Version and Serial\n");
 #endif
 
+    if (is_steam_controller(vid, pid) || is_in_sdl_blacklist(vid, pid))
+    {
+        /* this device is being used as a virtual Steam controller */
+        TRACE("hidraw %s: ignoring device %04x/%04x with virtual Steam controller\n", debugstr_a(devnode), vid, pid);
+        close(fd);
+        return;
+    }
+
     if (is_xbox_gamepad(vid, pid))
-        is_gamepad = TRUE;
+    {
+        /* SDL handles xbox (and steam) controllers */
+        TRACE("hidraw %s: ignoring xinput device %04x/%04x\n", debugstr_a(devnode), vid, pid);
+        close(fd);
+        return;
+    }
 #ifdef HAS_PROPER_INPUT_HEADER
     else
     {
@@ -1237,13 +1375,13 @@ static void try_add_device(struct udev_device *dev)
     if (strcmp(subsystem, "hidraw") == 0)
     {
         device = bus_create_hid_device(hidraw_busidW, vid, pid, input, version, 0, serial, is_gamepad,
-                                       &hidraw_vtbl, sizeof(struct platform_private));
+                                       &hidraw_vtbl, sizeof(struct platform_private), FALSE);
     }
 #ifdef HAS_PROPER_INPUT_HEADER
     else if (strcmp(subsystem, "input") == 0)
     {
         device = bus_create_hid_device(lnxev_busidW, vid, pid, input, version, 0, serial, is_gamepad,
-                                       &lnxev_vtbl, sizeof(struct wine_input_private));
+                                       &lnxev_vtbl, sizeof(struct wine_input_private), FALSE);
     }
 #endif
 
@@ -1252,6 +1390,10 @@ static void try_add_device(struct udev_device *dev)
         struct platform_private *private = impl_from_DEVICE_OBJECT(device);
         private->udev_device = udev_device_ref(dev);
         private->device_fd = fd;
+        private->vidpid.vid = vid;
+        private->vidpid.pid = pid;
+        private->bus_type = bus_type;
+        set_quirks(private);
 #ifdef HAS_PROPER_INPUT_HEADER
         if (strcmp(subsystem, "input") == 0)
             if (!build_report_descriptor((struct wine_input_private*)private, dev))

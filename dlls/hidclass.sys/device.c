@@ -76,7 +76,7 @@ NTSTATUS HID_CreateDevice(DEVICE_OBJECT *native_device, HID_MINIDRIVER_REGISTRAT
     return STATUS_SUCCESS;
 }
 
-NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
+NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device, BOOL xinput_hack)
 {
     static const WCHAR backslashW[] = {'\\',0};
     WCHAR device_instance_id[MAX_DEVICE_ID_LEN];
@@ -88,6 +88,8 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
     BASE_DEVICE_EXTENSION *ext;
 
     HidD_GetHidGuid(&hidGuid);
+    if(xinput_hack)
+        hidGuid.Data4[7]++; /* HACK: use different GUID so only xinput will find this device */
     ext = device->DeviceExtension;
 
     RtlInitUnicodeString( &nameW, ext->device_name);
@@ -125,7 +127,7 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
         return status;
     }
 
-    ext->link_handle = INVALID_HANDLE_VALUE;
+    ext->link_handle = 0;
 
     /* FIXME: This should probably be done in mouhid.sys. */
     if (ext->preparseData->caps.UsagePage == HID_USAGE_PAGE_GENERIC
@@ -251,13 +253,10 @@ static void HID_Device_sendRawInput(DEVICE_OBJECT *device, HID_XFER_PACKET *pack
 {
     BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
 
-    if (ext->link_handle == INVALID_HANDLE_VALUE)
-        return;
-
     SERVER_START_REQ(send_hardware_message)
     {
         req->win                  = 0;
-        req->flags                = SEND_HWMSG_RAWINPUT;
+        req->flags                = 0;
         req->input.type           = HW_INPUT_HID;
         req->input.hid.device     = wine_server_obj_handle(ext->link_handle);
         req->input.hid.usage_page = ext->preparseData->caps.UsagePage;

@@ -156,7 +156,11 @@ static HRESULT WINAPI multimedia_stream_SetState(IAMMultiMediaStream *iface, STR
     {
         hr = IMediaControl_Run(This->media_control);
         if (SUCCEEDED(hr))
+        {
+            FILTER_STATE state;
+            IMediaControl_GetState(This->media_control, INFINITE, (OAFilterState *)&state);
             hr = S_OK;
+        }
     }
     else if (new_state == STREAMSTATE_STOP)
         hr = IMediaControl_Stop(This->media_control);
@@ -465,6 +469,17 @@ static HRESULT WINAPI multimedia_stream_OpenFile(IAMMultiMediaStream *iface,
         {
             FIXME("Failed to get IFilterGraph2 interface, hr %#x.\n", ret);
             ret = IGraphBuilder_Render(This->graph, This->ipin);
+        }
+    }
+
+    if (SUCCEEDED(ret) && (flags & AMMSF_NOCLOCK))
+    {
+        IMediaFilter *media_filter;
+
+        if (SUCCEEDED(ret = IGraphBuilder_QueryInterface(This->graph, &IID_IMediaFilter, (void **)&media_filter)))
+        {
+            ret = IMediaFilter_SetSyncSource(media_filter, NULL);
+            IMediaFilter_Release(media_filter);
         }
     }
 

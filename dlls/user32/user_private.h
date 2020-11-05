@@ -97,7 +97,6 @@ typedef struct tagUSER_DRIVER {
     DWORD  (CDECL *pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
     void   (CDECL *pReleaseDC)(HWND,HDC);
     BOOL   (CDECL *pScrollDC)(HDC,INT,INT,HRGN);
-    void   (CDECL *pSetActiveWindow)(HWND);
     void   (CDECL *pSetCapture)(HWND,UINT);
     void   (CDECL *pSetFocus)(HWND);
     void   (CDECL *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
@@ -393,7 +392,5 @@ static inline WCHAR *heap_strdupW(const WCHAR *src)
     if ((dst = heap_alloc(len))) memcpy(dst, src, len);
     return dst;
 }
-
-extern HANDLE rawinput_handle_from_device_handle(HANDLE device);
 
 #endif /* __WINE_USER_PRIVATE_H */

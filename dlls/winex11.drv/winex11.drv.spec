@@ -29,7 +29,6 @@
 @ cdecl MsgWaitForMultipleObjectsEx(long ptr long long long) X11DRV_MsgWaitForMultipleObjectsEx
 @ cdecl ReleaseDC(long long) X11DRV_ReleaseDC
 @ cdecl ScrollDC(long long long long) X11DRV_ScrollDC
-@ cdecl SetActiveWindow(long) X11DRV_SetActiveWindow
 @ cdecl SetCapture(long long) X11DRV_SetCapture
 @ cdecl SetFocus(long) X11DRV_SetFocus
 @ cdecl SetLayeredWindowAttributes(long long long long) X11DRV_SetLayeredWindowAttributes

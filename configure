@@ -632,6 +632,8 @@ POLL_LIBS
 TOOLSEXT
 MSVCRTFLAGS
 EXTRACFLAGS
+GCRYPT_LIBS
+GCRYPT_CFLAGS
 VKD3D_SHADER_LIBS
 VKD3D_SHADER_CFLAGS
 VKD3D_LIBS
@@ -699,7 +701,6 @@ XSLT_LIBS
 XSLT_CFLAGS
 XML2_LIBS
 XML2_CFLAGS
-PCAP_LIBS
 X_EXTRA_LIBS
 X_LIBS
 X_PRE_LIBS
@@ -814,7 +815,6 @@ infodir
 docdir
 oldincludedir
 includedir
-runstatedir
 localstatedir
 sharedstatedir
 sysconfdir
@@ -852,6 +852,7 @@ with_faudio
 with_float_abi
 with_fontconfig
 with_freetype
+with_gcrypt
 with_gettext
 with_gettextpo
 with_gphoto
@@ -887,6 +888,7 @@ with_usb
 with_v4l2
 with_vkd3d
 with_vulkan
+with_xattr
 with_xcomposite
 with_xcursor
 with_xfixes
@@ -914,6 +916,7 @@ enable_adsldp
 enable_adsldpc
 enable_advapi32
 enable_advpack
+enable_amd_ags_x64
 enable_amsi
 enable_amstream
 enable_api_ms_win_appmodel_identity_l1_1_0
@@ -1286,11 +1289,14 @@ enable_dxdiagn
 enable_dxerr8
 enable_dxerr9
 enable_dxgi
+enable_dxgkrnl_sys
+enable_dxgmms1_sys
 enable_dxguid
 enable_dxva2
 enable_esent
 enable_evr
 enable_explorerframe
+enable_ext_ms_win_appmodel_usercontext_l1_1_0
 enable_ext_ms_win_authz_context_l1_1_0
 enable_ext_ms_win_domainjoin_netjoin_l1_1_0
 enable_ext_ms_win_dwmapi_ext_l1_1_0
@@ -1343,6 +1349,7 @@ enable_ext_ms_win_shell_comctl32_init_l1_1_0
 enable_ext_ms_win_shell_comdlg32_l1_1_0
 enable_ext_ms_win_shell_shell32_l1_2_0
 enable_ext_ms_win_uxtheme_themes_l1_1_0
+enable_ext_ms_win_xaml_pal_l1_1_0
 enable_faultrep
 enable_feclient
 enable_fltlib
@@ -1369,6 +1376,7 @@ enable_iccvid
 enable_icmp
 enable_ieframe
 enable_ieproxy
+enable_iertutil
 enable_imaadp32_acm
 enable_imagehlp
 enable_imm32
@@ -1501,6 +1509,7 @@ enable_netapi32
 enable_netcfgx
 enable_netio_sys
 enable_netprofm
+enable_netutils
 enable_newdev
 enable_ninput
 enable_normaliz
@@ -1510,6 +1519,9 @@ enable_ntdll
 enable_ntdsapi
 enable_ntoskrnl_exe
 enable_ntprint
+enable_win32
+enable_nvcuda
+enable_nvcuvid
 enable_objsel
 enable_odbc32
 enable_odbcbcp
@@ -1591,6 +1603,7 @@ enable_snmpapi
 enable_softpub
 enable_spoolss
 enable_srclient
+enable_srvcli
 enable_sspicli
 enable_stdole2_tlb
 enable_stdole32_tlb
@@ -1648,6 +1661,11 @@ enable_wevtapi
 enable_wevtsvc
 enable_wiaservc
 enable_wimgapi
+enable_win32k_sys
+enable_windows_gaming_input_dll
+enable_windows_globalization_dll
+enable_windows_media_speech_dll
+enable_windows_networking_connectivity_dll
 enable_windowscodecs
 enable_windowscodecsext
 enable_winealsa_drv
@@ -1709,6 +1727,17 @@ enable_x3daudio1_4
 enable_x3daudio1_5
 enable_x3daudio1_6
 enable_x3daudio1_7
+enable_xactengine2_0
+enable_xactengine2_1
+enable_xactengine2_10
+enable_xactengine2_2
+enable_xactengine2_3
+enable_xactengine2_4
+enable_xactengine2_5
+enable_xactengine2_6
+enable_xactengine2_7
+enable_xactengine2_8
+enable_xactengine2_9
 enable_xactengine3_0
 enable_xactengine3_1
 enable_xactengine3_2
@@ -1936,6 +1965,8 @@ VKD3D_CFLAGS
 VKD3D_LIBS
 VKD3D_SHADER_CFLAGS
 VKD3D_SHADER_LIBS
+GCRYPT_CFLAGS
+GCRYPT_LIBS
 LDAP_CFLAGS
 LDAP_LIBS'
 
@@ -1976,7 +2007,6 @@ datadir='${datarootdir}'
 sysconfdir='${prefix}/etc'
 sharedstatedir='${prefix}/com'
 localstatedir='${prefix}/var'
-runstatedir='${localstatedir}/run'
 includedir='${prefix}/include'
 oldincludedir='/usr/include'
 docdir='${datarootdir}/doc/${PACKAGE_TARNAME}'
@@ -2229,15 +2259,6 @@ do
   | -silent | --silent | --silen | --sile | --sil)
     silent=yes ;;
 
-  -runstatedir | --runstatedir | --runstatedi | --runstated \
-  | --runstate | --runstat | --runsta | --runst | --runs \
-  | --run | --ru | --r)
-    ac_prev=runstatedir ;;
-  -runstatedir=* | --runstatedir=* | --runstatedi=* | --runstated=* \
-  | --runstate=* | --runstat=* | --runsta=* | --runst=* | --runs=* \
-  | --run=* | --ru=* | --r=*)
-    runstatedir=$ac_optarg ;;
-
   -sbindir | --sbindir | --sbindi | --sbind | --sbin | --sbi | --sb)
     ac_prev=sbindir ;;
   -sbindir=* | --sbindir=* | --sbindi=* | --sbind=* | --sbin=* \
@@ -2375,7 +2396,7 @@ fi
 for ac_var in	exec_prefix prefix bindir sbindir libexecdir datarootdir \
 		datadir sysconfdir sharedstatedir localstatedir includedir \
 		oldincludedir docdir infodir htmldir dvidir pdfdir psdir \
-		libdir localedir mandir runstatedir
+		libdir localedir mandir
 do
   eval ac_val=\$$ac_var
   # Remove trailing slashes.
@@ -2528,7 +2549,6 @@ Fine tuning of the installation directories:
   --sysconfdir=DIR        read-only single-machine data [PREFIX/etc]
   --sharedstatedir=DIR    modifiable architecture-independent data [PREFIX/com]
   --localstatedir=DIR     modifiable single-machine data [PREFIX/var]
-  --runstatedir=DIR       modifiable per-process data [LOCALSTATEDIR/run]
   --libdir=DIR            object code libraries [EPREFIX/lib]
   --includedir=DIR        C header files [PREFIX/include]
   --oldincludedir=DIR     C header files for non-gcc [/usr/include]
@@ -2588,6 +2608,7 @@ Optional Packages:
   --with-float-abi=abi    specify the ABI (soft|softfp|hard) for ARM platforms
   --without-fontconfig    do not use fontconfig
   --without-freetype      do not use the FreeType library
+  --without-gcrypt        do not use libgcrypt
   --without-gettext       do not use gettext
   --with-gettextpo        use the GetTextPO library to rebuild po files
   --without-gphoto        do not use gphoto (Digital Camera support)
@@ -2624,6 +2645,7 @@ Optional Packages:
   --without-v4l2          do not use v4l2 (video capture)
   --without-vkd3d         do not use vkd3d (Direct3D 12 support)
   --without-vulkan        do not use Vulkan
+  --without-xattr         do not use xattr (security attributes support)
   --without-xcomposite    do not use the Xcomposite extension
   --without-xcursor       do not use the Xcursor extension
   --without-xfixes        do not use Xfixes for clipboard change notifications
@@ -2742,6 +2764,9 @@ Some influential environment variables:
               C compiler flags for libvkd3d-shader, overriding pkg-config
   VKD3D_SHADER_LIBS
               Linker flags for libvkd3d-shader, overriding pkg-config
+  GCRYPT_CFLAGS
+              C compiler flags for libgcrypt, overriding pkg-config
+  GCRYPT_LIBS Linker flags for libgcrypt, overriding pkg-config
   LDAP_CFLAGS C compiler flags for openldap, overriding pkg-config
   LDAP_LIBS   Linker flags for openldap, overriding pkg-config
 
@@ -3968,6 +3993,12 @@ if test "${with_freetype+set}" = set; then :
 fi
 
 
+# Check whether --with-gcrypt was given.
+if test "${with_gcrypt+set}" = set; then :
+  withval=$with_gcrypt;
+fi
+
+
 # Check whether --with-gettext was given.
 if test "${with_gettext+set}" = set; then :
   withval=$with_gettext;
@@ -4175,6 +4206,12 @@ fi
 # Check whether --with-vulkan was given.
 if test "${with_vulkan+set}" = set; then :
   withval=$with_vulkan;
+fi
+
+
+# Check whether --with-xattr was given.
+if test "${with_xattr+set}" = set; then :
+  withval=$with_xattr;
 fi
 
 
@@ -5805,6 +5842,34 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $wine_cv_builtin_ms_va_list" >&5
 $as_echo "$wine_cv_builtin_ms_va_list" >&6; }
     test $wine_cv_builtin_ms_va_list != no || as_fn_error $? "You need clang >= 5.0 to build Wine for arm64." "$LINENO" 5
+    # Avoid clobbering the x18 register which is reserved in windows.
+    # This isn't complete/enough unless all of the system libraries have
+    # been built with the same flag though.
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -ffixed-x18" >&5
+$as_echo_n "checking whether the compiler supports -ffixed-x18... " >&6; }
+if ${ac_cv_cflags__ffixed_x18+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -ffixed-x18"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__ffixed_x18=yes
+else
+  ac_cv_cflags__ffixed_x18=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__ffixed_x18" >&5
+$as_echo "$ac_cv_cflags__ffixed_x18" >&6; }
+if test "x$ac_cv_cflags__ffixed_x18" = xyes; then :
+  CFLAGS="$CFLAGS -ffixed-x18"
+fi
     ;;
   i[3456789]86*)
     enable_win16=${enable_win16:-yes}
@@ -5814,6 +5879,12 @@ esac
 
 enable_win16=${enable_win16:-no}
 enable_win64=${enable_win64:-no}
+if test "x$enable_win64" != "xyes"
+then
+  enable_win32="yes"
+else
+  enable_win32="no"
+fi
 
 enable_winetest=${enable_winetest:-$enable_tests}
 
@@ -6942,7 +7013,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -6988,7 +7059,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -7012,7 +7083,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -7057,7 +7128,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -7081,7 +7152,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -7401,7 +7472,7 @@ for ac_header in \
 	IOKit/IOKitLib.h \
 	IOKit/hid/IOHIDLib.h \
 	OpenAL/al.h \
-	OpenCL/opencl.h \
+	CL/opencl.h \
 	QuickTime/ImageCompression.h \
 	Security/Security.h \
 	SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h \
@@ -7436,6 +7507,7 @@ for ac_header in \
 	linux/joystick.h \
 	linux/major.h \
 	linux/param.h \
+	linux/seccomp.h \
 	linux/serial.h \
 	linux/types.h \
 	linux/ucdrom.h \
@@ -7876,6 +7948,65 @@ fi
 
 done
 
+
+if test "x$with_xattr" != "xno"
+then
+    for ac_header in attr/xattr.h sys/extattr.h
+do :
+  as_ac_Header=`$as_echo "ac_cv_header_$ac_header" | $as_tr_sh`
+ac_fn_c_check_header_mongrel "$LINENO" "$ac_header" "$as_ac_Header" "$ac_includes_default"
+if eval test \"x\$"$as_ac_Header"\" = x"yes"; then :
+  cat >>confdefs.h <<_ACEOF
+#define `$as_echo "HAVE_$ac_header" | $as_tr_cpp` 1
+_ACEOF
+ HAVE_XATTR=1
+fi
+
+done
+
+    for ac_header in sys/xattr.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "sys/xattr.h" "ac_cv_header_sys_xattr_h" "$ac_includes_default"
+if test "x$ac_cv_header_sys_xattr_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_SYS_XATTR_H 1
+_ACEOF
+ HAVE_XATTR=1
+        cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <sys/xattr.h>
+int
+main ()
+{
+getxattr("", "", "", 0, 0, 0);
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+
+$as_echo "#define XATTR_ADDITIONAL_OPTIONS 1" >>confdefs.h
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+
+done
+
+fi
+if test "x$with_xattr" = "xyes"
+then
+    if test "x$HAVE_XATTR" = "x"; then :
+  case "x$with_xattr" in
+  xno) ;;
+  *)   as_fn_error $? "xattr ${notice_platform}development files \
+not found. Wine will be built without extended attribute support, which probably isn't what you \
+want. You will need to install ${notice_platform}development packages of libattr at the very least.
+Use the --without-xattr option if you really want this." "$LINENO" 5 ;;
+esac
+
+fi
+fi
 
 
 DLLFLAGS="-D_REENTRANT"
@@ -12816,6 +12947,8 @@ if ac_fn_c_try_link "$LINENO"; then :
   ac_cv_lib_soname_OpenCL=`$LDD conftest$ac_exeext | grep "libOpenCL\\.$LIBEXT" | sed -e "s/^.*\(libOpenCL\.$LIBEXT[^	 ]*\).*$/\1/"';2,$d'`
 fi ;;
   esac
+else
+  ac_cv_lib_soname_OpenCL=
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext conftest.$ac_ext
@@ -12851,14 +12984,14 @@ fi
 
 if test "$ac_cv_header_pcap_pcap_h" = "yes"
 then
-    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for pcap_create in -lpcap" >&5
-$as_echo_n "checking for pcap_create in -lpcap... " >&6; }
-if ${ac_cv_lib_pcap_pcap_create+:} false; then :
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for -lpcap" >&5
+$as_echo_n "checking for -lpcap... " >&6; }
+if ${ac_cv_lib_soname_pcap+:} false; then :
   $as_echo_n "(cached) " >&6
 else
-  ac_check_lib_save_LIBS=$LIBS
+  ac_check_soname_save_LIBS=$LIBS
 LIBS="-lpcap  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
 /* Override any GCC internal prototype to avoid an error.
@@ -12877,23 +13010,37 @@ return pcap_create ();
 }
 _ACEOF
 if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_pcap_pcap_create=yes
+  case "$LIBEXT" in
+    dll) ac_cv_lib_soname_pcap=`$ac_cv_path_LDD conftest.exe | grep "pcap" | sed -e "s/dll.*/dll/"';2,$d'` ;;
+    dylib) ac_cv_lib_soname_pcap=`$OTOOL -L conftest$ac_exeext | grep "libpcap\\.[0-9A-Za-z.]*dylib" | sed -e "s/^.*\/\(libpcap\.[0-9A-Za-z.]*dylib\).*$/\1/"';2,$d'` ;;
+    *) ac_cv_lib_soname_pcap=`$READELF -d conftest$ac_exeext | grep "NEEDED.*libpcap\\.$LIBEXT" | sed -e "s/^.*\\[\\(libpcap\\.$LIBEXT[^	 ]*\\)\\].*$/\1/"';2,$d'`
+       if ${ac_cv_lib_soname_pcap:+false} :; then :
+  ac_cv_lib_soname_pcap=`$LDD conftest$ac_exeext | grep "libpcap\\.$LIBEXT" | sed -e "s/^.*\(libpcap\.$LIBEXT[^	 ]*\).*$/\1/"';2,$d'`
+fi ;;
+  esac
 else
-  ac_cv_lib_pcap_pcap_create=no
+  ac_cv_lib_soname_pcap=
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
+  LIBS=$ac_check_soname_save_LIBS
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_pcap_pcap_create" >&5
-$as_echo "$ac_cv_lib_pcap_pcap_create" >&6; }
-if test "x$ac_cv_lib_pcap_pcap_create" = xyes; then :
-  PCAP_LIBS="-lpcap"
+if ${ac_cv_lib_soname_pcap:+false} :; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: not found" >&5
+$as_echo "not found" >&6; }
+
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_soname_pcap" >&5
+$as_echo "$ac_cv_lib_soname_pcap" >&6; }
+
+cat >>confdefs.h <<_ACEOF
+#define SONAME_LIBPCAP "$ac_cv_lib_soname_pcap"
+_ACEOF
+
 
 fi
-
 fi
-if test "x$ac_cv_lib_pcap_pcap_create" != xyes; then :
+if test "x$ac_cv_lib_soname_pcap" = "x"; then :
   case "x$with_pcap" in
   x)   as_fn_append wine_notices "|pcap ${notice_platform}development files not found, wpcap won't be supported." ;;
   xno) ;;
@@ -15162,7 +15309,7 @@ if ${FAUDIO_LIBS:+false} :; then :
 fi
 fi
 
-FAUDIO_LIBS=${FAUDIO_LIBS:-"-lFAudio"}
+FAUDIO_LIBS=${FAUDIO_LIBS:-"-lFAudio -lavcodec -lavutil -lswresample"}
 $as_echo "$as_me:${as_lineno-$LINENO}: faudio cflags: $FAUDIO_CFLAGS" >&5
 $as_echo "$as_me:${as_lineno-$LINENO}: faudio libs: $FAUDIO_LIBS" >&5
 ac_save_CPPFLAGS=$CPPFLAGS
@@ -16345,7 +16492,17 @@ then
     enable_x3daudio1_5=${enable_x3daudio1_5:-no}
     enable_x3daudio1_6=${enable_x3daudio1_6:-no}
     enable_x3daudio1_7=${enable_x3daudio1_7:-no}
+    enable_xactengine2_0=${enable_xactengine2_0:-no}
+    enable_xactengine2_1=${enable_xactengine2_1:-no}
     enable_xactengine2_10=${enable_xactengine2_10:-no}
+    enable_xactengine2_2=${enable_xactengine2_2:-no}
+    enable_xactengine2_3=${enable_xactengine2_3:-no}
+    enable_xactengine2_4=${enable_xactengine2_4:-no}
+    enable_xactengine2_5=${enable_xactengine2_5:-no}
+    enable_xactengine2_6=${enable_xactengine2_6:-no}
+    enable_xactengine2_7=${enable_xactengine2_7:-no}
+    enable_xactengine2_8=${enable_xactengine2_8:-no}
+    enable_xactengine2_9=${enable_xactengine2_9:-no}
     enable_xactengine3_0=${enable_xactengine3_0:-no}
     enable_xactengine3_1=${enable_xactengine3_1:-no}
     enable_xactengine3_2=${enable_xactengine3_2:-no}
@@ -16900,6 +17057,108 @@ esac
 
 fi
 test "x$ac_cv_lib_soname_vkd3d" != "x" || enable_d3d12=${enable_d3d12:-no}
+
+if test "x$with_gcrypt" != "xno"
+then
+    if ${GCRYPT_CFLAGS:+false} :; then :
+  if ${PKG_CONFIG+:} false; then :
+  GCRYPT_CFLAGS=`$PKG_CONFIG --cflags libgcrypt 2>/dev/null`
+fi
+fi
+
+if ${GCRYPT_LIBS:+false} :; then :
+  if ${PKG_CONFIG+:} false; then :
+  GCRYPT_LIBS=`$PKG_CONFIG --libs libgcrypt 2>/dev/null`
+fi
+fi
+
+
+$as_echo "$as_me:${as_lineno-$LINENO}: libgcrypt cflags: $GCRYPT_CFLAGS" >&5
+$as_echo "$as_me:${as_lineno-$LINENO}: libgcrypt libs: $GCRYPT_LIBS" >&5
+ac_save_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $GCRYPT_CFLAGS"
+for ac_header in gcrypt.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "gcrypt.h" "ac_cv_header_gcrypt_h" "$ac_includes_default"
+if test "x$ac_cv_header_gcrypt_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_GCRYPT_H 1
+_ACEOF
+
+fi
+
+done
+
+        if test "$ac_cv_header_gcrypt_h" = "yes"
+        then
+            { $as_echo "$as_me:${as_lineno-$LINENO}: checking for -lgcrypt" >&5
+$as_echo_n "checking for -lgcrypt... " >&6; }
+if ${ac_cv_lib_soname_gcrypt+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_soname_save_LIBS=$LIBS
+LIBS="-lgcrypt $GCRYPT_LIBS $LIBS"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char gcry_sexp_build ();
+int
+main ()
+{
+return gcry_sexp_build ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  case "$LIBEXT" in
+    dll) ac_cv_lib_soname_gcrypt=`$ac_cv_path_LDD conftest.exe | grep "gcrypt" | sed -e "s/dll.*/dll/"';2,$d'` ;;
+    dylib) ac_cv_lib_soname_gcrypt=`$OTOOL -L conftest$ac_exeext | grep "libgcrypt\\.[0-9A-Za-z.]*dylib" | sed -e "s/^.*\/\(libgcrypt\.[0-9A-Za-z.]*dylib\).*$/\1/"';2,$d'` ;;
+    *) ac_cv_lib_soname_gcrypt=`$READELF -d conftest$ac_exeext | grep "NEEDED.*libgcrypt\\.$LIBEXT" | sed -e "s/^.*\\[\\(libgcrypt\\.$LIBEXT[^	 ]*\\)\\].*$/\1/"';2,$d'`
+       if ${ac_cv_lib_soname_gcrypt:+false} :; then :
+  ac_cv_lib_soname_gcrypt=`$LDD conftest$ac_exeext | grep "libgcrypt\\.$LIBEXT" | sed -e "s/^.*\(libgcrypt\.$LIBEXT[^	 ]*\).*$/\1/"';2,$d'`
+fi ;;
+  esac
+else
+  ac_cv_lib_soname_gcrypt=
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+  LIBS=$ac_check_soname_save_LIBS
+fi
+if ${ac_cv_lib_soname_gcrypt:+false} :; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: not found" >&5
+$as_echo "not found" >&6; }
+
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_soname_gcrypt" >&5
+$as_echo "$ac_cv_lib_soname_gcrypt" >&6; }
+
+cat >>confdefs.h <<_ACEOF
+#define SONAME_LIBGCRYPT "$ac_cv_lib_soname_gcrypt"
+_ACEOF
+
+
+fi
+        fi
+CPPFLAGS=$ac_save_CPPFLAGS
+
+fi
+if test "x$ac_cv_lib_soname_gcrypt" = "x"; then :
+  case "x$with_gcrypt" in
+  x)   as_fn_append wine_notices "|libgcrypt ${notice_platform}development files not found, GCRYPT won't be supported." ;;
+  xno) ;;
+  *)   as_fn_error $? "libgcrypt ${notice_platform}development files not found, GCRYPT won't be supported.
+This is an error since --with-gcrypt was requested." "$LINENO" 5 ;;
+esac
+
+fi
 
 
 EXTRACFLAGS=""
@@ -17883,6 +18142,8 @@ for ac_func in \
 	pwrite \
 	readdir \
 	readlink \
+	renameat \
+	renameat2 \
 	sched_yield \
 	select \
 	setproctitle \
@@ -20101,7 +20362,6 @@ X_CFLAGS = $X_CFLAGS
 X_PRE_LIBS = $X_PRE_LIBS
 X_LIBS = $X_LIBS
 X_EXTRA_LIBS = $X_EXTRA_LIBS
-PCAP_LIBS = $PCAP_LIBS
 XML2_CFLAGS = $XML2_CFLAGS
 XML2_LIBS = $XML2_LIBS
 XSLT_CFLAGS = $XSLT_CFLAGS
@@ -20169,6 +20429,8 @@ VKD3D_CFLAGS = $VKD3D_CFLAGS
 VKD3D_LIBS = $VKD3D_LIBS
 VKD3D_SHADER_CFLAGS = $VKD3D_SHADER_CFLAGS
 VKD3D_SHADER_LIBS = $VKD3D_SHADER_LIBS
+GCRYPT_CFLAGS = $GCRYPT_CFLAGS
+GCRYPT_LIBS = $GCRYPT_LIBS
 POLL_LIBS = $POLL_LIBS
 RT_LIBS = $RT_LIBS
 LDAP_CFLAGS = $LDAP_CFLAGS
@@ -20211,6 +20473,7 @@ wine_fn_config_makefile dlls/advapi32 enable_advapi32
 wine_fn_config_makefile dlls/advapi32/tests enable_tests
 wine_fn_config_makefile dlls/advpack enable_advpack
 wine_fn_config_makefile dlls/advpack/tests enable_tests
+wine_fn_config_makefile dlls/amd_ags_x64 enable_amd_ags_x64
 wine_fn_config_makefile dlls/amsi enable_amsi
 wine_fn_config_makefile dlls/amstream enable_amstream
 wine_fn_config_makefile dlls/amstream/tests enable_tests
@@ -20657,6 +20920,8 @@ wine_fn_config_makefile dlls/dxerr8 enable_dxerr8
 wine_fn_config_makefile dlls/dxerr9 enable_dxerr9
 wine_fn_config_makefile dlls/dxgi enable_dxgi
 wine_fn_config_makefile dlls/dxgi/tests enable_tests
+wine_fn_config_makefile dlls/dxgkrnl.sys enable_dxgkrnl_sys
+wine_fn_config_makefile dlls/dxgmms1.sys enable_dxgmms1_sys
 wine_fn_config_makefile dlls/dxguid enable_dxguid
 wine_fn_config_makefile dlls/dxva2 enable_dxva2
 wine_fn_config_makefile dlls/dxva2/tests enable_tests
@@ -20665,6 +20930,7 @@ wine_fn_config_makefile dlls/evr enable_evr
 wine_fn_config_makefile dlls/evr/tests enable_tests
 wine_fn_config_makefile dlls/explorerframe enable_explorerframe
 wine_fn_config_makefile dlls/explorerframe/tests enable_tests
+wine_fn_config_makefile dlls/ext-ms-win-appmodel-usercontext-l1-1-0 enable_ext_ms_win_appmodel_usercontext_l1_1_0
 wine_fn_config_makefile dlls/ext-ms-win-authz-context-l1-1-0 enable_ext_ms_win_authz_context_l1_1_0
 wine_fn_config_makefile dlls/ext-ms-win-domainjoin-netjoin-l1-1-0 enable_ext_ms_win_domainjoin_netjoin_l1_1_0
 wine_fn_config_makefile dlls/ext-ms-win-dwmapi-ext-l1-1-0 enable_ext_ms_win_dwmapi_ext_l1_1_0
@@ -20717,6 +20983,7 @@ wine_fn_config_makefile dlls/ext-ms-win-shell-comctl32-init-l1-1-0 enable_ext_ms
 wine_fn_config_makefile dlls/ext-ms-win-shell-comdlg32-l1-1-0 enable_ext_ms_win_shell_comdlg32_l1_1_0
 wine_fn_config_makefile dlls/ext-ms-win-shell-shell32-l1-2-0 enable_ext_ms_win_shell_shell32_l1_2_0
 wine_fn_config_makefile dlls/ext-ms-win-uxtheme-themes-l1-1-0 enable_ext_ms_win_uxtheme_themes_l1_1_0
+wine_fn_config_makefile dlls/ext-ms-win-xaml-pal-l1-1-0 enable_ext_ms_win_xaml_pal_l1_1_0
 wine_fn_config_makefile dlls/faultrep enable_faultrep
 wine_fn_config_makefile dlls/faultrep/tests enable_tests
 wine_fn_config_makefile dlls/feclient enable_feclient
@@ -20754,6 +21021,7 @@ wine_fn_config_makefile dlls/icmp enable_icmp
 wine_fn_config_makefile dlls/ieframe enable_ieframe
 wine_fn_config_makefile dlls/ieframe/tests enable_tests
 wine_fn_config_makefile dlls/ieproxy enable_ieproxy
+wine_fn_config_makefile dlls/iertutil enable_iertutil
 wine_fn_config_makefile dlls/ifsmgr.vxd enable_win16
 wine_fn_config_makefile dlls/imaadp32.acm enable_imaadp32_acm
 wine_fn_config_makefile dlls/imagehlp enable_imagehlp
@@ -20954,6 +21222,7 @@ wine_fn_config_makefile dlls/netcfgx/tests enable_tests
 wine_fn_config_makefile dlls/netio.sys enable_netio_sys
 wine_fn_config_makefile dlls/netprofm enable_netprofm
 wine_fn_config_makefile dlls/netprofm/tests enable_tests
+wine_fn_config_makefile dlls/netutils enable_netutils
 wine_fn_config_makefile dlls/newdev enable_newdev
 wine_fn_config_makefile dlls/ninput enable_ninput
 wine_fn_config_makefile dlls/ninput/tests enable_tests
@@ -20968,6 +21237,14 @@ wine_fn_config_makefile dlls/ntoskrnl.exe enable_ntoskrnl_exe
 wine_fn_config_makefile dlls/ntoskrnl.exe/tests enable_tests
 wine_fn_config_makefile dlls/ntprint enable_ntprint
 wine_fn_config_makefile dlls/ntprint/tests enable_tests
+wine_fn_config_makefile dlls/nvapi enable_win32
+wine_fn_config_makefile dlls/nvapi/tests enable_tests
+wine_fn_config_makefile dlls/nvapi64 enable_win64
+wine_fn_config_makefile dlls/nvcuda enable_nvcuda
+wine_fn_config_makefile dlls/nvcuda/tests enable_tests
+wine_fn_config_makefile dlls/nvcuvid enable_nvcuvid
+wine_fn_config_makefile dlls/nvencodeapi enable_win32
+wine_fn_config_makefile dlls/nvencodeapi64 enable_win64
 wine_fn_config_makefile dlls/objsel enable_objsel
 wine_fn_config_makefile dlls/odbc32 enable_odbc32
 wine_fn_config_makefile dlls/odbcbcp enable_odbcbcp
@@ -21103,6 +21380,7 @@ wine_fn_config_makefile dlls/sound.drv16 enable_win16
 wine_fn_config_makefile dlls/spoolss enable_spoolss
 wine_fn_config_makefile dlls/spoolss/tests enable_tests
 wine_fn_config_makefile dlls/srclient enable_srclient
+wine_fn_config_makefile dlls/srvcli enable_srvcli
 wine_fn_config_makefile dlls/sspicli enable_sspicli
 wine_fn_config_makefile dlls/stdole2.tlb enable_stdole2_tlb
 wine_fn_config_makefile dlls/stdole32.tlb enable_stdole32_tlb
@@ -21200,10 +21478,15 @@ wine_fn_config_makefile dlls/wevtsvc enable_wevtsvc
 wine_fn_config_makefile dlls/wiaservc enable_wiaservc
 wine_fn_config_makefile dlls/wiaservc/tests enable_tests
 wine_fn_config_makefile dlls/wimgapi enable_wimgapi
+wine_fn_config_makefile dlls/win32k.sys enable_win32k_sys
 wine_fn_config_makefile dlls/win32s16.dll16 enable_win16
 wine_fn_config_makefile dlls/win87em.dll16 enable_win16
 wine_fn_config_makefile dlls/winaspi.dll16 enable_win16
 wine_fn_config_makefile dlls/windebug.dll16 enable_win16
+wine_fn_config_makefile dlls/windows.gaming.input.dll enable_windows_gaming_input_dll
+wine_fn_config_makefile dlls/windows.globalization.dll enable_windows_globalization_dll
+wine_fn_config_makefile dlls/windows.media.speech.dll enable_windows_media_speech_dll
+wine_fn_config_makefile dlls/windows.networking.connectivity.dll enable_windows_networking_connectivity_dll
 wine_fn_config_makefile dlls/windowscodecs enable_windowscodecs
 wine_fn_config_makefile dlls/windowscodecs/tests enable_tests
 wine_fn_config_makefile dlls/windowscodecsext enable_windowscodecsext
@@ -21290,6 +21573,17 @@ wine_fn_config_makefile dlls/x3daudio1_4 enable_x3daudio1_4
 wine_fn_config_makefile dlls/x3daudio1_5 enable_x3daudio1_5
 wine_fn_config_makefile dlls/x3daudio1_6 enable_x3daudio1_6
 wine_fn_config_makefile dlls/x3daudio1_7 enable_x3daudio1_7
+wine_fn_config_makefile dlls/xactengine2_0 enable_xactengine2_0
+wine_fn_config_makefile dlls/xactengine2_1 enable_xactengine2_1
+wine_fn_config_makefile dlls/xactengine2_10 enable_xactengine2_10
+wine_fn_config_makefile dlls/xactengine2_2 enable_xactengine2_2
+wine_fn_config_makefile dlls/xactengine2_3 enable_xactengine2_3
+wine_fn_config_makefile dlls/xactengine2_4 enable_xactengine2_4
+wine_fn_config_makefile dlls/xactengine2_5 enable_xactengine2_5
+wine_fn_config_makefile dlls/xactengine2_6 enable_xactengine2_6
+wine_fn_config_makefile dlls/xactengine2_7 enable_xactengine2_7
+wine_fn_config_makefile dlls/xactengine2_8 enable_xactengine2_8
+wine_fn_config_makefile dlls/xactengine2_9 enable_xactengine2_9
 wine_fn_config_makefile dlls/xactengine3_0 enable_xactengine3_0
 wine_fn_config_makefile dlls/xactengine3_1 enable_xactengine3_1
 wine_fn_config_makefile dlls/xactengine3_2 enable_xactengine3_2

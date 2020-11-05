@@ -978,6 +978,7 @@ void update_user_time( Time time )
 void update_net_wm_states( struct x11drv_win_data *data )
 {
     DWORD i, style, ex_style, new_state = 0;
+    unsigned long net_wm_bypass_compositor = 0;
 
     if (!data->managed) return;
     if (data->whole_window == root_window) return;
@@ -990,7 +991,10 @@ void update_net_wm_states( struct x11drv_win_data *data )
         if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION)
             new_state |= (1 << NET_WM_STATE_MAXIMIZED);
         else if (!(style & WS_MINIMIZE))
+	{
+            net_wm_bypass_compositor = 1;
             new_state |= (1 << NET_WM_STATE_FULLSCREEN);
+	}
     }
     else if (style & WS_MAXIMIZE)
         new_state |= (1 << NET_WM_STATE_MAXIMIZED);
@@ -1049,6 +1053,10 @@ void update_net_wm_states( struct x11drv_win_data *data )
         }
     }
     data->net_wm_state = new_state;
+
+    XChangeProperty( data->display, data->whole_window, x11drv_atom(_NET_WM_BYPASS_COMPOSITOR), XA_CARDINAL,
+                     32, PropModeReplace, (unsigned char *)&net_wm_bypass_compositor, 1 );
+
 }
 
 /***********************************************************************
@@ -2222,54 +2230,6 @@ BOOL CDECL X11DRV_ScrollDC( HDC hdc, INT dx, INT dy, HRGN update )
     return ret;
 }
 
-
-/***********************************************************************
- *		SetActiveWindow  (X11DRV.@)
- */
-void CDECL X11DRV_SetActiveWindow( HWND hwnd )
-{
-    struct x11drv_thread_data *thread_data = x11drv_init_thread_data();
-    struct x11drv_win_data *data;
-
-    TRACE("%p\n", hwnd);
-
-    if (thread_data->active_window == hwnd)
-    {
-        TRACE("ignoring activation for already active window %p\n", hwnd);
-        return;
-    }
-
-    if (!(data = get_win_data( hwnd ))) return;
-
-    if (data->mapped && data->managed)
-    {
-        XEvent xev;
-        struct x11drv_win_data *active = get_win_data( thread_data->active_window );
-        DWORD timestamp = GetMessageTime() - EVENT_x11_time_to_win32_time( 0 );
-
-        TRACE("setting _NET_ACTIVE_WINDOW to %p/%lx, current active %p/%lx\n",
-            data->hwnd, data->whole_window, active ? active->hwnd : NULL, active ? active->whole_window : 0 );
-
-        xev.xclient.type = ClientMessage;
-        xev.xclient.window = data->whole_window;
-        xev.xclient.message_type = x11drv_atom(_NET_ACTIVE_WINDOW);
-        xev.xclient.serial = 0;
-        xev.xclient.display = data->display;
-        xev.xclient.send_event = True;
-        xev.xclient.format = 32;
-
-        xev.xclient.data.l[0] = 1; /* source: application */
-        xev.xclient.data.l[1] = timestamp;
-        xev.xclient.data.l[2] = active ? active->whole_window : 0;
-        xev.xclient.data.l[3] = 0;
-        xev.xclient.data.l[4] = 0;
-        XSendEvent( data->display, root_window, False, SubstructureRedirectMask | SubstructureNotifyMask, &xev );
-
-        if (active) release_win_data( active );
-    }
-
-    release_win_data( data );
-}
 
 /***********************************************************************
  *		SetCapture  (X11DRV.@)
