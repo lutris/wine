@@ -1,0 +1,45 @@
+# Last wine-tkg-staging-fsync-git configuration - Вт 10 ноя 2020 19:02:03 MSK :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 5.21.r0.g70d77a439ab
+Using wine-staging patchset (version 5.21.r0.ge2d9f97b)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
+
+Done applying reverting hotfixes (if any) - list available in prepare.log
+
+use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
+FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
+childwindow.patch -- ( Applied child window for vk patch )
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: -W dinput-remap-joystick -W dinput-reconnect-joystick -W dinput-axis-recalc
+
+fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
+
+proton-rawinput-nofshack.patch -- ( Using rawinput nofshack patchset )
+LAA-unix-staging.patch -- ( Applied large address aware override support )
+
+proton-winevulkan-nofshack.patch -- ( Using Proton winevulkan patches (nofshack) )
+msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
+josh-flat-theme.patch -- ( Add Josh's better-theme )
+proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
+
+Applied reverting hotfix xact-revert-179.myrevert
+Applied your own patch alt-tab-focus-fixes.mypatch
+Applied your own patch amstream.mypatch
+Applied your own patch blackops2_unhandled_exception_fix.mypatch
+Applied your own patch faudio-ffmpeg.mypatch
+Applied your own patch ldlibrary_chromium_fix.mypatch
+Applied your own patch legoisland_168726.mypatch
+Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
+Applied your own patch proton-amd_ags.mypatch
+Applied your own patch proton-tkg-staging.mypatch
+Applied your own patch rockstar_installer_fix_heap.mypatch
+Applied your own patch rockstarlauncher_downloads.mypatch
+Applied your own patch unity-alt-tab-fix.mypatch
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

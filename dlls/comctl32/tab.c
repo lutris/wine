@@ -130,7 +130,6 @@ typedef struct
  * Positioning constants
  */
 #define SELECTED_TAB_OFFSET     2
-#define ROUND_CORNER_SIZE       2
 #define DISPLAY_AREA_PADDINGX   2
 #define DISPLAY_AREA_PADDINGY   2
 #define CONTROL_BORDER_SIZEX    2
@@ -2118,21 +2117,17 @@ static void TAB_DrawItem(const TAB_INFO *infoPtr, HDC  hdc, INT  iItem)
 
 	  /* Now erase the top corner and draw diagonal edge */
 	  SetBkColor(hdc, corner);
-	  r1.left = r.right - ROUND_CORNER_SIZE - 1;
+	  r1.left = r.right;
 	  r1.top = r.top;
 	  r1.right = r.right;
-	  r1.bottom = r1.top + ROUND_CORNER_SIZE;
-	  ExtTextOutW(hdc, 0, 0, 2, &r1, NULL, 0, 0);
-	  r1.right--;
+	  r1.bottom = r1.top;
 	  DrawEdge(hdc, &r1, EDGE_RAISED, BF_SOFT|BF_DIAGONAL_ENDTOPLEFT);
 
 	  /* Now erase the bottom corner and draw diagonal edge */
-	  r1.left = r.right - ROUND_CORNER_SIZE - 1;
+	  r1.left = r.right;
 	  r1.bottom = r.bottom;
 	  r1.right = r.right;
-	  r1.top = r1.bottom - ROUND_CORNER_SIZE;
-	  ExtTextOutW(hdc, 0, 0, 2, &r1, NULL, 0, 0);
-	  r1.right--;
+	  r1.top = r1.bottom;
 	  DrawEdge(hdc, &r1, EDGE_RAISED, BF_SOFT|BF_DIAGONAL_ENDBOTTOMLEFT);
 
 	  if ((iItem == infoPtr->iSelected) && (selectedRect.top == 0)) {
@@ -2159,19 +2154,15 @@ static void TAB_DrawItem(const TAB_INFO *infoPtr, HDC  hdc, INT  iItem)
 	  SetBkColor(hdc, corner);
 	  r1.left = r.left;
 	  r1.top = r.top;
-	  r1.right = r1.left + ROUND_CORNER_SIZE + 1;
-	  r1.bottom = r1.top + ROUND_CORNER_SIZE;
-	  ExtTextOutW(hdc, 0, 0, 2, &r1, NULL, 0, 0);
-	  r1.left++;
+	  r1.right = r1.left;
+	  r1.bottom = r1.top;
 	  DrawEdge(hdc, &r1, EDGE_RAISED, BF_SOFT|BF_DIAGONAL_ENDTOPRIGHT);
 
 	  /* Now erase the bottom corner and draw diagonal edge */
 	  r1.left = r.left;
 	  r1.bottom = r.bottom;
-	  r1.right = r1.left + ROUND_CORNER_SIZE + 1;
-	  r1.top = r1.bottom - ROUND_CORNER_SIZE;
-	  ExtTextOutW(hdc, 0, 0, 2, &r1, NULL, 0, 0);
-	  r1.left++;
+	  r1.right = r1.left;
+	  r1.top = r1.bottom;
 	  DrawEdge(hdc, &r1, EDGE_SUNKEN, BF_DIAGONAL_ENDTOPLEFT);
         }
       }
@@ -2209,21 +2200,17 @@ static void TAB_DrawItem(const TAB_INFO *infoPtr, HDC  hdc, INT  iItem)
 
 	  /* Now erase the righthand corner and draw diagonal edge */
 	  SetBkColor(hdc, corner);
-	  r1.left = r.right - ROUND_CORNER_SIZE;
+	  r1.left = r.right;
 	  r1.bottom = r.bottom;
 	  r1.right = r.right;
-	  r1.top = r1.bottom - ROUND_CORNER_SIZE - 1;
-	  ExtTextOutW(hdc, 0, 0, 2, &r1, NULL, 0, 0);
-	  r1.bottom--;
+	  r1.top = r1.bottom;
 	  DrawEdge(hdc, &r1, EDGE_RAISED, BF_SOFT|BF_DIAGONAL_ENDBOTTOMLEFT);
 
 	  /* Now erase the lefthand corner and draw diagonal edge */
 	  r1.left = r.left;
 	  r1.bottom = r.bottom;
-	  r1.right = r1.left + ROUND_CORNER_SIZE;
-	  r1.top = r1.bottom - ROUND_CORNER_SIZE - 1;
-	  ExtTextOutW(hdc, 0, 0, 2, &r1, NULL, 0, 0);
-	  r1.bottom--;
+	  r1.right = r1.left;
+	  r1.top = r1.bottom;
 	  DrawEdge(hdc, &r1, EDGE_RAISED, BF_SOFT|BF_DIAGONAL_ENDTOPLEFT);
 
 	  if (iItem == infoPtr->iSelected)
@@ -2261,21 +2248,17 @@ static void TAB_DrawItem(const TAB_INFO *infoPtr, HDC  hdc, INT  iItem)
 
 	  /* Now erase the righthand corner and draw diagonal edge */
 	  SetBkColor(hdc, corner);
-	  r1.left = r.right - ROUND_CORNER_SIZE;
+	  r1.left = r.right;
 	  r1.top = r.top;
 	  r1.right = r.right;
-	  r1.bottom = r1.top + ROUND_CORNER_SIZE + 1;
-	  ExtTextOutW(hdc, 0, 0, 2, &r1, NULL, 0, 0);
-	  r1.top++;
+	  r1.bottom = r1.top;
 	  DrawEdge(hdc, &r1, EDGE_RAISED, BF_SOFT|BF_DIAGONAL_ENDBOTTOMRIGHT);
 
 	  /* Now erase the lefthand corner and draw diagonal edge */
 	  r1.left = r.left;
 	  r1.top = r.top;
-	  r1.right = r1.left + ROUND_CORNER_SIZE;
-	  r1.bottom = r1.top + ROUND_CORNER_SIZE + 1;
-	  ExtTextOutW(hdc, 0, 0, 2, &r1, NULL, 0, 0);
-	  r1.top++;
+	  r1.right = r1.left;
+	  r1.bottom = r1.top;
 	  DrawEdge(hdc, &r1, EDGE_RAISED, BF_SOFT|BF_DIAGONAL_ENDTOPRIGHT);
         }
       }

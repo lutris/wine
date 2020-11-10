@@ -116,6 +116,7 @@ static const struct object_ops file_ops =
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
     NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     file_get_fd,                  /* get_fd */
@@ -176,6 +177,7 @@ struct file *create_file_for_fd( int fd, unsigned int access, unsigned int shari
         release_object( file );
         return NULL;
     }
+    set_unix_name_of_fd( file->fd, &st );
     allow_fd_caching( file->fd );
     return file;
 }

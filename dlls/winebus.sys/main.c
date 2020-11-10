@@ -94,6 +94,18 @@ static const struct product_desc XBOX_CONTROLLERS[] = {
     {VID_MICROSOFT, 0x0719, NULL, xbox360_product_string, NULL}, /* Xbox 360 Wireless Adapter */
 };
 
+#define VID_VALVE 0x28de
+
+static const struct product_desc STEAM_CONTROLLERS[] = {
+    {VID_VALVE, 0x1101, NULL, NULL, NULL}, /* Valve Legacy Steam Controller */
+    {VID_VALVE, 0x1102, NULL, NULL, NULL}, /* Valve wired Steam Controller */
+    {VID_VALVE, 0x1105, NULL, NULL, NULL}, /* Valve Bluetooth Steam Controller */
+    {VID_VALVE, 0x1106, NULL, NULL, NULL}, /* Valve Bluetooth Steam Controller */
+    {VID_VALVE, 0x1142, NULL, NULL, NULL}, /* Valve wireless Steam Controller */
+    {VID_VALVE, 0x1201, NULL, NULL, NULL}, /* Valve wired Steam Controller */
+    {VID_VALVE, 0x1202, NULL, NULL, NULL}, /* Valve Bluetooth Steam Controller */
+};
+
 static DRIVER_OBJECT *driver_obj;
 
 static DEVICE_OBJECT *mouse_obj;
@@ -116,7 +128,7 @@ struct device_extension
 
     WORD vid, pid, input;
     DWORD uid, version, index;
-    BOOL is_gamepad;
+    BOOL is_gamepad, xinput_hack;
     WCHAR *serial;
     const WCHAR *busid;  /* Expected to be a static constant */
 
@@ -233,7 +245,7 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device)
 
 DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
                                      WORD input, DWORD version, DWORD uid, const WCHAR *serialW, BOOL is_gamepad,
-                                     const platform_vtbl *vtbl, DWORD platform_data_size)
+                                     const platform_vtbl *vtbl, DWORD platform_data_size, BOOL xinput_hack)
 {
     static const WCHAR device_name_fmtW[] = {'\\','D','e','v','i','c','e','\\','%','s','#','%','p',0};
     struct device_extension *ext;
@@ -274,6 +286,7 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     ext->version            = version;
     ext->index              = get_device_index(vid, pid, input);
     ext->is_gamepad         = is_gamepad;
+    ext->xinput_hack = xinput_hack;
     ext->serial             = strdupW(serialW);
     ext->busid              = busidW;
     ext->vtbl               = vtbl;
@@ -537,7 +550,7 @@ static void mouse_device_create(void)
 {
     static const WCHAR busidW[] = {'W','I','N','E','M','O','U','S','E',0};
 
-    mouse_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &mouse_vtbl, 0);
+    mouse_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &mouse_vtbl, 0, FALSE);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
@@ -556,6 +569,9 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
     case IRP_MN_START_DEVICE:
         mouse_device_create();
 
+        udev_driver_init();
+        iohid_driver_init();
+
         if (check_bus_option(&SDL_enabled, 1))
         {
             if (sdl_driver_init() == STATUS_SUCCESS)
@@ -564,8 +580,6 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
                 break;
             }
         }
-        udev_driver_init();
-        iohid_driver_init();
         irp->IoStatus.u.Status = STATUS_SUCCESS;
         break;
     case IRP_MN_SURPRISE_REMOVAL:
@@ -718,6 +732,7 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
             attr->VendorID = ext->vid;
             attr->ProductID = ext->pid;
             attr->VersionNumber = ext->version;
+            attr->Reserved[0] = ext->xinput_hack;
 
             irp->IoStatus.u.Status = status = STATUS_SUCCESS;
             irp->IoStatus.Information = sizeof(*attr);
@@ -962,6 +977,18 @@ static NTSTATUS WINAPI driver_add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *p
     bus_fdo->Flags &= ~DO_DEVICE_INITIALIZING;
 
     return STATUS_SUCCESS;
+}
+
+BOOL is_steam_controller(WORD vid, WORD pid)
+{
+    if (vid == VID_VALVE)
+    {
+        int i;
+        for (i = 0; i < ARRAY_SIZE(STEAM_CONTROLLERS); i++)
+            if (pid == STEAM_CONTROLLERS[i].pid) return TRUE;
+    }
+
+    return FALSE;
 }
 
 static void WINAPI driver_unload(DRIVER_OBJECT *driver)
