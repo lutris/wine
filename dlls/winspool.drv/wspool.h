@@ -33,5 +33,7 @@ extern void WINSPOOL_LoadSystemPrinters(void) DECLSPEC_HIDDEN;
 #define IDS_FILE_EXISTS   11
 #define IDS_CANNOT_OPEN   12
 
+#define IDR_SRGB_ICM       2
+
 #define FILENAME_DIALOG  100
 #define EDITBOX 201

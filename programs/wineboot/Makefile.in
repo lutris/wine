@@ -1,7 +1,7 @@
 MODULE    = wineboot.exe
 APPMODE   = -mconsole
 IMPORTS   = uuid advapi32 ws2_32
-DELAYIMPORTS = shell32 shlwapi version user32 setupapi newdev
+DELAYIMPORTS = shell32 shlwapi version user32 setupapi newdev wininet
 
 EXTRADLLFLAGS = -mno-cygwin
 

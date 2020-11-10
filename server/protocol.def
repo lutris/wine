@@ -317,6 +317,13 @@ struct hardware_msg_data
             int            y;       /* y coordinate */
             unsigned int   data;    /* mouse data */
         } mouse;
+        struct
+        {
+            int            type;    /* RIM_TYPEHID */
+            obj_handle_t   device;
+            unsigned int   length;  /* HID report length */
+            /* followed by length bytes of HID report data  */
+        } hid;
     } rawinput;
 };
 
@@ -340,7 +347,7 @@ typedef union
     int type;
     struct
     {
-        int            type;    /* INPUT_KEYBOARD */
+        int            type;    /* HW_INPUT_KEYBOARD */
         unsigned short vkey;    /* virtual key code */
         unsigned short scan;    /* scan code */
         unsigned int   flags;   /* event flags */
@@ -349,7 +356,7 @@ typedef union
     } kbd;
     struct
     {
-        int            type;    /* INPUT_MOUSE */
+        int            type;    /* HW_INPUT_MOUSE */
         int            x;       /* coordinates */
         int            y;
         unsigned int   data;    /* mouse data */
@@ -359,11 +366,23 @@ typedef union
     } mouse;
     struct
     {
-        int            type;    /* INPUT_HARDWARE */
+        int            type;    /* HW_INPUT_HARDWARE */
         unsigned int   msg;     /* message code */
         lparam_t       lparam;  /* message param */
     } hw;
+    struct
+    {
+        int            type;    /* HW_INPUT_HID */
+        obj_handle_t   device;
+        unsigned char  usage_page;
+        unsigned char  usage;
+        unsigned int   length;
+    } hid;
 } hw_input_t;
+#define HW_INPUT_MOUSE    0
+#define HW_INPUT_KEYBOARD 1
+#define HW_INPUT_HARDWARE 2
+#define HW_INPUT_HID      3
 
 typedef union
 {
@@ -1314,6 +1333,7 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Get the Unix name from a file handle */
 @REQ(get_handle_unix_name)
     obj_handle_t   handle;      /* file handle */
+    int            nofollow;    /* do not follow symlinks (return the link) */
 @REPLY
     data_size_t    name_len;    /* unix name length */
     VARARG(name,string);        /* unix name */
@@ -1427,6 +1447,7 @@ enum server_fd_type
     int family;                 /* family, see socket manpage */
     int type;                   /* type, see socket manpage */
     int protocol;               /* protocol, see socket manpage */
+    timeout_t connect_time;     /* time the socket was connected (relative) */
 @END
 
 
@@ -2004,6 +2025,7 @@ enum message_type
     user_handle_t   win;       /* window handle */
     hw_input_t      input;     /* input data */
     unsigned int    flags;     /* flags (see below) */
+    VARARG(data,bytes);        /* hid report data */
 @REPLY
     int             wait;      /* do we need to wait for a reply? */
     int             prev_x;    /* previous cursor position */
@@ -2013,6 +2035,8 @@ enum message_type
     VARARG(keystate,bytes);    /* global state array for all the keys */
 @END
 #define SEND_HWMSG_INJECTED    0x01
+#define SEND_HWMSG_RAWINPUT    0x02
+#define SEND_HWMSG_WINDOW      0x04
 
 
 /* Get a message from the current queue */
@@ -2460,6 +2484,13 @@ enum coords_relative
 @REQ(set_window_region)
     user_handle_t  window;        /* handle to the window */
     int            redraw;        /* redraw the window? */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
+@END
+
+
+/* Set the layer region */
+@REQ(set_layer_region)
+    user_handle_t  window;        /* handle to the window */
     VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
 @END
 
@@ -3180,6 +3211,7 @@ struct handle_info
     process_id_t owner;
     obj_handle_t handle;
     unsigned int access;
+    unsigned int type;
 };
 
 /* Return a list of all opened handles */
@@ -3289,6 +3321,16 @@ struct handle_info
 /* Query object type name information */
 @REQ(get_object_type)
     obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    unsigned int   index;         /* type index */
+    data_size_t    total;         /* needed size for type name */
+    VARARG(type,unicode_str);     /* type name */
+@END
+
+
+/* Query object type name information */
+@REQ(get_object_type_by_index)
+    unsigned int   index;         /* index of the type */
 @REPLY
     data_size_t    total;         /* needed size for type name */
     VARARG(type,unicode_str);     /* type name */
@@ -3503,6 +3545,13 @@ struct handle_info
 @END
 
 
+/* set fd eof information */
+@REQ(set_fd_eof_info)
+    obj_handle_t handle;        /* handle to a file or directory */
+    file_pos_t   eof;           /* offset of eof of file */
+@END
+
+
 /* Retrieve layered info for a window */
 @REQ(get_window_layered_info)
     user_handle_t  handle;        /* handle to the window */
@@ -3663,4 +3712,57 @@ struct handle_info
 /* Resume a process */
 @REQ(resume_process)
     obj_handle_t handle;       /* process handle */
+@END
+
+enum esync_type
+{
+    ESYNC_SEMAPHORE = 1,
+    ESYNC_AUTO_EVENT,
+    ESYNC_MANUAL_EVENT,
+    ESYNC_MUTEX,
+    ESYNC_AUTO_SERVER,
+    ESYNC_MANUAL_SERVER,
+    ESYNC_QUEUE,
+};
+
+/* Create a new eventfd-based synchronization object */
+@REQ(create_esync)
+    unsigned int access;        /* wanted access rights */
+    int          initval;       /* initial value */
+    int          type;          /* type of esync object */
+    int          max;           /* maximum count on a semaphore */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the object */
+    int          type;          /* actual type (may be different for events) */
+    unsigned int shm_idx;
+@END
+
+@REQ(open_esync)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    int          type;          /* type of esync object (above) */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+    int          type;          /* type of esync object (above) */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Retrieve the esync fd for an object. */
+@REQ(get_esync_fd)
+    obj_handle_t handle;        /* handle to the object */
+@REPLY
+    int          type;
+    unsigned int shm_idx;
+@END
+
+/* Notify the server that we are doing a message wait or done with one. */
+@REQ(esync_msgwait)
+    int          in_msgwait;    /* are we in a message wait? */
+@END
+
+/* Retrieve the fd to wait on for user APCs. */
+@REQ(get_esync_apc_fd)
 @END

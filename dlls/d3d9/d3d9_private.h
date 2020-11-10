@@ -40,6 +40,7 @@
 #include "wine/wined3d.h"
 
 #define D3D9_MAX_VERTEX_SHADER_CONSTANTF 256
+#define D3D9_MAX_VERTEX_SHADER_CONSTANTF_SWVP 8192
 #define D3D9_MAX_TEXTURE_UNITS 20
 #define D3D9_MAX_STREAMS 16
 
@@ -71,7 +72,7 @@ struct d3d9
 };
 
 void d3d9_caps_from_wined3dcaps(const struct d3d9 *d3d9, unsigned int adapter_ordinal,
-        D3DCAPS9 *caps, const struct wined3d_caps *wined3d_caps) DECLSPEC_HIDDEN;
+        D3DCAPS9 *caps, const struct wined3d_caps *wined3d_caps, DWORD flags) DECLSPEC_HIDDEN;
 BOOL d3d9_init(struct d3d9 *d3d9, BOOL extended) DECLSPEC_HIDDEN;
 
 struct fvf_declaration
