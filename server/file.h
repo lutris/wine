@@ -22,6 +22,7 @@
 #define __WINE_SERVER_FILE_H
 
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #include "object.h"
 
@@ -82,6 +83,7 @@ extern struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t 
                            unsigned int access, unsigned int sharing, unsigned int options );
 extern struct fd *create_anonymous_fd( const struct fd_ops *fd_user_ops,
                                        int unix_fd, struct object *user, unsigned int options );
+extern void set_unix_name_of_fd( struct fd *fd, const struct stat *fd_st );
 extern struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sharing,
                                  unsigned int options );
 extern struct fd *get_fd_object_for_mapping( struct fd *fd, unsigned int access, unsigned int sharing );
@@ -103,6 +105,7 @@ extern char *dup_fd_name( struct fd *root, const char *name );
 
 extern int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry );
 extern int default_fd_get_esync_fd( struct object *obj, enum esync_type *type );
+extern unsigned int default_fd_get_fsync_idx( struct object *obj, enum fsync_type *type );
 extern unsigned int default_fd_map_access( struct object *obj, unsigned int access );
 extern int default_fd_get_poll_events( struct fd *fd );
 extern void default_poll_event( struct fd *fd, int event );
