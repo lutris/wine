@@ -60,6 +60,7 @@ static const struct object_ops symlink_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -88,8 +89,7 @@ static void symlink_dump( struct object *obj, int verbose )
 
 static struct object_type *symlink_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'S','y','m','b','o','l','i','c','L','i','n','k'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_SymbolicLink, sizeof(type_SymbolicLink) };
     return get_object_type( &str );
 }
 

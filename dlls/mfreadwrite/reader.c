@@ -1046,7 +1046,29 @@ static HRESULT source_reader_get_stream_read_index(struct source_reader *reader,
             {
                 /* Cycle through all selected streams once, next pick first selected. */
                 if (FAILED(hr = source_reader_get_first_selected_stream(reader, STREAM_FLAG_REQUESTED_ONCE, stream_index)))
-                    hr = source_reader_get_first_selected_stream(reader, 0, stream_index);
+                {
+                    //hr = source_reader_get_first_selected_stream(reader, 0, stream_index);
+                    static int last_selection = -1;
+                    int i;
+                    BOOL selected;
+
+                    for (i = 0; i < (int) reader->stream_count; ++i)
+                    {
+                        source_reader_get_stream_selection(reader, i, &selected);
+                        if (selected && i > last_selection)
+                        {
+                            last_selection = i;
+                            *stream_index = i;
+                            hr = S_OK;
+                            break;
+                        }
+                    }
+                    if (i == reader->stream_count)
+                    {
+                        hr = source_reader_get_first_selected_stream(reader, 0, stream_index);
+                        last_selection = hr == S_OK ? *stream_index : -1;
+                    }
+                }
             }
             return hr;
         default:
@@ -1597,6 +1619,7 @@ static HRESULT source_reader_create_decoder_for_stream(struct source_reader *rea
 {
     MFT_REGISTER_TYPE_INFO in_type, out_type;
     CLSID *clsids, mft_clsid, category;
+    BOOL decoder_found = FALSE;
     unsigned int i = 0, count;
     IMFMediaType *input_type;
     HRESULT hr;
@@ -1643,12 +1666,21 @@ static HRESULT source_reader_create_decoder_for_stream(struct source_reader *rea
                 }
 
             }
+            else if (!decoder_found)
+            {
+                /* see if there are other decoders for this stream */
+                if (SUCCEEDED(MFTEnum(category, 0, &in_type, NULL, NULL, &clsids, &count)) && count)
+                {
+                    decoder_found = TRUE;
+                    CoTaskMemFree(clsids);
+                }
+            }
         }
 
         IMFMediaType_Release(input_type);
     }
 
-    return MF_E_TOPO_CODEC_NOT_FOUND;
+    return decoder_found ? MF_E_INVALIDREQUEST : MF_E_TOPO_CODEC_NOT_FOUND;
 }
 
 static HRESULT WINAPI src_reader_SetCurrentMediaType(IMFSourceReader *iface, DWORD index, DWORD *reserved,
@@ -2127,6 +2159,10 @@ static HRESULT create_source_reader_from_source(IMFMediaSource *source, IMFAttri
             break;
 
         object->streams[i].index = i;
+
+        hr = IMFPresentationDescriptor_SelectStream(object->descriptor, i);
+        if (FAILED(hr))
+            break;
     }
 
     if (FAILED(hr))

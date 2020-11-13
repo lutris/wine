@@ -22,6 +22,20 @@
 #ifndef __WIDL_HASH_H
 #define __WIDL_HASH_H
 
+#include "windef.h"
+
 extern unsigned int lhash_val_of_name_sys( syskind_t skind, LCID lcid, LPCSTR lpStr);
+
+typedef struct
+{
+   ULONG Unknown[6];
+   ULONG State[5];
+   ULONG Count[2];
+   UCHAR Buffer[64];
+} SHA_CTX;
+
+VOID A_SHAInit(SHA_CTX *ctx);
+VOID A_SHAUpdate(SHA_CTX *ctx, const UCHAR *buffer, UINT size);
+VOID A_SHAFinal(SHA_CTX *ctx, PULONG result);
 
 #endif

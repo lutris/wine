@@ -68,6 +68,8 @@ struct object_ops
     void (*remove_queue)(struct object *,struct wait_queue_entry *);
     /* is object signaled? */
     int  (*signaled)(struct object *,struct wait_queue_entry *);
+    /* return the esync fd for this object */
+    int (*get_esync_fd)(struct object *, enum esync_type *type);
     /* wait satisfied */
     void (*satisfied)(struct object *,struct wait_queue_entry *);
     /* signal an object */
@@ -162,6 +164,9 @@ extern struct fd *no_get_fd( struct object *obj );
 extern unsigned int no_map_access( struct object *obj, unsigned int access );
 extern struct security_descriptor *default_get_sd( struct object *obj );
 extern int default_set_sd( struct object *obj, const struct security_descriptor *sd, unsigned int set_info );
+extern struct security_descriptor *set_sd_from_token_internal( const struct security_descriptor *sd,
+                                                               const struct security_descriptor *old_sd,
+                                                               unsigned int set_info, struct token *token );
 extern int set_sd_defaults_from_token( struct object *obj, const struct security_descriptor *sd,
                                        unsigned int set_info, struct token *token );
 extern WCHAR *no_get_full_name( struct object *obj, data_size_t *ret_len );
@@ -244,6 +249,31 @@ extern struct object *get_directory_obj( struct process *process, obj_handle_t h
 extern struct object_type *get_object_type( const struct unicode_str *name );
 extern int directory_link_name( struct object *obj, struct object_name *name, struct object *parent );
 extern void init_directories(void);
+
+/* type functions */
+
+static const WCHAR type_Desktop[] =       {'D','e','s','k','t','o','p'};
+static const WCHAR type_Device[] =        {'D','e','v','i','c','e'};
+static const WCHAR type_Directory[] =     {'D','i','r','e','c','t','o','r','y'};
+static const WCHAR type_Event[] =         {'E','v','e','n','t'};
+static const WCHAR type_File[] =          {'F','i','l','e'};
+static const WCHAR type_IoCompletion[] =  {'I','o','C','o','m','p','l','e','t','i','o','n'};
+static const WCHAR type_Job[] =           {'J','o','b'};
+static const WCHAR type_Key[] =           {'K','e','y'};
+static const WCHAR type_KeyedEvent[] =    {'K','e','y','e','d','E','v','e','n','t'};
+static const WCHAR type_Mutant[] =        {'M','u','t','a','n','t'};
+static const WCHAR type_Process[] =       {'P','r','o','c','e','s','s'};
+static const WCHAR type_Section[] =       {'S','e','c','t','i','o','n'};
+static const WCHAR type_Semaphore[] =     {'S','e','m','a','p','h','o','r','e'};
+static const WCHAR type_SymbolicLink[] =  {'S','y','m','b','o','l','i','c','L','i','n','k'};
+static const WCHAR type_Thread[] =        {'T','h','r','e','a','d'};
+static const WCHAR type_Timer[] =         {'T','i','m','e','r'};
+static const WCHAR type_Token[] =         {'T','o','k','e','n'};
+static const WCHAR type_Type[] =          {'T','y','p','e'};
+static const WCHAR type_WindowStation[] = {'W','i','n','d','o','w','S','t','a','t','i','o','n'};
+
+extern void init_types(void);
+extern unsigned int type_get_index( struct object_type *type );
 
 /* symbolic link functions */
 

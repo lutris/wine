@@ -2035,6 +2035,18 @@ static void get_timezone_info( RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi )
     mutex_unlock( &tz_mutex );
 }
 
+static DWORD translate_object_index(DWORD index)
+{
+    WORD version = MAKEWORD(NtCurrentTeb()->Peb->OSMinorVersion, NtCurrentTeb()->Peb->OSMajorVersion);
+
+    /* Process Hacker depends on this logic */
+    if (version >= 0x0602)
+        return index;
+    else if (version == 0x0601)
+        return index + 2;
+    else
+        return index + 1;
+}
 
 /******************************************************************************
  *              NtQuerySystemInformation  (NTDLL.@)
@@ -2426,12 +2438,66 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                     shi->Handle[i].OwnerPid     = handle_info[i].owner;
                     shi->Handle[i].HandleValue  = handle_info[i].handle;
                     shi->Handle[i].AccessMask   = handle_info[i].access;
-                    /* FIXME: Fill out ObjectType, HandleFlags, ObjectPointer */
+                    shi->Handle[i].ObjectType   = translate_object_index( handle_info[i].type );
+                    /* FIXME: Fill out HandleFlags, ObjectPointer */
                 }
             }
             else if (ret == STATUS_BUFFER_TOO_SMALL)
             {
                 len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION, Handle[reply->count] );
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+            }
+        }
+        SERVER_END_REQ;
+
+        free( handle_info );
+        break;
+    }
+
+    case SystemExtendedHandleInformation:
+    {
+        struct handle_info *handle_info;
+        DWORD i, num_handles;
+
+        if (size < sizeof(SYSTEM_HANDLE_INFORMATION_EX))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+
+        if (!info)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+
+        num_handles = size - FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle );
+        num_handles /= sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX);
+        if (!(handle_info = malloc( sizeof(*handle_info) * num_handles )))
+            return STATUS_NO_MEMORY;
+
+        SERVER_START_REQ( get_system_handles )
+        {
+            wine_server_set_reply( req, handle_info, sizeof(*handle_info) * num_handles );
+            if (!(ret = wine_server_call( req )))
+            {
+                SYSTEM_HANDLE_INFORMATION_EX *shi = info;
+                shi->Count = wine_server_reply_size( req ) / sizeof(*handle_info);
+                shi->Reserved = 0;
+                len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle[shi->Count] );
+                for (i = 0; i < shi->Count; i++)
+                {
+                    memset( &shi->Handle[i], 0, sizeof(shi->Handle[i]) );
+                    shi->Handle[i].UniqueProcessId = handle_info[i].owner;
+                    shi->Handle[i].HandleValue     = handle_info[i].handle;
+                    shi->Handle[i].GrantedAccess   = handle_info[i].access;
+                    shi->Handle[i].ObjectTypeIndex = translate_object_index( handle_info[i].type );
+                    /* FIXME: Fill out remaining fields */
+                }
+            }
+            else if (ret == STATUS_BUFFER_TOO_SMALL)
+            {
+                len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle[reply->count] );
                 ret = STATUS_INFO_LENGTH_MISMATCH;
             }
         }
@@ -2653,6 +2719,28 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         ret = STATUS_SUCCESS;
         break;
 
+    case SystemCodeIntegrityInformation:
+    {
+        SYSTEM_CODEINTEGRITY_INFORMATION *scii = info;
+
+        FIXME("SystemCodeIntegrityInformation, size %u, info %p, stub!\n", size, info);
+
+        if (size < sizeof(SYSTEM_CODEINTEGRITY_INFORMATION))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+
+        if (!info)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+
+        scii->CodeIntegrityOptions = CODEINTEGRITY_OPTION_ENABLED;
+        break;
+    }
+
     default:
 	FIXME( "(0x%08x,%p,0x%08x,%p) stub\n", class, info, size, ret_size );
 
@@ -2666,7 +2754,6 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     if (ret_size) *ret_size = len;
     return ret;
 }
-
 
 /******************************************************************************
  *              NtQuerySystemInformationEx  (NTDLL.@)

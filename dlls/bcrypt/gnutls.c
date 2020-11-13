@@ -347,9 +347,12 @@ fail:
 
 static void gnutls_uninitialize(void)
 {
-    pgnutls_global_deinit();
-    dlclose( libgnutls_handle );
-    libgnutls_handle = NULL;
+    if (libgnutls_handle)
+    {
+        pgnutls_global_deinit();
+        dlclose( libgnutls_handle );
+        libgnutls_handle = NULL;
+    }
 }
 
 struct buffer
@@ -1845,22 +1848,32 @@ static const struct key_funcs key_funcs =
     key_export_dsa_capi,
     key_export_ecc,
     key_import_dsa_capi,
-    key_import_ecc
+    key_import_ecc,
+    NULL
 };
 
-NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )
+struct key_funcs * gnutls_lib_init( DWORD reason )
 {
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-        if (!gnutls_initialize()) return STATUS_DLL_NOT_FOUND;
-        *(const struct key_funcs **)ptr_out = &key_funcs;
-        break;
+        if (!gnutls_initialize()) return NULL;
+        return &key_funcs;
     case DLL_PROCESS_DETACH:
         gnutls_uninitialize();
-        break;
     }
-    return STATUS_SUCCESS;
+    return NULL;
 }
 
-#endif /* HAVE_GNUTLS_CIPHER_INIT */
+#else /* HAVE_GNUTLS_CIPHER_INIT */
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
+#include "winternl.h"
+
+struct key_funcs * gnutls_lib_init( DWORD reason )
+{
+    return NULL;
+}
+#endif

@@ -1,0 +1,49 @@
+/*
+ * COM Classes for xactengine
+ *
+ * Copyright 2018 Ethan Lee for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+#pragma makedep register
+
+[
+    threading(both),
+#if XACT3_VER == 0x0200
+    uuid(0aa000aa-f404-11d9-bd7a-0010dc4f8f81)
+#elif XACT3_VER == 0x0201
+    uuid(1f1b577e-5e5a-4e8a-ba73-c657ea8e8598)
+#elif XACT3_VER == 0x0202
+    uuid(c60fae90-4183-4a3f-b2f7-ac1dc49b0e5c)
+#elif XACT3_VER == 0x0203
+    uuid(1138472b-d187-44e9-81f2-ae1b0e7785f1)
+#elif XACT3_VER == 0x0204
+    uuid(bc3e0fc6-2e0d-4c45-bc61-d9c328319bd8)
+#elif XACT3_VER == 0x0205
+    uuid(54b68bc7-3a45-416b-a8c9-19bf19ec1df5)
+#elif XACT3_VER == 0x0206
+    uuid(3a2495ce-31d0-435b-8ccf-e9f0843fd960)
+#elif XACT3_VER == 0x0207
+    uuid(cd0d66ec-8057-43f5-acbd-66dfb36fd78c)
+#elif XACT3_VER == 0x0208
+    uuid(77c56bf4-18a1-42b0-88af-5072ce814949)
+#elif XACT3_VER == 0x0209
+    uuid(343e68e6-8f82-4a8d-a2da-6e9a944b378c)
+#else /* XACT3_VER == 0x0209 or not defined */
+    uuid(65d822a4-4799-42c6-9b18-d26cf66dd320)
+#endif
+]
+coclass XACTEngine {}

@@ -1222,6 +1222,288 @@ static BOOL colortables_check_equality(PALETTEENTRY table1[256], PALETTEENTRY ta
     return TRUE;
 }
 
+static void fill_surface(IDirectDrawSurface *surface, DWORD fillcolor, int level)
+{
+    DDSCAPS caps = {DDSCAPS_COMPLEX};
+    IDirectDrawSurface *surface2;
+    DDSURFACEDESC ddsd;
+    DWORD x, y;
+    HRESULT hr;
+    int curlevel = -1;
+
+    IDirectDrawSurface_AddRef(surface);
+
+    while (surface)
+    {
+        curlevel++;
+
+        if (level == -1 || curlevel == level)
+        {
+            memset(&ddsd, 0, sizeof(ddsd));
+            ddsd.dwSize = sizeof(ddsd);
+
+            hr = IDirectDrawSurface_Lock(surface, NULL, &ddsd, DDLOCK_WAIT, NULL);
+            ok(hr == DD_OK, "IDirectDrawSurface_Lock returned: %x\n", hr);
+
+            for (y = 0; y < ddsd.dwHeight; y++)
+            {
+                if (U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount == 32)
+                {
+                    DWORD *textureRow = (DWORD *)((char *)ddsd.lpSurface + y * U1(ddsd).lPitch);
+                    for (x = 0; x < ddsd.dwWidth;  x++)
+                        *textureRow++ = fillcolor;
+                }
+                else if (U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount == 16)
+                {
+                    WORD *textureRow = (WORD *)((char *)ddsd.lpSurface + y * U1(ddsd).lPitch);
+                    for (x = 0; x < ddsd.dwWidth;  x++)
+                        *textureRow++ = fillcolor;
+                }
+                else
+                {
+                    ok(0, "Unsupported format!\n");
+                    break;
+                }
+            }
+
+            hr = IDirectDrawSurface_Unlock(surface, NULL);
+            ok(hr == DD_OK, "IDirectDrawSurface_Unlock returned: %x\n", hr);
+        }
+
+        if (level != -1 && curlevel >= level)
+        {
+            IDirectDrawSurface_Release(surface);
+            break;
+        }
+
+        if (IDirectDrawSurface_GetAttachedSurface(surface, &caps, &surface2) != DD_OK)
+            surface2 = NULL;
+
+        IDirectDrawSurface_Release(surface);
+        surface = surface2;
+    }
+}
+
+static BOOL check_surface(IDirectDrawSurface *surface, DWORD fillcolor, int level)
+{
+    DDSCAPS caps = {DDSCAPS_COMPLEX};
+    IDirectDrawSurface *surface2;
+    DDSURFACEDESC ddsd;
+    int curlevel = -1;
+    BOOL result = TRUE;
+    DWORD x, y;
+    HRESULT hr;
+
+    IDirectDrawSurface_AddRef(surface);
+    fillcolor &= 0x00ffffff;
+
+    while (surface)
+    {
+        curlevel++;
+
+        if (level == -1 || curlevel == level)
+        {
+            memset(&ddsd, 0, sizeof(ddsd));
+            ddsd.dwSize = sizeof(ddsd);
+
+            hr = IDirectDrawSurface_Lock(surface, NULL, &ddsd, DDLOCK_WAIT, NULL);
+            ok(hr == DD_OK, "IDirectDrawSurface_Lock returned: %x\n", hr);
+
+            for (y = 0; y < ddsd.dwHeight; y++)
+            {
+                if (U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount == 32)
+                {
+                    DWORD *textureRow = (DWORD *)((char *)ddsd.lpSurface + y * U1(ddsd).lPitch);
+                    for (x = 0; x < ddsd.dwWidth;  x++)
+                    {
+                        if ((*textureRow & 0x00ffffff) != fillcolor)
+                        {
+                            ok(0, "Expected color %x, got %x at (%d, %d) in level %d\n",
+                               fillcolor, *textureRow, x, y, curlevel);
+                            result = FALSE;
+                            goto end;
+                        }
+                        textureRow++;
+                    }
+                }
+                else if (U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount == 16)
+                {
+                    WORD *textureRow = (WORD *)((char *)ddsd.lpSurface + y * U1(ddsd).lPitch);
+                    for (x = 0; x < ddsd.dwWidth;  x++)
+                    {
+                        if (*textureRow != fillcolor)
+                        {
+                            ok(0, "Expected color %x, got %x at (%d, %d) in level %d\n",
+                               fillcolor, *textureRow, x, y, curlevel);
+                            result = FALSE;
+                            goto end;
+                        }
+                        textureRow++;
+                    }
+                }
+                else
+                {
+                    ok(0, "Unsupported format!\n");
+                    break;
+                }
+            }
+
+        end:
+            hr = IDirectDrawSurface_Unlock(surface, NULL);
+            ok(hr == DD_OK, "IDirectDrawSurface_Unlock returned: %x\n", hr);
+        }
+
+        if (level != -1 && curlevel >= level)
+        {
+            IDirectDrawSurface_Release(surface);
+            break;
+        }
+
+        if (IDirectDrawSurface_GetAttachedSurface(surface, &caps, &surface2) != DD_OK)
+            surface2 = NULL;
+
+        IDirectDrawSurface_Release(surface);
+        surface = surface2;
+    }
+
+    return result;
+}
+
+struct rgb_format
+{
+    DWORD dwRGBBitCount;
+    DWORD dwRBitMask;
+    DWORD dwGBitMask;
+    DWORD dwBBitMask;
+};
+
+struct mipmap_surface_info
+{
+    struct rgb_format *format;
+    DWORD             width;
+    DWORD             height;
+    int               levels;
+    DWORD             fill[4];
+};
+
+struct rgb_format test_rgb24 = {32, 0x00FF0000, 0x0000FF00, 0x000000FF};
+struct rgb_format test_rgb16 = {16, 0xf800, 0x07e0, 0x001f};
+
+struct
+{
+    struct mipmap_surface_info surfaces[2];
+    HRESULT hres;
+    int     level_check;
+    DWORD   fill_check[4];
+}
+load_tests[] =
+{
+    /* different formats */
+    { {{&test_rgb16, 256, 256, 0, {0x1234}},
+       {&test_rgb24, 256, 256, 0, {0x789ABC}} },
+                        DD_OK, 1, {0x1045A5}},
+    { {{&test_rgb24, 256, 256, 0, {0x123456}},
+       {&test_rgb16, 256, 256, 0, {0x1234}} },
+                        DD_OK, 1, {0x11AA}},
+
+    /* different sizes, but no mipmap */
+    { {{&test_rgb24, 256, 256, 0, {0xff0000}},
+       {&test_rgb24, 256, 256, 0, {0x00ff00}} },
+                        DD_OK, 1, {0xff0000}},
+    { {{&test_rgb24, 512, 512, 0, {0x00ff00}},
+       {&test_rgb24, 256, 256, 0, {0x0000ff}} },
+                        DD_OK, 1, {0x00ff00}},
+    { {{&test_rgb24, 256, 256, 0, {0x0000ff}},
+       {&test_rgb24, 512, 512, 0, {0xff0000}} },
+                        DD_OK, 1, {0x0000ff}},
+
+    /* different sizes, 1 mapmip level */
+    { {{&test_rgb24, 256, 256, 1, {0xff0000}},
+       {&test_rgb24, 256, 256, 1, {0x00ff00}} },
+                        DD_OK, 1, {0xff0000}},
+    { {{&test_rgb24, 512, 512, 1, {0x00ff00}},
+       {&test_rgb24, 256, 256, 1, {0x0000ff}} },
+                        DD_OK, 1, {0x00ff00}},
+    { {{&test_rgb24, 256, 256, 1, {0x0000ff}},
+       {&test_rgb24, 512, 512, 1, {0xff0000}} },
+                        DD_OK, 1, {0x0000ff}},
+
+    /* different sizes, 2 mapmip levels */
+    { {{&test_rgb24, 256, 256, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb24, 256, 256, 2, {0x00ff00, 0x00ff00}} },
+                        DD_OK, 2, {0xff0000, 0x0000ff}},
+    { {{&test_rgb24, 512, 512, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb24, 256, 256, 2, {0x00ff00, 0x00ff00}} },
+                        DD_OK, 2, {0xff0000, 0x0000ff}},
+    { {{&test_rgb24, 256, 256, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb24, 512, 512, 2, {0x00ff00, 0x00ff00}} },
+                        DD_OK, 2, {0xff0000, 0x0000ff}},
+
+    /* different sizes, source mipmap levels > dest mimap levels */
+    { {{&test_rgb24, 256, 256, 3, {0xff0000, 0x0000ff, 0x808080}},
+       {&test_rgb24, 256, 256, 2, {0x00ff00, 0x00ff00}} },
+               DDERR_NOTFOUND, 0, {}},
+    { {{&test_rgb24, 512, 512, 3, {0xff0000, 0x0000ff, 0x808080}},
+       {&test_rgb24, 256, 256, 2, {0x00ff00, 0x00ff00}} },
+               DDERR_NOTFOUND, 0, {}},
+    { {{&test_rgb24, 256, 256, 3, {0xff0000, 0x0000ff, 0x808080}},
+       {&test_rgb24, 512, 512, 2, {0x00ff00, 0x00ff00}} },
+               DDERR_NOTFOUND, 0, {}},
+
+    /* different sizes, source mipmap levels < dest mipmap levels  */
+    { {{&test_rgb24, 256, 256, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb24, 256, 256, 3, {0x00ff00, 0x00ff00, 0x808080}} },
+                        DD_OK, 3, {0xff0000, 0x0000ff, 0x808080}},
+    { {{&test_rgb24, 512, 512, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb24, 256, 256, 3, {0x00ff00, 0x00ff00, 0x808080}} },
+                        DD_OK, 3, {0xff0000, 0x0000ff, 0x808080}},
+    { {{&test_rgb24, 256, 256, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb24, 512, 512, 3, {0x00ff00, 0x00ff00, 0x808080}} },
+                        DD_OK, 3, {0xff0000, 0x0000ff, 0x808080}},
+
+    /* different sizes, different formats */
+    { {{&test_rgb24, 256, 256, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb16, 256, 256, 2, {0x07e0, 0x07e0}} },
+                        DD_OK, 2, {0xf800, 0x001f}},
+    { {{&test_rgb24, 512, 512, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb16, 256, 256, 2, {0x07e0, 0x07e0}} },
+                        DD_OK, 2, {0xf800, 0x001f}},
+    { {{&test_rgb24, 256, 256, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb16, 512, 512, 2, {0x07e0, 0x07e0}} },
+                        DD_OK, 2, {0xf800, 0x001f}},
+
+    { {{&test_rgb16, 256, 256, 2, {0xf800, 0x001f}},
+       {&test_rgb24, 256, 256, 2, {0x00ff00, 0x00ff00}} },
+                        DD_OK, 2, {0xff0000, 0x0000ff}},
+    { {{&test_rgb16, 512, 512, 2, {0xf800, 0x001f}},
+       {&test_rgb24, 256, 256, 2, {0x00ff00, 0x00ff00}} },
+                        DD_OK, 2, {0xff0000, 0x0000ff}},
+    { {{&test_rgb16, 256, 256, 2, {0xf800, 0x001f}},
+       {&test_rgb24, 512, 512, 2, {0x00ff00, 0x00ff00}} },
+                        DD_OK, 2, {0xff0000, 0x0000ff}},
+
+    /* different sizes, source mipmap levels < destmipmap levels , different format */
+    { {{&test_rgb24, 256, 256, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb16, 256, 256, 3, {0x07e0, 0x07e0, 0x1234}} },
+                        DD_OK, 3, {0xf800, 0x001f, 0x1234}},
+    { {{&test_rgb24, 512, 512, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb16, 256, 256, 3, {0x07e0, 0x07e0, 0x1234}} },
+                        DD_OK, 3, {0xf800, 0x001f, 0x1234}},
+    { {{&test_rgb24, 256, 256, 2, {0xff0000, 0x0000ff}},
+       {&test_rgb16, 512, 512, 3, {0x07e0, 0x07e0, 0x1234}} },
+                        DD_OK, 3, {0xf800, 0x001f, 0x1234}},
+
+    { {{&test_rgb16, 256, 256, 2, {0xf800, 0x001f}},
+       {&test_rgb24, 256, 256, 3, {0x00ff00, 0x00ff00, 0x808080}} },
+                        DD_OK, 3, {0xff0000, 0x0000ff, 0x808080}},
+    { {{&test_rgb16, 512, 512, 2, {0xf800, 0x001f}},
+       {&test_rgb24, 256, 256, 3, {0x00ff00, 0x00ff00, 0x808080}} },
+                        DD_OK, 3, {0xff0000, 0x0000ff, 0x808080}},
+    { {{&test_rgb16, 256, 256, 2, {0xf800, 0x001f}},
+       {&test_rgb24, 512, 512, 3, {0x00ff00, 0x00ff00, 0x808080}} },
+                        DD_OK, 3, {0xff0000, 0x0000ff, 0x808080}},
+};
+
 /* test palette handling in IDirect3DTexture_Load */
 static void TextureLoadTest(void)
 {
@@ -1284,6 +1566,97 @@ static void TextureLoadTest(void)
     /* test Load when both textures have no palette */
     hr = IDirect3DTexture_Load(Texture2, Texture);
     ok(hr == DD_OK, "IDirect3DTexture_Load returned %08x\n", hr);
+
+    for (i = 0; i < sizeof(load_tests) / sizeof(load_tests[0]); i++)
+    {
+        IDirectDrawSurface *TexSurfaces[2] = {NULL, NULL};
+        IDirect3DTexture *Textures[2] = {NULL, NULL};
+        DDSURFACEDESC ddsd2;
+        int j, k;
+
+        for (j = 0; j < 2; j++)
+        {
+            memset(&ddsd2, 0, sizeof (ddsd2));
+            ddsd2.dwSize = sizeof (ddsd2);
+            ddsd2.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+            ddsd2.dwHeight = load_tests[i].surfaces[j].height;
+            ddsd2.dwWidth = load_tests[i].surfaces[j].width;
+            ddsd2.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+            ddsd2.ddpfPixelFormat.dwSize = sizeof(ddsd2.ddpfPixelFormat);
+            ddsd2.ddpfPixelFormat.dwFlags = DDPF_RGB;
+            U1(U4(ddsd2).ddpfPixelFormat).dwRGBBitCount = load_tests[i].surfaces[j].format->dwRGBBitCount;
+            U2(U4(ddsd2).ddpfPixelFormat).dwRBitMask = load_tests[i].surfaces[j].format->dwRBitMask;
+            U3(U4(ddsd2).ddpfPixelFormat).dwGBitMask = load_tests[i].surfaces[j].format->dwGBitMask;
+            U4(U4(ddsd2).ddpfPixelFormat).dwBBitMask = load_tests[i].surfaces[j].format->dwBBitMask;
+
+            if (load_tests[i].surfaces[j].levels)
+            {
+                ddsd2.dwFlags |= DDSD_MIPMAPCOUNT;
+                ddsd2.ddsCaps.dwCaps |= DDSCAPS_MIPMAP | DDSCAPS_COMPLEX;
+                U2(ddsd2).dwMipMapCount = load_tests[i].surfaces[j].levels;
+            }
+
+            hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd2, &TexSurfaces[j], NULL);
+            ok(hr == D3D_OK, "IDirectDraw_CreateSurface returned %08x for surface %d in test %d\n", hr, j, i);
+            if (FAILED(hr)) goto next;
+
+            hr = IDirectDrawSurface_QueryInterface(TexSurfaces[j], &IID_IDirect3DTexture, (void *)&Textures[j]);
+            ok(hr == D3D_OK, "IDirectDrawSurface_QueryInterface returned %08x for surface %d in test %d\n", hr, j, i);
+            if (FAILED(hr)) goto next;
+
+            if (load_tests[i].surfaces[j].levels)
+            {
+                for (k = 0; k < load_tests[i].surfaces[j].levels; k++)
+                    fill_surface(TexSurfaces[j], load_tests[i].surfaces[j].fill[k], k);
+            }
+            else
+                fill_surface(TexSurfaces[j], load_tests[i].surfaces[j].fill[0], -1);
+        }
+
+        hr = IDirect3DTexture_Load(Textures[1], Textures[0]);
+        ok(hr == load_tests[i].hres, "IDirect3DTexture_Load returned %08x, expected %08x\n", hr, load_tests[i].hres);
+        if (hr != DD_OK) goto next;
+
+        memset(&ddsd2, 0, sizeof (ddsd2));
+        ddsd2.dwSize = sizeof(ddsd2);
+        hr = IDirectDrawSurface_GetSurfaceDesc(TexSurfaces[1], &ddsd2);
+        ok(hr == DD_OK, "IDirectDrawSurface_GetSurfaceDesc returned %08x\n", hr);
+
+        if (load_tests[i].surfaces[1].levels)
+        {
+            ok(U2(ddsd2).dwMipMapCount == load_tests[i].surfaces[1].levels,
+               "Expected %d mipmap levels, got %d in run %d\n", load_tests[i].surfaces[1].levels,
+               U2(ddsd2).dwMipMapCount, i);
+        }
+
+        for (k = 0; k < load_tests[i].level_check; k++)
+        {
+            if (!check_surface(TexSurfaces[1], load_tests[i].fill_check[k], k))
+                ok(0, "Check surface failed in test %d\n", i);
+        }
+
+        ok(U1(U4(ddsd2).ddpfPixelFormat).dwRGBBitCount == load_tests[i].surfaces[1].format->dwRGBBitCount,
+           "Expected %d rgb bits, got %d in run %d\n", load_tests[i].surfaces[1].format->dwRGBBitCount,
+           U1(U4(ddsd2).ddpfPixelFormat).dwRGBBitCount, i);
+
+        ok(U1(U4(ddsd2).ddpfPixelFormat).dwRBitMask == load_tests[i].surfaces[1].format->dwRBitMask,
+           "Expected %08x red bits, got %08x in run %d\n", load_tests[i].surfaces[1].format->dwRBitMask,
+           U1(U4(ddsd2).ddpfPixelFormat).dwRBitMask, i);
+
+        ok(U1(U4(ddsd2).ddpfPixelFormat).dwGBitMask == load_tests[i].surfaces[1].format->dwGBitMask,
+           "Expected %08x green bits, got %08x in run %d\n", load_tests[i].surfaces[1].format->dwGBitMask,
+           U1(U4(ddsd2).ddpfPixelFormat).dwGBitMask, i);
+
+        ok(U1(U4(ddsd2).ddpfPixelFormat).dwBBitMask == load_tests[i].surfaces[1].format->dwBBitMask,
+           "Expected %08x blue bits, got %08x in run %d\n", load_tests[i].surfaces[1].format->dwBBitMask,
+           U1(U4(ddsd2).ddpfPixelFormat).dwBBitMask, i);
+
+    next:
+        if (Textures[0]) IDirect3DTexture_Release(Textures[0]);
+        if (TexSurfaces[0]) IDirectDrawSurface_Release(TexSurfaces[0]);
+        if (Textures[1]) IDirect3DTexture_Release(Textures[1]);
+        if (TexSurfaces[1]) IDirectDrawSurface_Release(TexSurfaces[1]);
+    }
 
     for (i = 0; i < 256; i++) {
         table1[i].peRed = i;
