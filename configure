@@ -1694,6 +1694,7 @@ enable_wmp
 enable_wmphoto
 enable_wmvcore
 enable_wnaspi32
+enable_wow64cpu
 enable_wpc
 enable_wpcap
 enable_ws2_32
@@ -7473,6 +7474,7 @@ for ac_header in \
 	sys/cdio.h \
 	sys/epoll.h \
 	sys/event.h \
+	sys/eventfd.h \
 	sys/filio.h \
 	sys/ioctl.h \
 	sys/ipc.h \
@@ -12784,6 +12786,62 @@ if test "x$ac_cv_lib_OpenCL_clGetPlatformInfo" = xyes; then :
 
 fi
 
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for -lOpenCL" >&5
+$as_echo_n "checking for -lOpenCL... " >&6; }
+if ${ac_cv_lib_soname_OpenCL+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_soname_save_LIBS=$LIBS
+LIBS="-lOpenCL  $LIBS"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char clGetPlatformInfo ();
+int
+main ()
+{
+return clGetPlatformInfo ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  case "$LIBEXT" in
+    dll) ac_cv_lib_soname_OpenCL=`$ac_cv_path_LDD conftest.exe | grep "OpenCL" | sed -e "s/dll.*/dll/"';2,$d'` ;;
+    dylib) ac_cv_lib_soname_OpenCL=`$OTOOL -L conftest$ac_exeext | grep "libOpenCL\\.[0-9A-Za-z.]*dylib" | sed -e "s/^.*\/\(libOpenCL\.[0-9A-Za-z.]*dylib\).*$/\1/"';2,$d'` ;;
+    *) ac_cv_lib_soname_OpenCL=`$READELF -d conftest$ac_exeext | grep "NEEDED.*libOpenCL\\.$LIBEXT" | sed -e "s/^.*\\[\\(libOpenCL\\.$LIBEXT[^	 ]*\\)\\].*$/\1/"';2,$d'`
+       if ${ac_cv_lib_soname_OpenCL:+false} :; then :
+  ac_cv_lib_soname_OpenCL=`$LDD conftest$ac_exeext | grep "libOpenCL\\.$LIBEXT" | sed -e "s/^.*\(libOpenCL\.$LIBEXT[^	 ]*\).*$/\1/"';2,$d'`
+fi ;;
+  esac
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+  LIBS=$ac_check_soname_save_LIBS
+fi
+if ${ac_cv_lib_soname_OpenCL:+false} :; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: not found" >&5
+$as_echo "not found" >&6; }
+       cat >>confdefs.h <<_ACEOF
+#define SONAME_LIBOPENCL "libOpenCL.$LIBEXT"
+_ACEOF
+
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_soname_OpenCL" >&5
+$as_echo "$ac_cv_lib_soname_OpenCL" >&6; }
+
+cat >>confdefs.h <<_ACEOF
+#define SONAME_LIBOPENCL "$ac_cv_lib_soname_OpenCL"
+_ACEOF
+
+
+fi
 fi
 if test "x$ac_cv_lib_OpenCL_clGetPlatformInfo" != xyes; then :
   case "x$with_opencl" in
@@ -16291,6 +16349,7 @@ then
     enable_x3daudio1_5=${enable_x3daudio1_5:-no}
     enable_x3daudio1_6=${enable_x3daudio1_6:-no}
     enable_x3daudio1_7=${enable_x3daudio1_7:-no}
+    enable_xactengine2_10=${enable_xactengine2_10:-no}
     enable_xactengine3_0=${enable_xactengine3_0:-no}
     enable_xactengine3_1=${enable_xactengine3_1:-no}
     enable_xactengine3_2=${enable_xactengine3_2:-no}
@@ -17821,6 +17880,7 @@ for ac_func in \
 	pipe2 \
 	poll \
 	port_create \
+	ppoll \
 	prctl \
 	pread \
 	proc_pidinfo \
@@ -18229,6 +18289,72 @@ fi
     LIBS=$ac_save_LIBS
     ;;
 esac
+
+if test "$ac_cv_header_sys_mman_h" = "yes" -a "x$RT_LIBS" = "x"
+then
+    ac_save_LIBS=$LIBS
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing shm_open" >&5
+$as_echo_n "checking for library containing shm_open... " >&6; }
+if ${ac_cv_search_shm_open+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_func_search_save_LIBS=$LIBS
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char shm_open ();
+int
+main ()
+{
+return shm_open ();
+  ;
+  return 0;
+}
+_ACEOF
+for ac_lib in '' rt; do
+  if test -z "$ac_lib"; then
+    ac_res="none required"
+  else
+    ac_res=-l$ac_lib
+    LIBS="-l$ac_lib  $ac_func_search_save_LIBS"
+  fi
+  if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_search_shm_open=$ac_res
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext
+  if ${ac_cv_search_shm_open+:} false; then :
+  break
+fi
+done
+if ${ac_cv_search_shm_open+:} false; then :
+
+else
+  ac_cv_search_shm_open=no
+fi
+rm conftest.$ac_ext
+LIBS=$ac_func_search_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_shm_open" >&5
+$as_echo "$ac_cv_search_shm_open" >&6; }
+ac_res=$ac_cv_search_shm_open
+if test "$ac_res" != no; then :
+  test "$ac_res" = "none required" || LIBS="$ac_res $LIBS"
+
+$as_echo "#define HAVE_SHM_OPEN 1" >>confdefs.h
+
+                    test "$ac_res" = "none required" || RT_LIBS="$ac_res"
+
+fi
+
+fi
+LIBS=$ac_save_LIBS
 
 if test "x$with_ldap" != "xno"
 then
@@ -20375,6 +20501,7 @@ wine_fn_config_makefile dlls/crypt32/tests enable_tests
 wine_fn_config_makefile dlls/cryptdlg enable_cryptdlg
 wine_fn_config_makefile dlls/cryptdll enable_cryptdll
 wine_fn_config_makefile dlls/cryptext enable_cryptext
+wine_fn_config_makefile dlls/cryptext/tests enable_tests
 wine_fn_config_makefile dlls/cryptnet enable_cryptnet
 wine_fn_config_makefile dlls/cryptnet/tests enable_tests
 wine_fn_config_makefile dlls/cryptui enable_cryptui
@@ -21147,6 +21274,7 @@ wine_fn_config_makefile dlls/wmvcore enable_wmvcore
 wine_fn_config_makefile dlls/wmvcore/tests enable_tests
 wine_fn_config_makefile dlls/wnaspi32 enable_wnaspi32
 wine_fn_config_makefile dlls/wow32 enable_win16
+wine_fn_config_makefile dlls/wow64cpu enable_wow64cpu
 wine_fn_config_makefile dlls/wpc enable_wpc
 wine_fn_config_makefile dlls/wpc/tests enable_tests
 wine_fn_config_makefile dlls/wpcap enable_wpcap

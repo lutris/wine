@@ -47,6 +47,9 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 /* @makedep: generic.ppd */
 1 PPDFILE generic.ppd
 
+/* @makedep: sRGB_Color_Space_Profile.icm */
+IDR_SRGB_ICM RCDATA sRGB_Color_Space_Profile.icm
+
 #define WINE_FILENAME_STR "winspool.drv"
 #define WINE_FILEDESCRIPTION_STR "Wine core printer driver"
 

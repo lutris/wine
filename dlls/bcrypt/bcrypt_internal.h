@@ -191,6 +191,8 @@ struct key
 struct secret
 {
     struct object hdr;
+    UCHAR *data;
+    ULONG len;
 };
 
 struct key_funcs
@@ -213,6 +215,11 @@ struct key_funcs
     NTSTATUS (CDECL *key_export_ecc)( struct key *, UCHAR *, ULONG, ULONG * );
     NTSTATUS (CDECL *key_import_dsa_capi)( struct key *, UCHAR *, ULONG );
     NTSTATUS (CDECL *key_import_ecc)( struct key *, UCHAR *, ULONG );
+    NTSTATUS (CDECL *key_compute_secret_ecc)( unsigned char *privkey_in, struct key *pubkey_in, struct secret *secret );
 };
+
+struct key_funcs *gnutls_lib_init(DWORD reason);
+struct key_funcs *macos_lib_init(DWORD reason);
+struct key_funcs *gcrypt_lib_init(DWORD reason);
 
 #endif /* __BCRYPT_INTERNAL_H */

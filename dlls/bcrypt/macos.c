@@ -284,14 +284,25 @@ static const struct key_funcs key_funcs =
     key_export_dsa_capi,
     key_export_ecc,
     key_import_dsa_capi,
-    key_import_ecc
+    key_import_ecc,
+    NULL
 };
 
-NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )
+struct key_funcs * macos_lib_init( DWORD reason )
 {
-    if (reason != DLL_PROCESS_ATTACH) return STATUS_SUCCESS;
-    *(const struct key_funcs **)ptr_out = &key_funcs;
-    return STATUS_SUCCESS;
+    if (reason != DLL_PROCESS_ATTACH) return NULL;
+    return &key_funcs;
 }
 
+#else
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
+#include "winternl.h"
+
+struct key_funcs * macos_lib_init( DWORD reason )
+{
+    return NULL;
+}
 #endif

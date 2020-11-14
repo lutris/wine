@@ -86,6 +86,7 @@
 #include "winioctl.h"
 #include "winternl.h"
 #include "unix_private.h"
+#include "esync.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
@@ -1564,6 +1565,7 @@ static void start_main_thread(void)
     dbg_init();
     server_init_process();
     startup_info_size = server_init_thread( teb->Peb, &suspend );
+    esync_init();
     virtual_map_user_shared_data();
     init_cpu_info();
     init_files();
@@ -1778,6 +1780,8 @@ void __wine_main( int argc, char *argv[], char *envp[] )
 #endif
 
     virtual_init();
+    signal_init_early();
+
     init_environment( argc, argv, envp );
 
 #ifdef __APPLE__

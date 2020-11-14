@@ -259,6 +259,32 @@ static BOOL is_fake_italic( HDC hdc )
     return !(mac_style & 2);
 }
 
+char *PSDRV_get_download_name(PHYSDEV dev, BOOL vertical)
+{
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
+    char *ps_name;
+    LPOUTLINETEXTMETRICA potm;
+    DWORD len = GetOutlineTextMetricsA(dev->hdc, 0, NULL);
+    LOGFONTW lf;
+
+    assert(physDev->font.fontloc == Download);
+
+    if (!GetObjectW(GetCurrentObject(dev->hdc, OBJ_FONT), sizeof(lf), &lf))
+        return NULL;
+
+    potm = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!potm)
+        return NULL;
+
+    GetOutlineTextMetricsA(dev->hdc, len, potm);
+
+    ps_name = NULL;
+    get_download_name(dev, potm, &ps_name, vertical);
+    HeapFree(GetProcessHeap(), 0, potm);
+
+    return ps_name;
+}
+
 /****************************************************************************
  *  PSDRV_WriteSetDownloadFont
  *

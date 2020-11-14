@@ -2473,6 +2473,49 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
     return ret;
 }
 
+/******************************************************************************
+ * Get the default and the app-specific config keys.
+ */
+BOOL get_app_key(HKEY *defkey, HKEY *appkey)
+{
+    char buffer[MAX_PATH+16];
+    DWORD len;
+
+    *appkey = 0;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\System */
+    if (RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\System", defkey))
+        *defkey = 0;
+
+    len = GetModuleFileNameA(0, buffer, MAX_PATH);
+    if (len && len < MAX_PATH)
+    {
+        HKEY tmpkey;
+
+        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\System */
+        if (!RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey))
+        {
+            char *p, *appname = buffer;
+            if ((p = strrchr(appname, '/'))) appname = p + 1;
+            if ((p = strrchr(appname, '\\'))) appname = p + 1;
+            strcat(appname, "\\System");
+
+            if (RegOpenKeyA(tmpkey, appname, appkey)) *appkey = 0;
+            RegCloseKey(tmpkey);
+        }
+    }
+
+    return *defkey || *appkey;
+}
+
+static DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char *name, DWORD *data)
+{
+    DWORD type;
+    DWORD size = sizeof(DWORD);
+    if (appkey && !RegQueryValueExA(appkey, name, 0, &type, (BYTE *)data, &size) && (type == REG_DWORD)) return 0;
+    if (defkey && !RegQueryValueExA(defkey, name, 0, &type, (BYTE *)data, &size) && (type == REG_DWORD)) return 0;
+    return ERROR_FILE_NOT_FOUND;
+}
 
 /***********************************************************************
  *		GetSystemMetrics (USER32.@)
@@ -2717,7 +2760,21 @@ INT WINAPI GetSystemMetrics( INT index )
         return 1;
     case SM_TABLETPC:
     case SM_MEDIACENTER:
-        return 0;
+    {
+        const char *name = (index == SM_TABLETPC) ? "TabletPC" : "MediaCenter";
+        HKEY defkey, appkey;
+        DWORD value;
+
+        if (!get_app_key(&defkey, &appkey))
+            return 0;
+
+        if (get_config_key_dword(defkey, appkey, name, &value))
+            value = 0;
+
+        if (appkey) RegCloseKey( appkey );
+        if (defkey) RegCloseKey( defkey );
+        return value;
+    }
     case SM_CMETRICS:
         return SM_CMETRICS;
     default:
@@ -4560,26 +4617,85 @@ LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCON
     LUID gpu_luid;
     WCHAR device_name[CCHDEVICENAME];
     DEVMODEW devmode;
+    POINT origin;
+    HMONITOR monitor;
+    MONITORINFOEXW monitor_info;
+    DISPLAYCONFIG_SOURCE_MODE *source_mode = &modeinfo[0].DUMMYUNIONNAME.sourceMode;
+    DISPLAYCONFIG_TARGET_MODE *target_mode = &modeinfo[1].DUMMYUNIONNAME.targetMode;
+    DISPLAYCONFIG_PATH_SOURCE_INFO *source_info = &pathinfo[0].sourceInfo;
+    DISPLAYCONFIG_PATH_TARGET_INFO *target_info = &pathinfo[0].targetInfo;
 
-    FIXME("(%08x %p %p %p %p %p): semi-stub\n", flags, numpathelements, pathinfo, numinfoelements, modeinfo, topologyid);
+    TRACE("(%08x %p %p %p %p %p)\n", flags, numpathelements, pathinfo, numinfoelements, modeinfo, topologyid);
 
-    if (!numpathelements || !numinfoelements)
-        return ERROR_INVALID_PARAMETER;
+    if (*numpathelements < 1 || *numinfoelements < 2)
+        return ERROR_INSUFFICIENT_BUFFER;
 
-    if (!*numpathelements || !*numinfoelements)
-        return ERROR_INVALID_PARAMETER;
+    origin.x = 0;
+    origin.y = 0;
+    monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+    monitor_info.cbSize = sizeof(monitor_info);
+    if (!(GetMonitorInfoW(monitor, (MONITORINFO*) &monitor_info)))
+    {
+        return ERROR_GEN_FAILURE;
+    }
+    if (!(EnumDisplaySettingsW(monitor_info.szDevice, 0, &devmode)))
+    {
+        return ERROR_GEN_FAILURE;
+    }
 
-    if (flags != QDC_ALL_PATHS &&
-        flags != QDC_ONLY_ACTIVE_PATHS &&
-        flags != QDC_DATABASE_CURRENT)
-        return ERROR_INVALID_PARAMETER;
+    AllocateLocallyUniqueId(&gpu_luid);
 
-    if (((flags == QDC_DATABASE_CURRENT) && !topologyid) ||
-        ((flags != QDC_DATABASE_CURRENT) && topologyid))
-        return ERROR_INVALID_PARAMETER;
+    source_mode->width = devmode.dmPelsWidth;
+    source_mode->height = devmode.dmPelsHeight;
+    source_mode->pixelFormat = DISPLAYCONFIG_PIXELFORMAT_32BPP;
+    source_mode->position.x = 0;
+    source_mode->position.y = 0;
 
-    if (flags != QDC_ONLY_ACTIVE_PATHS)
-        FIXME("only returning active paths\n");
+    /* no idea what pixel rate is */
+    target_mode->targetVideoSignalInfo.pixelRate = 0xdeadbeef;
+    target_mode->targetVideoSignalInfo.hSyncFreq.Numerator = devmode.dmDisplayFrequency * devmode.dmPelsHeight;
+    target_mode->targetVideoSignalInfo.hSyncFreq.Denominator = 1;
+    target_mode->targetVideoSignalInfo.vSyncFreq.Numerator = devmode.dmDisplayFrequency;
+    target_mode->targetVideoSignalInfo.vSyncFreq.Denominator = 1;
+    target_mode->targetVideoSignalInfo.activeSize.cx = devmode.dmPelsWidth;
+    target_mode->targetVideoSignalInfo.activeSize.cy = devmode.dmPelsHeight;
+    target_mode->targetVideoSignalInfo.totalSize.cx = devmode.dmPelsWidth;
+    target_mode->targetVideoSignalInfo.totalSize.cy = devmode.dmPelsHeight;
+    target_mode->targetVideoSignalInfo.DUMMYUNIONNAME.videoStandard = D3DKMDT_VSS_NTSC_M;
+    target_mode->targetVideoSignalInfo.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
+
+    modeinfo[0].infoType = DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;
+    modeinfo[0].id = 0;
+    modeinfo[0].adapterId = gpu_luid;
+    modeinfo[1].infoType = DISPLAYCONFIG_MODE_INFO_TYPE_TARGET;
+    modeinfo[1].id = 0;
+    modeinfo[1].adapterId = gpu_luid;
+
+    source_info->adapterId = gpu_luid;
+    source_info->id = 0;
+    source_info->DUMMYUNIONNAME.modeInfoIdx = 0;
+    source_info->statusFlags = DISPLAYCONFIG_SOURCE_IN_USE;
+
+    target_info->adapterId = gpu_luid;
+    target_info->id = 0;
+
+    target_info->DUMMYUNIONNAME.modeInfoIdx = 1;
+    target_info->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI;
+    target_info->rotation = DISPLAYCONFIG_ROTATION_IDENTITY;
+    target_info->scaling = DISPLAYCONFIG_SCALING_IDENTITY;
+    target_info->refreshRate.Numerator = devmode.dmDisplayFrequency;
+    target_info->refreshRate.Denominator = 1;
+    target_info->scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
+    target_info->targetAvailable = TRUE;
+    target_info->statusFlags = DISPLAYCONFIG_TARGET_IN_USE;
+
+    pathinfo[0].flags = DISPLAYCONFIG_PATH_ACTIVE;
+
+    if (flags == QDC_DATABASE_CURRENT && topologyid)
+    {
+        *topologyid = DISPLAYCONFIG_TOPOLOGY_INTERNAL;
+    }
+
 
     if (topologyid)
     {
