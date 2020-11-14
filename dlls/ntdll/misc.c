@@ -546,3 +546,10 @@ BOOL WINAPI ApiSetQueryApiSetPresence(const UNICODE_STRING *namespace, BOOLEAN *
         *present = TRUE;
     return TRUE;
 }
+
+BOOL IsTransgaming(void)
+{
+    static int call_count = -1;
+    call_count++;
+    return call_count == 1;
+}

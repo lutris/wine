@@ -1,0 +1,430 @@
+diff --git a/dlls/sapi/Makefile.in b/dlls/sapi/Makefile.in
+index 464a174caa0..f695bd47b12 100644
+--- a/dlls/sapi/Makefile.in
++++ b/dlls/sapi/Makefile.in
+@@ -6,6 +6,7 @@ EXTRADLLFLAGS = -mno-cygwin
+ C_SRCS = \
+ 	automation.c \
+ 	main.c \
++	stream.c \
+ 	token.c \
+ 	tts.c
+ 
+diff --git a/dlls/sapi/main.c b/dlls/sapi/main.c
+index 9c644001faa..1acc3d92d64 100644
+--- a/dlls/sapi/main.c
++++ b/dlls/sapi/main.c
+@@ -107,6 +107,7 @@ static const struct IClassFactoryVtbl class_factory_vtbl =
+ 
+ static struct class_factory data_key_cf       = { { &class_factory_vtbl }, data_key_create };
+ static struct class_factory file_stream_cf    = { { &class_factory_vtbl }, file_stream_create };
++static struct class_factory speech_stream_cf   = { { &class_factory_vtbl }, speech_stream_create };
+ static struct class_factory speech_voice_cf   = { { &class_factory_vtbl }, speech_voice_create };
+ static struct class_factory token_category_cf = { { &class_factory_vtbl }, token_category_create };
+ static struct class_factory token_enum_cf     = { { &class_factory_vtbl }, token_enum_create };
+@@ -131,6 +132,8 @@ HRESULT WINAPI DllGetClassObject( REFCLSID clsid, REFIID iid, void **obj )
+         cf = &token_enum_cf.IClassFactory_iface;
+     else if (IsEqualCLSID( clsid, &CLSID_SpObjectToken ))
+         cf = &token_cf.IClassFactory_iface;
++    else if (IsEqualCLSID( clsid, &CLSID_SpStream ))
++        cf = &speech_stream_cf.IClassFactory_iface;
+     else if (IsEqualCLSID( clsid, &CLSID_SpVoice ))
+         cf = &speech_voice_cf.IClassFactory_iface;
+ 
+diff --git a/dlls/sapi/sapi_classes.idl b/dlls/sapi/sapi_classes.idl
+index 082244e0812..7941f9689ed 100644
+--- a/dlls/sapi/sapi_classes.idl
++++ b/dlls/sapi/sapi_classes.idl
+@@ -64,6 +64,18 @@ coclass SpObjectToken
+     [default] interface ISpDataKey;
+ }
+ 
++[
++    uuid(715d9c59-4442-11d2-9605-00c04f8ee628),
++    helpstring("Speech Stream"),
++    progid("SAPI.SpStream.1"),
++    vi_progid("SAPI.SpStream"),
++    threading(both)
++]
++coclass SpStream
++{
++    interface ISpStream;
++}
++
+ [
+     uuid(96749377-3391-11d2-9ee3-00c04f797396),
+     helpstring("Speech Voice"),
+diff --git a/dlls/sapi/sapi_private.h b/dlls/sapi/sapi_private.h
+index 414dea2755a..509bcb0715b 100644
+--- a/dlls/sapi/sapi_private.h
++++ b/dlls/sapi/sapi_private.h
+@@ -22,6 +22,7 @@
+ 
+ HRESULT data_key_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
+ HRESULT file_stream_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
++HRESULT speech_stream_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
+ HRESULT speech_voice_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
+ HRESULT token_category_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
+ HRESULT token_enum_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
+diff --git a/dlls/sapi/stream.c b/dlls/sapi/stream.c
+new file mode 100644
+index 00000000000..c2d112cae7a
+--- /dev/null
++++ b/dlls/sapi/stream.c
+@@ -0,0 +1,248 @@
++/*
++ * Speech API (SAPI) stream implementation.
++ *
++ * Copyright 2020 Gijs Vermeulen
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
++ */
++
++#include <stdarg.h>
++
++#define COBJMACROS
++
++#include "windef.h"
++#include "winbase.h"
++#include "objbase.h"
++
++#include "sapiddk.h"
++
++#include "wine/debug.h"
++
++#include "sapi_private.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(sapi);
++
++struct spstream
++{
++    ISpStream ISpStream_iface;
++    LONG ref;
++};
++
++static inline struct spstream *impl_from_ISpStream(ISpStream *iface)
++{
++    return CONTAINING_RECORD(iface, struct spstream, ISpStream_iface);
++}
++
++static HRESULT WINAPI spstream_QueryInterface(ISpStream *iface, REFIID iid, void **obj)
++{
++    struct spstream *This = impl_from_ISpStream(iface);
++
++    TRACE("(%p, %s, %p).\n", iface, debugstr_guid(iid), obj);
++
++    if (IsEqualIID(iid, &IID_IUnknown) ||
++        IsEqualIID(iid, &IID_ISpStream))
++        *obj = &This->ISpStream_iface;
++    else
++    {
++        *obj = NULL;
++        FIXME("interface %s not implemented.\n", debugstr_guid(iid));
++        return E_NOINTERFACE;
++    }
++
++    IUnknown_AddRef((IUnknown *)*obj);
++    return S_OK;
++}
++
++static ULONG WINAPI spstream_AddRef(ISpStream *iface)
++{
++    struct spstream *This = impl_from_ISpStream(iface);
++    ULONG ref = InterlockedIncrement(&This->ref);
++
++    TRACE("(%p): ref=%u.\n", iface, ref);
++
++    return ref;
++}
++
++static ULONG WINAPI spstream_Release(ISpStream *iface)
++{
++    struct spstream *This = impl_from_ISpStream(iface);
++    ULONG ref = InterlockedDecrement(&This->ref);
++
++    TRACE("(%p): ref=%u.\n", iface, ref);
++
++    if (!ref)
++    {
++        heap_free(This);
++    }
++
++    return ref;
++}
++static HRESULT WINAPI spstream_Read(ISpStream *iface, void *pv, ULONG cb, ULONG *read)
++{
++    FIXME("(%p, %p, %d, %p): stub.\n", iface, pv, cb, read);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_Write(ISpStream *iface, const void *pv, ULONG cb, ULONG *written)
++{
++    FIXME("(%p, %p, %d, %p): stub.\n", iface, pv, cb, written);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_Seek(ISpStream *iface, LARGE_INTEGER mode, DWORD origin, ULARGE_INTEGER *position)
++{
++    FIXME("(%p, %s, %d, %p): stub.\n", iface, wine_dbgstr_longlong(mode.QuadPart), origin, position);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_SetSize(ISpStream *iface, ULARGE_INTEGER size)
++{
++    FIXME("(%p, %s): stub.\n", iface, wine_dbgstr_longlong(size.QuadPart));
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_CopyTo(ISpStream *iface, IStream *stream, ULARGE_INTEGER cb,
++                                      ULARGE_INTEGER *read, ULARGE_INTEGER *written)
++{
++    FIXME("(%p, %p, %s, %p, %p): stub.\n", iface, stream, wine_dbgstr_longlong(cb.QuadPart),
++          read, written);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_Commit(ISpStream *iface, DWORD flag)
++{
++    FIXME("(%p, %d): stub.\n", iface, flag);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_Revert(ISpStream *iface)
++{
++    FIXME("(%p): stub.\n", iface);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_LockRegion(ISpStream *iface, ULARGE_INTEGER offset, ULARGE_INTEGER cb, DWORD type)
++{
++    FIXME("(%p, %s, %s, %d): stub.\n", iface, wine_dbgstr_longlong(offset.QuadPart),
++          wine_dbgstr_longlong(cb.QuadPart), type);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_UnlockRegion(ISpStream *iface, ULARGE_INTEGER offset, ULARGE_INTEGER cb, DWORD type)
++{
++    FIXME("(%p, %s, %s, %d): stub.\n", iface, wine_dbgstr_longlong(offset.QuadPart),
++          wine_dbgstr_longlong(cb.QuadPart), type);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_Stat(ISpStream *iface, STATSTG *statstg, DWORD flag)
++{
++    FIXME("(%p, %p, %d): stub.\n", iface, statstg, flag);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_Clone(ISpStream *iface, IStream **stream)
++{
++    FIXME("(%p, %p): stub.\n", iface, stream);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_GetFormat(ISpStream *iface, GUID *format, WAVEFORMATEX **wave)
++{
++    FIXME("(%p, %p, %p): stub.\n", iface, format, wave);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_SetBaseStream(ISpStream *iface, IStream *stream, REFGUID format,
++                                             const WAVEFORMATEX *wave)
++{
++    FIXME("(%p, %p, %s, %p): stub.\n", iface, stream, debugstr_guid(format), wave);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_GetBaseStream(ISpStream *iface, IStream **stream)
++{
++    FIXME("(%p, %p): stub.\n", iface, stream);
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_BindToFile(ISpStream *iface, LPCWSTR filename, SPFILEMODE mode,
++                                          const GUID *format, const WAVEFORMATEX* wave,
++                                          ULONGLONG interest)
++{
++    FIXME("(%p, %s, %d, %s, %p, %s): stub.\n", iface, debugstr_w(filename), mode, debugstr_guid(format),
++          wave, wine_dbgstr_longlong(interest));
++
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI spstream_Close(ISpStream *iface)
++{
++    FIXME("(%p): stub.\n", iface);
++
++    return E_NOTIMPL;
++}
++
++const static ISpStreamVtbl spstream_vtbl =
++{
++    spstream_QueryInterface,
++    spstream_AddRef,
++    spstream_Release,
++    spstream_Read,
++    spstream_Write,
++    spstream_Seek,
++    spstream_SetSize,
++    spstream_CopyTo,
++    spstream_Commit,
++    spstream_Revert,
++    spstream_LockRegion,
++    spstream_UnlockRegion,
++    spstream_Stat,
++    spstream_Clone,
++    spstream_GetFormat,
++    spstream_SetBaseStream,
++    spstream_GetBaseStream,
++    spstream_BindToFile,
++    spstream_Close
++};
++
++HRESULT speech_stream_create(IUnknown *outer, REFIID iid, void **obj)
++{
++    struct spstream *This = heap_alloc(sizeof(*This));
++    HRESULT hr;
++
++    if (!This) return E_OUTOFMEMORY;
++    This->ISpStream_iface.lpVtbl = &spstream_vtbl;
++    This->ref = 1;
++
++    hr = ISpStream_QueryInterface(&This->ISpStream_iface, iid, obj);
++
++    ISpStream_Release(&This->ISpStream_iface);
++    return hr;
++}
+diff --git a/dlls/sapi/tests/Makefile.in b/dlls/sapi/tests/Makefile.in
+index d5d97550970..f1de67418dc 100644
+--- a/dlls/sapi/tests/Makefile.in
++++ b/dlls/sapi/tests/Makefile.in
+@@ -3,5 +3,6 @@ IMPORTS   = ole32 user32 advapi32
+ 
+ C_SRCS = \
+ 	automation.c \
++	stream.c \
+ 	token.c \
+ 	tts.c
+diff --git a/dlls/sapi/tests/stream.c b/dlls/sapi/tests/stream.c
+new file mode 100644
+index 00000000000..aa91b782647
+--- /dev/null
++++ b/dlls/sapi/tests/stream.c
+@@ -0,0 +1,69 @@
++/*
++ * Speech API (SAPI) stream tests.
++ *
++ * Copyright 2020 Gijs Vermeulen
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
++ */
++
++#define COBJMACROS
++
++#include "sapiddk.h"
++#include "sperror.h"
++
++#include "wine/test.h"
++
++#define EXPECT_REF(obj,ref) _expect_ref((IUnknown*)obj, ref, __LINE__)
++static void _expect_ref(IUnknown *obj, ULONG ref, int line)
++{
++    ULONG rc;
++    IUnknown_AddRef(obj);
++    rc = IUnknown_Release(obj);
++    ok_(__FILE__,line)(rc == ref, "Unexpected refcount %d, expected %d.\n", rc, ref);
++}
++
++static void test_interfaces(void)
++{
++    ISpStream *speech_stream;
++    IDispatch *dispatch;
++    IUnknown *unk;
++    HRESULT hr;
++
++    hr = CoCreateInstance(&CLSID_SpStream, NULL, CLSCTX_INPROC_SERVER,
++                          &IID_ISpStream, (void **)&speech_stream);
++    ok(hr == S_OK, "Failed to create ISpeechVoice interface: %#x.\n", hr);
++    EXPECT_REF(speech_stream, 1);
++
++    hr = CoCreateInstance(&CLSID_SpStream, NULL, CLSCTX_INPROC_SERVER,
++                          &IID_IUnknown, (void **)&unk);
++    ok(hr == S_OK, "Failed to create IUnknown interface: %#x.\n", hr);
++    EXPECT_REF(unk, 1);
++    EXPECT_REF(speech_stream, 1);
++    IUnknown_Release(unk);
++
++    hr = CoCreateInstance(&CLSID_SpStream, NULL, CLSCTX_INPROC_SERVER,
++                          &IID_IDispatch, (void **)&dispatch);
++    ok(hr == E_NOINTERFACE, "Succeeded to create IDispatch interface: %#x.\n", hr);
++    ok(!dispatch, "Expected NULL dispatch, got %p.", dispatch);
++
++    ISpStream_Release(speech_stream);
++}
++
++START_TEST(stream)
++{
++    CoInitialize(NULL);
++    test_interfaces();
++    CoUninitialize();
++}
+diff --git a/include/sapi.idl b/include/sapi.idl
+index 0a7a034cace..52da472983d 100644
+--- a/include/sapi.idl
++++ b/include/sapi.idl
+@@ -1086,6 +1086,17 @@ library SpeechLib
+         interface ISpRecognizer;
+     };
+ 
++    [
++        uuid(715d9c59-4442-11d2-9605-00c04f8ee628),
++        helpstring("Speech Stream"),
++        restricted,
++        hidden
++    ]
++    coclass SpStream
++    {
++        interface ISpStream;
++    };
++
+     [
+         uuid(96749377-3391-11d2-9ee3-00c04f797396)
+     ]

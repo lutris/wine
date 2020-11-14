@@ -70,7 +70,7 @@ BOOL usexvidmode = TRUE;
 BOOL usexrandr = TRUE;
 BOOL usexcomposite = TRUE;
 BOOL use_xkb = TRUE;
-BOOL use_take_focus = TRUE;
+BOOL use_take_focus = FALSE;
 BOOL use_primary_selection = FALSE;
 BOOL use_system_cursors = TRUE;
 BOOL show_systray = TRUE;
@@ -159,6 +159,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_SYSTEM_TRAY_OPCODE",
     "_NET_SYSTEM_TRAY_S0",
     "_NET_SYSTEM_TRAY_VISUAL",
+    "_NET_WM_BYPASS_COMPOSITOR",
     "_NET_WM_ICON",
     "_NET_WM_MOVERESIZE",
     "_NET_WM_NAME",

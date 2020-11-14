@@ -59,6 +59,7 @@ struct ntdll_thread_data
     PRTL_THREAD_START_ROUTINE start;  /* thread entry point */
     void              *param;         /* thread entry point parameter */
     int                esync_apc_fd;  /* fd to wait on for user APCs */
+    int               *fsync_apc_futex;
 };
 
 C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
@@ -472,5 +473,7 @@ static inline int ntdll_wcsnicmp( const WCHAR *str1, const WCHAR *str2, int n )
 #define wcsupr(str)        ntdll_wcsupr(str)
 #define towupper(c)        ntdll_towupper(c)
 #define towlower(c)        ntdll_towlower(c)
+
+BOOL CDECL __wine_needs_override_large_address_aware(void);
 
 #endif /* __NTDLL_UNIX_PRIVATE_H */

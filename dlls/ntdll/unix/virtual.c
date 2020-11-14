@@ -2675,6 +2675,7 @@ static void init_teb( TEB *teb, PEB *peb )
     thread_data->wait_fd[0] = -1;
     thread_data->wait_fd[1] = -1;
     thread_data->esync_apc_fd = -1;
+    thread_data->fsync_apc_futex = NULL;
     list_add_head( &teb_list, &thread_data->entry );
 }
 
@@ -3463,6 +3464,19 @@ void CDECL virtual_release_address_space(void)
     }
 
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+}
+
+BOOL CDECL __wine_needs_override_large_address_aware(void)
+{
+    static int needs_override = -1;
+
+    if (needs_override == -1)
+    {
+        const char *str = getenv( "WINE_LARGE_ADDRESS_AWARE" );
+
+        needs_override = !str || atoi(str) == 1;
+    }
+    return needs_override;
 }
 
 

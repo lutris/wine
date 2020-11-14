@@ -57,6 +57,7 @@
 
 #include "unix_private.h"
 #include "esync.h"
+#include "fsync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(esync);
 
@@ -66,7 +67,7 @@ int do_esync(void)
     static int do_esync_cached = -1;
 
     if (do_esync_cached == -1)
-        do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC"));
+        do_esync_cached = getenv("WINEESYNC") && atoi(getenv("WINEESYNC")) && !do_fsync();
 
     return do_esync_cached;
 #else
@@ -867,7 +868,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
             return ret;
     }
 
-    if (objs[count - 1] && objs[count - 1]->type == ESYNC_QUEUE)
+    if (count && objs[count - 1] && objs[count - 1]->type == ESYNC_QUEUE)
         msgwait = TRUE;
 
     if (has_esync && has_server)
@@ -896,7 +897,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
         }
     }
 
-    if (wait_any || count == 1)
+    if (wait_any || count <= 1)
     {
         /* Try to check objects now, so we can obviate poll() at least. */
         for (i = 0; i < count; i++)
