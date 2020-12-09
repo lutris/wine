@@ -1,0 +1,37 @@
+From cf3bb0ce0d07531f7c8a053d5184bf2b0b287ce8 Mon Sep 17 00:00:00 2001
+From: Paul Gofman <pgofman@codeweavers.com>
+Date: Tue, 8 Dec 2020 13:07:19 +0300
+Subject: [PATCH] kernelbase: Get language sort only when required in
+ LCMapStringEx().
+
+Fixes very slow loading (a few minutes) of Warhammer 40000: Inquisitor
+- Martyr after b780e5f5b1bd018629bfa31431e216c7579fe9aa.
+
+Signed-off-by: Paul Gofman <pgofman@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/kernelbase/locale.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/kernelbase/locale.c b/dlls/kernelbase/locale.c
+index 7218a159844..c60b796aa48 100644
+--- a/dlls/kernelbase/locale.c
++++ b/dlls/kernelbase/locale.c
+@@ -5205,7 +5205,7 @@ INT WINAPI DECLSPEC_HOTPATCH LCMapStringEx( const WCHAR *locale, DWORD flags, co
+                                             WCHAR *dst, int dstlen, NLSVERSIONINFO *version,
+                                             void *reserved, LPARAM handle )
+ {
+-    const struct sortguid *sortid;
++    const struct sortguid *sortid = NULL;
+     LPWSTR dst_ptr;
+     INT len;
+ 
+@@ -5236,7 +5236,7 @@ INT WINAPI DECLSPEC_HOTPATCH LCMapStringEx( const WCHAR *locale, DWORD flags, co
+ 
+     if (!dstlen) dst = NULL;
+ 
+-    if (!(sortid = get_language_sort( locale )))
++    if (flags & LCMAP_LINGUISTIC_CASING && !(sortid = get_language_sort( locale )))
+     {
+         FIXME( "unknown locale %s\n", debugstr_w(locale) );
+         SetLastError( ERROR_INVALID_PARAMETER );

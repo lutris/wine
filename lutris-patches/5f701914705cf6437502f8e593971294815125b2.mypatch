@@ -1,0 +1,27 @@
+From 5f701914705cf6437502f8e593971294815125b2 Mon Sep 17 00:00:00 2001
+From: Alexandre Julliard <julliard@winehq.org>
+Date: Mon, 7 Dec 2020 12:46:28 +0100
+Subject: [PATCH] gdi32: Always let the Freetype driver fixup the AA flags.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=50127
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/gdi32/font.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/gdi32/font.c b/dlls/gdi32/font.c
+index 9fa0f45ec4b..858f5ef675f 100644
+--- a/dlls/gdi32/font.c
++++ b/dlls/gdi32/font.c
+@@ -3761,9 +3761,9 @@ static HFONT CDECL font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
+ 
+         font = select_font( &lf, dcmat, can_use_bitmap );
+ 
+-        if (font && !*aa_flags)
++        if (font)
+         {
+-            *aa_flags = font->aa_flags;
++            if (!*aa_flags) *aa_flags = font->aa_flags;
+             if (!*aa_flags)
+             {
+                 if (lf.lfQuality == CLEARTYPE_QUALITY || lf.lfQuality == CLEARTYPE_NATURAL_QUALITY)

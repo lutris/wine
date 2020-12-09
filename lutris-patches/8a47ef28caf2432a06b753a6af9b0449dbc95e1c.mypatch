@@ -1,0 +1,25 @@
+From 8a47ef28caf2432a06b753a6af9b0449dbc95e1c Mon Sep 17 00:00:00 2001
+From: Jacek Caban <jacek@codeweavers.com>
+Date: Tue, 8 Dec 2020 01:03:51 +0100
+Subject: [PATCH] conhost: Use QS_ALLINPUT to wait for input in main loop.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=50014
+Signed-off-by: Jacek Caban <jacek@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ programs/conhost/conhost.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/programs/conhost/conhost.c b/programs/conhost/conhost.c
+index dbf0e1459d1..0548fcaafd3 100644
+--- a/programs/conhost/conhost.c
++++ b/programs/conhost/conhost.c
+@@ -2625,7 +2625,7 @@ static int main_loop( struct console *console, HANDLE signal )
+     for (;;)
+     {
+         if (pump_msgs)
+-            res = MsgWaitForMultipleObjects( wait_cnt, wait_handles, FALSE, INFINITE, QS_ALLEVENTS );
++            res = MsgWaitForMultipleObjects( wait_cnt, wait_handles, FALSE, INFINITE, QS_ALLINPUT );
+         else
+             res = WaitForMultipleObjects( wait_cnt, wait_handles, FALSE, INFINITE );
+ 

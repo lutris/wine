@@ -1,0 +1,54 @@
+# Last wine-tkg-staging-fsync-git configuration - Ср 09 дек 2020 09:54:35 MSK :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 6.0rc1.r0.g842b38e2916
+Using wine-staging patchset (version 6.0rc1.r0.gd7b71f0b)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
+
+Done applying reverting hotfixes (if any) - list available in prepare.log
+
+use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
+FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
+childwindow.patch -- ( Applied child window for vk patch )
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: 
+
+mk11.patch -- ( Applied Mortal Kombat 11 fix )
+fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
+
+LAA-unix-staging.patch -- ( Applied large address aware override support )
+
+proton-winevulkan-nofshack.patch -- ( Using Proton winevulkan patches (nofshack) )
+msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
+josh-flat-theme.patch -- ( Add Josh's better-theme )
+proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
+
+Applied your own patch 14b50ee1b81338e2c2dcb432e4c8091ed376f2d9.mypatch
+Applied your own patch 183a8cf380ae2d95c8d694604e930965aae12f16.mypatch
+Applied your own patch 251262a4-43a5234.mypatch
+Applied your own patch 5f701914705cf6437502f8e593971294815125b2.mypatch
+Applied your own patch 8a47ef28caf2432a06b753a6af9b0449dbc95e1c.mypatch
+Applied your own patch alt-tab-focus-fixes.mypatch
+Applied your own patch bf662e5b624c30bf458f23779c52b3acf9204b21.mypatch
+Applied your own patch blackops2_unhandled_exception_fix.mypatch
+Applied your own patch c7ba8b7aa49f9938b24f55a7c3cd049c27d73aad.mypatch
+Applied your own patch cf3bb0ce0d07531f7c8a053d5184bf2b0b287ce8.mypatch
+Applied your own patch dsound.mypatch
+Applied your own patch fac1e40aaf0726a3e328a922cb496927548190cf.mypatch
+Applied your own patch ffxiv-launcher-workaround.mypatch
+Applied your own patch ldlibrary_chromium_fix.mypatch
+Applied your own patch legoisland_168726.mypatch
+Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
+Applied your own patch proton-amd_ags.mypatch
+Applied your own patch pulse_names.mypatch
+Applied your own patch rockstar_installer_fix_heap.mypatch
+Applied your own patch rockstarlauncher_downloads.mypatch
+Applied your own patch unity-alt-tab-fix.mypatch
+Applied your own patch winegstreamer.mypatch
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

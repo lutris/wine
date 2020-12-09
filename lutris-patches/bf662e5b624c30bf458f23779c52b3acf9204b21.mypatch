@@ -1,0 +1,25 @@
+From bf662e5b624c30bf458f23779c52b3acf9204b21 Mon Sep 17 00:00:00 2001
+From: Chip Davis <cdavis@codeweavers.com>
+Date: Mon, 7 Dec 2020 22:26:04 -0600
+Subject: [PATCH] iphlpapi: Fix copy-paste error.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=50274
+Signed-off-by: Chip Davis <cdavis@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/iphlpapi/ipstats.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/dlls/iphlpapi/ipstats.c b/dlls/iphlpapi/ipstats.c
+index 0fa446c21a5..36f90f2c3a8 100644
+--- a/dlls/iphlpapi/ipstats.c
++++ b/dlls/iphlpapi/ipstats.c
+@@ -2980,7 +2980,7 @@ DWORD build_tcp6_table( TCP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE
+             row.dwLocalScopeId = find_ipv6_addr_scope( (const IN6_ADDR *)&row.ucLocalAddr, addr_scopes, addr_scopes_size );
+             memcpy( &row.ucRemoteAddr, &in->in6p_faddr.s6_addr, sizeof(row.ucRemoteAddr) );
+             row.dwRemotePort = in->inp_fport;
+-            row.dwLocalScopeId = find_ipv6_addr_scope( (const IN6_ADDR *)&row.ucRemoteAddr, addr_scopes, addr_scopes_size );
++            row.dwRemoteScopeId = find_ipv6_addr_scope( (const IN6_ADDR *)&row.ucRemoteAddr, addr_scopes, addr_scopes_size );
+             row.dwState = TCPStateToMIBState( tcp->t_state );
+             if (!match_class( class, row.dwState )) continue;
+ 

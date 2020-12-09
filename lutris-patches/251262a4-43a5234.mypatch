@@ -1,0 +1,80 @@
+From 251262a44a8f8403fd963e7bb510da778944af1b Mon Sep 17 00:00:00 2001
+From: Zebediah Figura <z.figura12@gmail.com>
+Date: Sun, 6 Dec 2020 10:19:11 -0600
+Subject: [PATCH] Revert "winegstreamer: Avoid performing color matrix
+ conversions in videoconvert.".
+
+This reverts commit fd25ba65e0eb9fedfb2cdfa2b7a4b16e0401dfdf.
+
+The relevant commit breaks visual correctness in many applications, for the sake
+of performance. As such I am rather inclined to revert it for 6.0, especially as
+a full solution will probably involve a revert of this patch along with upstream
+changes to GStreamer.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=49535
+Signed-off-by: Zebediah Figura <z.figura12@gmail.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winegstreamer/gstdemux.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/dlls/winegstreamer/gstdemux.c b/dlls/winegstreamer/gstdemux.c
+index e227ed9331d..77204bc55a2 100644
+--- a/dlls/winegstreamer/gstdemux.c
++++ b/dlls/winegstreamer/gstdemux.c
+@@ -1024,9 +1024,6 @@ static void init_new_decoded_pad(GstElement *bin, GstPad *pad, struct gstdemux *
+             goto out;
+         }
+ 
+-        /* Avoid expensive color matrix conversions. */
+-        gst_util_set_object_arg(G_OBJECT(vconv), "matrix-mode", "none");
+-
+         /* GStreamer outputs RGB video top-down, but DirectShow expects bottom-up. */
+         if (!(flip = gst_element_factory_make("videoflip", NULL)))
+         {
+
+From 43a5234bd9adb455cadf7be2c438edbcb58afb6c Mon Sep 17 00:00:00 2001
+From: Zebediah Figura <z.figura12@gmail.com>
+Date: Sat, 5 Dec 2020 10:32:17 -0600
+Subject: [PATCH] winegstreamer: Clean up a newly allocated buffer on error in
+ bytestream_wrapper_pull().
+
+Signed-off-by: Zebediah Figura <z.figura12@gmail.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/winegstreamer/media_source.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winegstreamer/media_source.c b/dlls/winegstreamer/media_source.c
+index 5c502cf3ed5..a9a85cf4d4b 100644
+--- a/dlls/winegstreamer/media_source.c
++++ b/dlls/winegstreamer/media_source.c
+@@ -441,6 +441,7 @@ GstFlowReturn bytestream_wrapper_pull(GstPad *pad, GstObject *parent, guint64 of
+ {
+     struct media_source *source = gst_pad_get_element_private(pad);
+     IMFByteStream *byte_stream = source->byte_stream;
++    GstBuffer *new_buffer = NULL;
+     ULONG bytes_read;
+     GstMapInfo info;
+     BOOL is_eof;
+@@ -460,7 +461,7 @@ GstFlowReturn bytestream_wrapper_pull(GstPad *pad, GstObject *parent, guint64 of
+         return GST_FLOW_EOS;
+ 
+     if (!(*buf))
+-        *buf = gst_buffer_new_and_alloc(len);
++        *buf = new_buffer = gst_buffer_new_and_alloc(len);
+     gst_buffer_map(*buf, &info, GST_MAP_WRITE);
+     hr = IMFByteStream_Read(byte_stream, info.data, len, &bytes_read);
+     gst_buffer_unmap(*buf, &info);
+@@ -468,7 +469,11 @@ GstFlowReturn bytestream_wrapper_pull(GstPad *pad, GstObject *parent, guint64 of
+     gst_buffer_set_size(*buf, bytes_read);
+ 
+     if (FAILED(hr))
++    {
++        if (new_buffer)
++            gst_buffer_unref(new_buffer);
+         return GST_FLOW_ERROR;
++    }
+     return GST_FLOW_OK;
+ }
+ 

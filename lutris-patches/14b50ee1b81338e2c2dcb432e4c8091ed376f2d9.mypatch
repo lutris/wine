@@ -1,0 +1,58 @@
+From 14b50ee1b81338e2c2dcb432e4c8091ed376f2d9 Mon Sep 17 00:00:00 2001
+From: Jacek Caban <jacek@codeweavers.com>
+Date: Mon, 7 Dec 2020 23:42:37 +0100
+Subject: [PATCH] conhost: Fix handling selection boundaries in copy_selection.
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=50052
+Signed-off-by: Jacek Caban <jacek@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ programs/conhost/window.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/programs/conhost/window.c b/programs/conhost/window.c
+index 3d83632fabf..f5cf8e434c3 100644
+--- a/programs/conhost/window.c
++++ b/programs/conhost/window.c
+@@ -969,13 +969,13 @@ static void copy_selection( struct console *console )
+     WCHAR *p, *buf;
+     HANDLE mem;
+ 
+-    w = abs( console->window->selection_start.X - console->window->selection_end.X ) + 2;
++    w = abs( console->window->selection_start.X - console->window->selection_end.X ) + 1;
+     h = abs( console->window->selection_start.Y - console->window->selection_end.Y ) + 1;
+ 
+     if (!OpenClipboard( console->win )) return;
+     EmptyClipboard();
+ 
+-    mem = GlobalAlloc( GMEM_MOVEABLE, (w * h) * sizeof(WCHAR) );
++    mem = GlobalAlloc( GMEM_MOVEABLE, (w + 1) * h * sizeof(WCHAR) );
+     if (mem && (p = buf = GlobalLock( mem )))
+     {
+         int x, y;
+@@ -992,20 +992,21 @@ static void copy_selection( struct console *console )
+                 p[x - c.X] = console->active->data[y * console->active->width + x].ch;
+ 
+             /* strip spaces from the end of the line */
+-            end = p + w - 1;
++            end = p + w;
+             while (end > p && *(end - 1) == ' ')
+                 end--;
+-            *end = (y < h - 1) ? '\n' : '\0';
++            *end = (y < c.Y + h - 1) ? '\n' : '\0';
+             p = end + 1;
+         }
+ 
+-        GlobalUnlock( mem );
+-        if (p - buf != w * h)
++        TRACE( "%s\n", debugstr_w( buf ));
++        if (p - buf != (w + 1) * h)
+         {
+             HANDLE new_mem;
+             new_mem = GlobalReAlloc( mem, (p - buf) * sizeof(WCHAR), GMEM_MOVEABLE );
+             if (new_mem) mem = new_mem;
+         }
++        GlobalUnlock( mem );
+         SetClipboardData( CF_UNICODETEXT, mem );
+     }
+     CloseClipboard();

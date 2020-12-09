@@ -1,0 +1,35 @@
+From fac1e40aaf0726a3e328a922cb496927548190cf Mon Sep 17 00:00:00 2001
+From: Hans Leidekker <hans@codeweavers.com>
+Date: Mon, 7 Dec 2020 17:53:01 +0100
+Subject: [PATCH] setupapi: Handle NULL source filename in build_filepathsW.
+
+Source filename is NULL for files to be deleted.
+
+Signed-off-by: Hans Leidekker <hans@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/setupapi/queue.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/setupapi/queue.c b/dlls/setupapi/queue.c
+index 7ed66c298d3..dc718cc66fc 100644
+--- a/dlls/setupapi/queue.c
++++ b/dlls/setupapi/queue.c
+@@ -152,7 +152,7 @@ static BOOL build_filepathsW( const struct file_op *op, FILEPATHS_W *paths )
+     unsigned int src_len = 1, dst_len = 1;
+     WCHAR *source = (PWSTR)paths->Source, *target = (PWSTR)paths->Target;
+ 
+-    if (op->src_file[0] != '@')
++    if (!op->src_file || op->src_file[0] != '@')
+     {
+         if (op->media) src_len += lstrlenW(op->media->root) + 1;
+         if (op->src_path) src_len += lstrlenW(op->src_path) + 1;
+@@ -174,7 +174,7 @@ static BOOL build_filepathsW( const struct file_op *op, FILEPATHS_W *paths )
+         paths->Target = target = HeapAlloc( GetProcessHeap(), 0, dst_len );
+     }
+     if (!source || !target) return FALSE;
+-    if (op->src_file[0] != '@')
++    if (!op->src_file || op->src_file[0] != '@')
+         concat_W( source, op->media ? op->media->root : NULL, op->src_path, op->src_file );
+     else
+         lstrcpyW( source, op->src_file );
