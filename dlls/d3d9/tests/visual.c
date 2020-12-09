@@ -21710,6 +21710,370 @@ done:
     DestroyWindow(window);
 }
 
+static void do_test_indexed_vertex_blending(IDirect3DDevice9 *device, const char *test_id_str)
+{
+    IDirect3DPixelShader9 *ps;
+    D3DCAPS9 caps;
+    D3DCOLOR color;
+    HRESULT hr;
+    unsigned int i;
+
+    /* This comment exists so that this hunk doesn't get applied to the wrong function, again. */
+    static const D3DMATRIX view_mat =
+    {{{
+        2.0f / 10.0f, 0.0f,         0.0f, 0.0f,
+        0.0f,         2.0f / 10.0f, 0.0f, 0.0f,
+        0.0f,         0.0f,         1.0f, 0.0f,
+        0.0f,         0.0f,         0.0f, 1.0f
+    /* This comment exists so that this hunk doesn't get applied to the wrong function, again. */
+    }}},
+    upper_left =
+    {{{
+         1.0f, 0.0f, 0.0f, 0.0f,
+         0.0f, 1.0f, 0.0f, 0.0f,
+         0.0f, 0.0f, 2.0f, 0.0f,
+        -4.0f, 4.0f, 0.0f, 1.0f
+    }}},
+    lower_left =
+    {{{
+         1.0f,  0.0f, 0.0f, 0.0f,
+         0.0f,  1.0f, 0.0f, 0.0f,
+         0.0f,  0.0f, 2.0f, 0.0f,
+        -4.0f, -4.0f, 0.0f, 1.0f
+    }}},
+    upper_right =
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 2.0f, 0.0f,
+        4.0f, 4.0f, 0.0f, 1.0f
+    }}},
+    lower_right =
+    {{{
+        1.0f,  0.0f, 0.0f, 0.0f,
+        0.0f,  1.0f, 0.0f, 0.0f,
+        0.0f,  0.0f, 2.0f, 0.0f,
+        4.0f, -4.0f, 0.0f, 1.0f
+    }}},
+    identity =
+    {{{
+        1.0f,  0.0f, 0.0f, 0.0f,
+        0.0f,  1.0f, 0.0f, 0.0f,
+        0.0f,  0.0f, 1.0f, 0.0f,
+        0.0f,  0.0f, 0.0f, 1.0f
+    }}};
+
+    static const DWORD normal_ps[] =
+    {
+        0xffff0200,                                                             /* ps_2_0               */
+        0x05000051, 0xa00f0000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, /* def c0, 1, 0, 0, 0   */
+        0x0200001f, 0x80000000, 0xb0070000,                                     /* dcl t0.xyz           */
+        0x02000001, 0x80170000, 0xb0e40000,                                     /* mov_sat r0.xyz, t0   */
+        0x02000001, 0x80080000, 0xa0000000,                                     /* mov r0.w, c0.x       */
+        0x02000001, 0x800f0800, 0x80e40000,                                     /* mov oC0, r0          */
+        0x0000ffff,                                                             /* end                  */
+    };
+
+    static const POINT quad_upper_right_points[] =
+    {
+        {576, 48}, {-1, -1},
+    },
+    quad_upper_right_empty_points[] =
+    {
+        {64, 48}, {64, 432}, {576, 432}, {320, 240}, {-1, -1}
+    },
+    quad_center_points[] =
+    {
+        {320, 240}, {-1, -1}
+    },
+    quad_center_empty_points[] =
+    {
+        {64, 48}, {576, 48}, {64, 432}, {576, 432}, {-1, -1}
+    },
+    quad_upper_center_points[] =
+    {
+        {320, 48}, {-1, -1}
+    },
+    quad_upper_center_empty_points[] =
+    {
+        {320, 240}, {64, 48}, {576, 48}, {-1, -1}
+    },
+    quad_fullscreen_points[] =
+    {
+        {320, 48}, {320, 240}, {64, 48}, {576, 48}, {64, 432}, {576, 432}, {-1, -1}
+    },
+    quad_fullscreen_empty_points[] =
+    {
+        {-1, -1}
+    };
+
+    static const struct
+    {
+        struct
+        {
+            struct vec3 position;
+            struct vec3 blendweights;
+            DWORD matrixIndices;
+            struct vec3 normal;
+        }
+        vertex_data[4];
+        const POINT *quad_points;
+        const POINT *empty_points;
+    }
+    tests[] =
+    {
+        /* upper right */
+        {
+            {{{-1.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{-1.0f,  1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{ 1.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{ 1.0f,  1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}}},
+            quad_upper_right_points, quad_upper_right_empty_points
+        },
+        /* center */
+        {
+            {{{-1.0f, -1.0f, 0.0f}, {0.25f, 0.25f, 0.25f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{-1.0f,  1.0f, 0.0f}, {0.25f, 0.25f, 0.25f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{ 1.0f, -1.0f, 0.0f}, {0.25f, 0.25f, 0.25f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{ 1.0f,  1.0f, 0.0f}, {0.25f, 0.25f, 0.25f}, 0x06070405, {0.0f, 0.0f, 1.0f}}},
+            quad_center_points, quad_center_empty_points
+        },
+        /*  upper center */
+        {
+            {{{-1.0f, -1.0f, 0.0f}, {0.5f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{-1.0f,  1.0f, 0.0f}, {0.5f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{ 1.0f, -1.0f, 0.0f}, {0.5f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{ 1.0f,  1.0f, 0.0f}, {0.5f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}}},
+            quad_upper_center_points, quad_upper_center_empty_points
+        },
+        /*  full screen */
+        {
+            {{{-1.0f, -1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{-1.0f,  1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{ 1.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}},
+             {{ 1.0f,  1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0x06070405, {0.0f, 0.0f, 1.0f}}},
+            quad_fullscreen_points, quad_fullscreen_empty_points
+        }
+    };
+
+    memset(&caps, 0, sizeof(caps));
+    hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
+    if (caps.MaxVertexBlendMatrixIndex < 7 || caps.MaxVertexBlendMatrices < 4)
+    {
+        win_skip("(%s) Too few vertex blend matrices supported: MaxVertexBlendMatrices=%u, MaxVertexBlendMatrixIndex=%u.\n",
+                test_id_str, caps.MaxVertexBlendMatrices, caps.MaxVertexBlendMatrixIndex);
+        return;
+    }
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %08x.\n", hr);
+
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_VIEW, &view_mat);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform returned %08x.\n", hr);
+
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLDMATRIX(5), &upper_left);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetTransform returned %08x.\n", test_id_str, hr);
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLDMATRIX(4), &lower_left);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetTransform returned %08x.\n", test_id_str, hr);
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLDMATRIX(7), &lower_right);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetTransform returned %08x.\n", test_id_str, hr);
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLDMATRIX(6), &upper_right);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetTransform returned %08x.\n", test_id_str, hr);
+
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_VERTEXBLEND, D3DVBF_3WEIGHTS);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetRenderState failed %08x.\n", test_id_str, hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_INDEXEDVERTEXBLENDENABLE, TRUE);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetRenderState D3DRS_INDEXEDVERTEXBLENDENABLE failed %08x.\n",
+            test_id_str, hr);
+
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACENORMAL | 1);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetTextureStageState failed %08x.\n", test_id_str, hr);
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, &identity);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetTransform returned %08x.\n", test_id_str, hr);
+
+    hr = IDirect3DDevice9_CreatePixelShader(device, normal_ps, &ps);
+    ok(hr == D3D_OK, "(%s) IDirect3DDevice9_CreatePixelShader failed %08x.\n", test_id_str, hr);
+
+    for (i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
+    {
+        const POINT *point;
+
+        hr = IDirect3DDevice9_SetPixelShader(device, NULL);
+        ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetPixelShader failed %08x.\n", test_id_str, hr);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff000000, 0.0, 0);
+        ok(SUCCEEDED(hr), "Failed to clear, hr %08x.\n", hr);
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZB4 | D3DFVF_LASTBETA_UBYTE4 | D3DFVF_NORMAL);
+        ok(SUCCEEDED(hr), "(%s) Failed to set FVF, hr %#x.\n", test_id_str, hr);
+
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, tests[i].vertex_data,
+                9 * sizeof(float) + sizeof(DWORD));
+        ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+
+        point = tests[i].quad_points;
+        while (point->x != -1 && point->y != -1)
+        {
+            color = getPixelColor(device, point->x, point->y);
+            ok(color_match(color, 0x00ffffff, 1), "(%s) Expected quad at %dx%d.\n", test_id_str, point->x, point->y);
+            ++point;
+        }
+
+        point = tests[i].empty_points;
+        while (point->x != -1 && point->y != -1)
+        {
+            color = getPixelColor(device, point->x, point->y);
+            ok(color_match(color, 0x00000000, 1), "(%s) Unexpected quad at %dx%d.\n", test_id_str, point->x, point->y);
+            ++point;
+        }
+
+        hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+        ok(SUCCEEDED(hr), "Failed to present, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_SetPixelShader(device, ps);
+        ok(hr == D3D_OK, "(%s) IDirect3DDevice9_SetPixelShader failed %08x.\n", test_id_str, hr);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff000000, 0.0, 0);
+        ok(SUCCEEDED(hr), "Failed to clear %08x.\n", hr);
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZB4 | D3DFVF_LASTBETA_UBYTE4 | D3DFVF_NORMAL);
+        ok(SUCCEEDED(hr), "(%s) Failed to set FVF, hr %#x.\n", test_id_str, hr);
+
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, tests[i].vertex_data,
+                9 * sizeof(float) + sizeof(DWORD));
+        ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+
+        point = tests[i].quad_points;
+        while (point->x != -1 && point->y != -1)
+        {
+            color = getPixelColor(device, point->x, point->y);
+            todo_wine ok(color_match(color, 0x0000007f, 1), "(%s) Expected color 0x0000007f at %dx%d, got 0x%08x.\n", test_id_str, point->x, point->y, color);
+            ++point;
+        }
+
+        point = tests[i].empty_points;
+        while (point->x != -1 && point->y != -1)
+        {
+            color = getPixelColor(device, point->x, point->y);
+            ok(color_match(color, 0x00000000, 1), "(%s) Expected color 0x00000000 at %dx%d, got 0x%08x", test_id_str, point->x, point->y, color);
+            ++point;
+        }
+
+        hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+        ok(SUCCEEDED(hr), "Failed to present, hr %#x.\n", hr);
+    }
+
+    IDirect3DVertexShader9_Release(ps);
+}
+
+static void test_indexed_vertex_blending(void)
+{
+    D3DPRESENT_PARAMETERS present_parameters = {0};
+    IDirect3DDevice9 *device;
+    IDirect3D9 *d3d;
+    ULONG refcount;
+    D3DCAPS9 caps;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+
+    memset(&caps, 0, sizeof(caps));
+    hr = IDirect3D9_GetDeviceCaps(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &caps);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(caps.MaxVertexBlendMatrices == 4 && !caps.MaxVertexBlendMatrixIndex,
+            "Got unexpected MaxVertexBlendMatrices %u, MaxVertexBlendMatrixIndex %u.\n",
+            caps.MaxVertexBlendMatrices, caps.MaxVertexBlendMatrixIndex);
+    hr = IDirect3D9_GetDeviceCaps(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_REF, &caps);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(caps.MaxVertexBlendMatrices == 4 && caps.MaxVertexBlendMatrixIndex == 255,
+            "Got unexpected MaxVertexBlendMatrices %u, MaxVertexBlendMatrixIndex %u.\n",
+            caps.MaxVertexBlendMatrices, caps.MaxVertexBlendMatrixIndex);
+
+    present_parameters.Windowed = TRUE;
+    present_parameters.hDeviceWindow = window;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    present_parameters.BackBufferWidth = 640;
+    present_parameters.BackBufferHeight = 480;
+    present_parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
+    present_parameters.EnableAutoDepthStencil = TRUE;
+    present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    if (SUCCEEDED(IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
+            D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device)))
+    {
+        do_test_indexed_vertex_blending(device,"IVB hardware");
+        refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    else
+        skip("Failed to create a HAL device, skipping test.\n");
+
+    if (SUCCEEDED(IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
+            D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device)))
+    {
+        memset(&caps, 0, sizeof(caps));
+        hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+        ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
+        ok(caps.MaxVertexBlendMatrixIndex == 255, "Expected 255 as maximum blend matrix index, got %u.\n",
+                caps.MaxVertexBlendMatrixIndex);
+
+        do_test_indexed_vertex_blending(device,"IVB software");
+
+        refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    else
+        skip("Failed to create a HAL device with software processing, skipping test.\n");
+
+    if (SUCCEEDED(IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
+            D3DCREATE_MIXED_VERTEXPROCESSING, &present_parameters, &device)))
+    {
+        memset(&caps, 0, sizeof(caps));
+        hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+        ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
+        ok(caps.MaxVertexBlendMatrixIndex < 255, "Expected less than 255 as maximum blend matrix index, got %u.\n",
+                caps.MaxVertexBlendMatrixIndex);
+
+        hr = IDirect3DDevice9_SetSoftwareVertexProcessing(device, TRUE);
+        ok(SUCCEEDED(hr), "Failed to enable software processing, hr %#x.\n", hr);
+
+        memset(&caps, 0, sizeof(caps));
+        hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+        ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
+        ok(caps.MaxVertexBlendMatrixIndex == 255, "Expected 255 as maximum blend matrix index, got %u.\n",
+                caps.MaxVertexBlendMatrixIndex);
+
+        hr = IDirect3DDevice9_SetSoftwareVertexProcessing(device, FALSE);
+        ok(SUCCEEDED(hr), "Failed to disable software processing, hr %#x.\n", hr);
+
+        do_test_indexed_vertex_blending(device,"IVB mixed");
+
+        refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    else
+        skip("Failed to create a HAL device with mixed processing, skipping tests.\n");
+
+    IDirect3D9_Release(d3d);
+    DestroyWindow(window);
+}
+
 static void test_updatetexture(void)
 {
     BOOL r32f_supported, ati2n_supported, do_visual_test;
@@ -24821,7 +25185,6 @@ static void test_mvp_software_vertex_shaders(void)
     hr = IDirect3DDevice9_CreateVertexShader(device, reladdr_shader_code, &reladdr_shader);
     ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9_CreateVertexShader(device, pure_sw_shader_code, &pure_sw_shader);
-    todo_wine
     ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &vertex_declaration);
     ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
@@ -24859,7 +25222,7 @@ static void test_mvp_software_vertex_shaders(void)
 
     expected_color = 0x00ff0000; /* Color from vertex data and not from the shader. */
     color = getPixelColor(device, 5, 5);
-    ok(color == expected_color, "Expected color 0x%08x, got 0x%08x (sw shader in hw mode, second attempt).\n",
+    todo_wine ok(color == expected_color, "Expected color 0x%08x, got 0x%08x (sw shader in hw mode, second attempt).\n",
             expected_color, color);
 
     hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
@@ -24878,7 +25241,6 @@ static void test_mvp_software_vertex_shaders(void)
 
     expected_color = 0x00ffffff;
     color = getPixelColor(device, 5, 5);
-    todo_wine
     ok(color == expected_color, "Expected color 0x%08x, got 0x%08x (sw shader in sw mode).\n",
             expected_color, color);
 
@@ -24895,7 +25257,6 @@ static void test_mvp_software_vertex_shaders(void)
     hr = IDirect3DDevice9_SetVertexShaderConstantF(device, 0, c_index, 1);
     ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9_SetVertexShaderConstantF(device, (unsigned int)c_index[0], c_color, 1);
-    todo_wine
     ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
 
     hr = IDirect3DDevice9_BeginScene(device);
@@ -24929,7 +25290,6 @@ static void test_mvp_software_vertex_shaders(void)
 
     expected_color = 0x0000ffff; /* c[256] is c_color for SW shader. */
     color = getPixelColor(device, 5, 5);
-    todo_wine
     ok(color == expected_color, "Expected color 0x%08x, got 0x%08x (shader in sw mode).\n",
             expected_color, color);
 
@@ -27033,6 +27393,7 @@ START_TEST(visual)
     test_multisample_mismatch();
     test_texcoordindex();
     test_vertex_blending();
+    test_indexed_vertex_blending();
     test_updatetexture();
     test_depthbias();
     test_flip();

@@ -27,6 +27,9 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#ifdef HAVE_TERMIOS_H
+# include <termios.h>
+#endif
 #include <sys/time.h>
 #ifdef HAVE_SYS_IOCTL_H
 # include <sys/ioctl.h>
@@ -1188,8 +1191,8 @@ static NTSTATUS set_volume_info( struct volume *volume, struct dos_drive *drive,
         id = disk_device->unix_mount;
         id_len = strlen( disk_device->unix_mount ) + 1;
     }
-    if (volume->mount) set_mount_point_id( volume->mount, id, id_len );
-    if (drive && drive->mount) set_mount_point_id( drive->mount, id, id_len );
+    if (volume->mount) set_mount_point_id( volume->mount, id, id_len, -1 );
+    if (drive && drive->mount) set_mount_point_id( drive->mount, id, id_len, drive->drive );
 
     return STATUS_SUCCESS;
 }
@@ -1969,6 +1972,27 @@ static BOOL create_port_device( DRIVER_OBJECT *driver, int n, const char *unix_p
     }
 
     sprintfW( dos_name, dos_name_format, n );
+
+#ifdef linux
+    /* Serial port device files almost always exist on Linux even if the corresponding serial
+     * ports don't exist. Do a basic functionality check before advertising a serial port. */
+    if (driver == serial_driver)
+    {
+        struct termios tios;
+        int fd;
+
+        if ((fd = open( unix_path, O_RDONLY )) == -1)
+            return FALSE;
+
+        if (tcgetattr( fd, &tios ) == -1)
+        {
+            close( fd );
+            return FALSE;
+        }
+
+        close( fd );
+    }
+#endif
 
     /* create DOS device */
     unlink( dosdevices_path );
