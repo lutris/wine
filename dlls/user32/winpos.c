@@ -1119,8 +1119,8 @@ static BOOL show_window( HWND hwnd, INT cmd )
 
     swp = USER_Driver->pShowWindow( hwnd, cmd, &newPos, swp );
 
-    parent = GetAncestor( hwnd, GA_PARENT );
-    if (parent && !IsWindowVisible( parent ) && !(swp & SWP_STATECHANGED))
+    if ((style & WS_CHILD) && (parent = GetAncestor( hwnd, GA_PARENT )) &&
+        !IsWindowVisible( parent ) && !(swp & SWP_STATECHANGED))
     {
         /* if parent is not visible simply toggle WS_VISIBLE and return */
         if (showFlag) WIN_SetStyle( hwnd, WS_VISIBLE, 0 );
@@ -1179,7 +1179,14 @@ static BOOL show_window( HWND hwnd, INT cmd )
     else WIN_ReleasePtr( wndPtr );
 
     /* if previous state was minimized Windows sets focus to the window */
-    if (style & WS_MINIMIZE) SetFocus( hwnd );
+    if (style & WS_MINIMIZE)
+    {
+        SetFocus( hwnd );
+        /* Send a WM_ACTIVATE message for a top level window, even if the window is already active */
+        style = GetWindowLongW( hwnd, GWL_STYLE );
+        if (!(style & WS_CHILD) && !(swp & SWP_NOACTIVATE))
+            SendMessageW( hwnd, WM_ACTIVATE, WA_ACTIVE, 0 );
+    }
 
 done:
     SetThreadDpiAwarenessContext( context );
@@ -1955,8 +1962,11 @@ static BOOL fixup_flags( WINDOWPOS *winpos, const RECT *old_window_rect, int par
     if (winpos->cy < 0) winpos->cy = 0;
     else if (winpos->cy > 32767) winpos->cy = 32767;
 
-    parent = GetAncestor( winpos->hwnd, GA_PARENT );
-    if (!IsWindowVisible( parent )) winpos->flags |= SWP_NOREDRAW;
+    if (wndPtr->dwStyle & WS_CHILD)
+    {
+        parent = GetAncestor( winpos->hwnd, GA_PARENT );
+        if (!IsWindowVisible( parent )) winpos->flags |= SWP_NOREDRAW;
+    }
 
     if (wndPtr->dwStyle & WS_VISIBLE) winpos->flags &= ~SWP_SHOWWINDOW;
     else
