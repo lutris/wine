@@ -11,6 +11,7 @@ C_SRCS = \
 	debugger.c \
 	device.c \
 	directory.c \
+	esync.c \
 	event.c \
 	fd.c \
 	file.c \
@@ -30,6 +31,7 @@ C_SRCS = \
 	region.c \
 	registry.c \
 	request.c \
+	scheduler.c \
 	semaphore.c \
 	serial.c \
 	signal.c \
