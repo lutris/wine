@@ -1,0 +1,35 @@
+# Last wine-tkg-staging-esync-git configuration - Вс 13 дек 2020 18:58:12 MSK :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 6.0rc2.r0.g3acb0b3326c
+Using wine-staging patchset (version 6.0rc2.r0.gc646dc92)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
+
+Done applying reverting hotfixes (if any) - list available in prepare.log
+
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: 
+
+
+
+
+Applied your own patch alt-tab-focus-fixes.mypatch
+Applied your own patch blackops2_unhandled_exception_fix.mypatch
+Applied your own patch dsound.mypatch
+Applied your own patch ffxiv-launcher-workaround.mypatch
+Applied your own patch ldlibrary_chromium_fix.mypatch
+Applied your own patch legoisland_168726.mypatch
+Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
+Applied your own patch proton-amd_ags.mypatch
+Applied your own patch pulse_names.mypatch
+Applied your own patch rockstar_installer_fix_heap.mypatch
+Applied your own patch rockstarlauncher_downloads.mypatch
+Applied your own patch unity-alt-tab-fix.mypatch
+Applied your own patch winegstreamer.mypatch
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )
