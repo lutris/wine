@@ -193,7 +193,7 @@ BOOL Str_SetPtrAtoW (LPWSTR *lppDest, LPCSTR lpSrc) DECLSPEC_HIDDEN;
 BOOL Str_SetPtrWtoA (LPSTR *lppDest, LPCWSTR lpSrc) DECLSPEC_HIDDEN;
 BOOL imagelist_has_alpha(HIMAGELIST, UINT) DECLSPEC_HIDDEN;
 
-#define COMCTL32_VERSION_MINOR 81
+#define COMCTL32_VERSION_MINOR 0
 
 /* Our internal stack structure of the window procedures to subclass */
 typedef struct _SUBCLASSPROCS {

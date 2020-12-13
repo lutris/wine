@@ -42,6 +42,61 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+
+static inline double precise_cosh( double x )
+{
+    WORD precise_cw = 0x37f, pre_cw;
+    double z;
+    __asm__ __volatile__( "fnstcw %0" : "=m" (pre_cw) );
+    __asm__ __volatile__( "fldcw %0" : : "m" (precise_cw) );
+    z = cosh( x );
+    __asm__ __volatile__( "fldcw %0" : : "m" (pre_cw) );
+    return z;
+}
+
+static inline double precise_exp( double x )
+{
+    WORD precise_cw = 0x37f, pre_cw;
+    double z;
+    __asm__ __volatile__( "fnstcw %0" : "=m" (pre_cw) );
+    __asm__ __volatile__( "fldcw %0" : : "m" (precise_cw) );
+    z = exp( x );
+    __asm__ __volatile__( "fldcw %0" : : "m" (pre_cw) );
+    return z;
+}
+
+static inline double precise_pow( double x, double y )
+{
+    WORD precise_cw = 0x37f, pre_cw;
+    double z;
+    __asm__ __volatile__( "fnstcw %0" : "=m" (pre_cw) );
+    __asm__ __volatile__( "fldcw %0" : : "m" (precise_cw) );
+    z = pow( x, y );
+    __asm__ __volatile__( "fldcw %0" : : "m" (pre_cw) );
+    return z;
+}
+
+static inline double precise_sinh( double x )
+{
+    WORD precise_cw = 0x37f, pre_cw;
+    double z;
+    __asm__ __volatile__( "fnstcw %0" : "=m" (pre_cw) );
+    __asm__ __volatile__( "fldcw %0" : : "m" (precise_cw) );
+    z = sinh( x );
+    __asm__ __volatile__( "fldcw %0" : : "m" (pre_cw) );
+    return z;
+}
+
+#else
+
+#define precise_cosh cosh
+#define precise_exp  exp
+#define precise_pow  pow
+#define precise_sinh sinh
+
+#endif
+
 /*********************************************************************
  *      acosh
  */
@@ -182,7 +237,7 @@ static float CDECL unix_cosf( float x )
  */
 static double CDECL unix_cosh( double x )
 {
-    return cosh( x );
+    return precise_cosh( x );
 }
 
 /*********************************************************************
@@ -254,7 +309,7 @@ static float CDECL unix_erfcf(float x)
  */
 static double CDECL unix_exp( double x )
 {
-    return exp( x );
+    return precise_exp( x );
 }
 
 /*********************************************************************
@@ -705,7 +760,7 @@ static float CDECL unix_nexttowardf(float num, double next)
  */
 static double CDECL unix_pow( double x, double y )
 {
-    return pow( x, y );
+    return precise_pow( x, y );
 }
 
 /*********************************************************************
@@ -885,7 +940,7 @@ static float CDECL unix_sinf( float x )
  */
 static double CDECL unix_sinh( double x )
 {
-    return sinh( x );
+    return precise_sinh( x );
 }
 
 /*********************************************************************
