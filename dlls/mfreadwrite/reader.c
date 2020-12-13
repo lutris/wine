@@ -1584,6 +1584,7 @@ static HRESULT source_reader_create_decoder_for_stream(struct source_reader *rea
 {
     MFT_REGISTER_TYPE_INFO in_type, out_type;
     CLSID *clsids, mft_clsid, category;
+    BOOL decoder_found = FALSE;
     unsigned int i = 0, count;
     IMFMediaType *input_type;
     HRESULT hr;
@@ -1630,12 +1631,21 @@ static HRESULT source_reader_create_decoder_for_stream(struct source_reader *rea
                 }
 
             }
+            else if (!decoder_found)
+            {
+                /* see if there are other decoders for this stream */
+                if (SUCCEEDED(MFTEnum(category, 0, &in_type, NULL, NULL, &clsids, &count)) && count)
+                {
+                    decoder_found = TRUE;
+                    CoTaskMemFree(clsids);
+                }
+            }
         }
 
         IMFMediaType_Release(input_type);
     }
 
-    return MF_E_TOPO_CODEC_NOT_FOUND;
+    return decoder_found ? MF_E_INVALIDREQUEST : MF_E_TOPO_CODEC_NOT_FOUND;
 }
 
 static HRESULT WINAPI src_reader_SetCurrentMediaType(IMFSourceReader *iface, DWORD index, DWORD *reserved,
@@ -2138,6 +2148,10 @@ static HRESULT create_source_reader_from_source(IMFMediaSource *source, IMFAttri
             break;
 
         object->streams[i].index = i;
+
+        hr = IMFPresentationDescriptor_SelectStream(object->descriptor, i);
+        if (FAILED(hr))
+            break;
     }
 
     if (FAILED(hr))

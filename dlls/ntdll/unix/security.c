@@ -713,7 +713,13 @@ NTSTATUS WINAPI NtAccessCheck( PSECURITY_DESCRIPTOR descr, HANDLE token, ACCESS_
     TRACE( "(%p, %p, %08x, %p, %p, %p, %p, %p)\n",
            descr, token, access, mapping, privs, retlen, access_granted, access_status );
 
-    if (!privs || !retlen) return STATUS_ACCESS_VIOLATION;
+    if (!retlen) return STATUS_ACCESS_VIOLATION;
+    if (!*retlen)
+    {
+        *retlen = sizeof(PRIVILEGE_SET);
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    if (!privs) return STATUS_ACCESS_VIOLATION;
 
     /* reuse the object attribute SD marshalling */
     InitializeObjectAttributes( &attr, NULL, 0, 0, descr );
