@@ -1,0 +1,32 @@
+# Last wine-tkg-staging-fsync-git configuration - Вс 13 дек 2020 12:04:49 MSK :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 6.0rc1.r0.g842b38e2916
+Using wine-staging patchset (version 6.0rc1.r0.gd7b71f0b)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
+
+Done applying reverting hotfixes (if any) - list available in prepare.log
+
+use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
+FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
+childwindow.patch -- ( Applied child window for vk patch )
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: 
+
+mk11.patch -- ( Applied Mortal Kombat 11 fix )
+fsync-unix-staging-3100197.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
+
+LAA-unix-staging.patch -- ( Applied large address aware override support )
+
+proton-winevulkan-nofshack.patch -- ( Using Proton winevulkan patches (nofshack) )
+msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
+josh-flat-theme.patch -- ( Add Josh's better-theme )
+proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
+
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )
