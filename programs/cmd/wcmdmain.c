@@ -1134,8 +1134,10 @@ void WCMD_run_program (WCHAR *command, BOOL called)
 
     /* 1. If extension supplied, see if that file exists */
     if (extensionsupplied) {
-      if (GetFileAttributesW(thisDir) != INVALID_FILE_ATTRIBUTES) {
+      DWORD attribs = GetFileAttributesW(thisDir);
+      if (attribs != INVALID_FILE_ATTRIBUTES && !(attribs&FILE_ATTRIBUTE_DIRECTORY)) {
         found = TRUE;
+        WINE_TRACE("Found as file with extension as '%s'\n", wine_dbgstr_w(thisDir));
       }
     }
 
@@ -1165,6 +1167,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
           }
 
           if (GetFileAttributesW(thisDir) != INVALID_FILE_ATTRIBUTES) {
+            WINE_TRACE("Found via search and pathext as '%s'\n", wine_dbgstr_w(thisDir));
             found = TRUE;
             thisExt = NULL;
           }
@@ -1186,52 +1189,115 @@ void WCMD_run_program (WCHAR *command, BOOL called)
       /* Special case BAT and CMD */
       if (ext && (!wcsicmp(ext, L".bat") || !wcsicmp(ext, L".cmd"))) {
         BOOL oldinteractive = interactive;
+        WINE_TRACE("Calling batch program\n");
         interactive = FALSE;
         WCMD_batch (thisDir, command, called, NULL, INVALID_HANDLE_VALUE);
         interactive = oldinteractive;
-        return;
-      } else {
-
-        /* thisDir contains the file to be launched, but with what?
-           eg. a.exe will require a.exe to be launched, a.html may be iexplore */
-        hinst = FindExecutableW (thisDir, NULL, temp);
-        if ((INT_PTR)hinst < 32)
-          console = 0;
-        else
-          console = SHGetFileInfoW(temp, 0, &psfi, sizeof(psfi), SHGFI_EXETYPE);
-
-        ZeroMemory (&st, sizeof(STARTUPINFOW));
-        st.cb = sizeof(STARTUPINFOW);
-        init_msvcrt_io_block(&st);
-
-        /* Launch the process and if a CUI wait on it to complete
-           Note: Launching internal wine processes cannot specify a full path to exe */
-        status = CreateProcessW(thisDir,
-                                command, NULL, NULL, TRUE, 0, NULL, NULL, &st, &pe);
-        heap_free(st.lpReserved2);
-        if ((opt_c || opt_k) && !opt_s && !status
-            && GetLastError()==ERROR_FILE_NOT_FOUND && command[0]=='\"') {
-          /* strip first and last quote WCHARacters and try again */
-          WCMD_strip_quotes(command);
-          opt_s = TRUE;
-          WCMD_run_program(command, called);
-          return;
-        }
-
-        if (!status)
-          break;
-
-        /* Always wait when non-interactive (cmd /c or in batch program),
-           or for console applications                                    */
-        if (!interactive || (console && !HIWORD(console)))
-            WaitForSingleObject (pe.hProcess, INFINITE);
-        GetExitCodeProcess (pe.hProcess, &errorlevel);
-        if (errorlevel == STILL_ACTIVE) errorlevel = 0;
-
-        CloseHandle(pe.hProcess);
-        CloseHandle(pe.hThread);
+        WINE_TRACE("Back from call to batch program\n");
         return;
       }
+
+      /* Calculate what program will be launched, and whether it is a
+         console application or not. Note the program may be different
+         from the parameter (eg running a .txt file will launch notepad.exe) */
+      hinst = FindExecutableW (thisDir, NULL, temp);
+      if ((INT_PTR)hinst < 32)
+        console = 0;   /* Assume not console app by default */
+      else
+        console = SHGetFileInfoW(temp, 0, &psfi, sizeof(psfi), SHGFI_EXETYPE);
+
+
+      /* If it is not a .com or .exe, try to launch through ShellExecuteExW
+         which takes into account the association for the extension.        */
+      if (ext && (wcsicmp(ext, L".exe") && wcsicmp(ext, L".com"))) {
+
+        SHELLEXECUTEINFOW shexw;
+        BOOL              rc;
+        WCHAR            *rawarg;
+
+        WCMD_parameter(command, 1, &rawarg, FALSE, TRUE);
+        WINE_TRACE("Launching via ShellExecuteEx\n");
+        memset(&shexw, 0x00, sizeof(shexw));
+        shexw.cbSize   = sizeof(SHELLEXECUTEINFOW);
+        shexw.fMask    = SEE_MASK_NO_CONSOLE |      /* Run in same console as currently using       */
+                         SEE_MASK_NOCLOSEPROCESS;   /* We need a process handle to possibly wait on */
+        shexw.lpFile   = thisDir;
+        shexw.lpParameters = rawarg;
+        shexw.nShow    = SW_SHOWNORMAL;
+
+        /* Try to launch the binary or its associated program */
+        rc = ShellExecuteExW(&shexw);
+
+        if (rc && (INT_PTR)shexw.hInstApp >= 32) {
+
+          WINE_TRACE("Successfully launched\n");
+
+          /* It worked... Always wait when non-interactive (cmd /c or in
+             batch program), or for console applications                  */
+          if (!interactive || (console && !HIWORD(console))) {
+            WINE_TRACE("Waiting for process to end\n");
+            WaitForSingleObject (shexw.hProcess, INFINITE);
+          }
+
+          GetExitCodeProcess (shexw.hProcess, &errorlevel);
+          if (errorlevel == STILL_ACTIVE) {
+            WINE_TRACE("Process still running, but returning anyway\n");
+            errorlevel = 0;
+          } else {
+            WINE_TRACE("Process ended, errorlevel %d\n", errorlevel);
+          }
+
+          CloseHandle(pe.hProcess);
+          return;
+
+        }
+      }
+
+      /* If its a .exe or .com or the shellexecute failed due to no association,
+         CreateProcess directly                                                  */
+      ZeroMemory (&st, sizeof(STARTUPINFOW));
+      st.cb = sizeof(STARTUPINFOW);
+      init_msvcrt_io_block(&st);
+
+      /* Launch the process and if a CUI wait on it to complete
+         Note: Launching internal wine processes cannot specify a full path to exe */
+      WINE_TRACE("Launching via CreateProcess\n");
+      status = CreateProcessW(thisDir,
+                              command, NULL, NULL, TRUE, 0, NULL, NULL, &st, &pe);
+      heap_free(st.lpReserved2);
+      if ((opt_c || opt_k) && !opt_s && !status
+          && GetLastError()==ERROR_FILE_NOT_FOUND && command[0]=='\"') {
+        /* strip first and last quote WCHARacters and try again */
+        WCMD_strip_quotes(command);
+        opt_s = TRUE;
+        WCMD_run_program(command, called);
+        return;
+      }
+
+      if (!status) {
+        WINE_TRACE("Failed to launch via CreateProcess, rc %d (%d)\n",
+                   status, GetLastError());
+        break;
+      }
+
+      /* Always wait when non-interactive (cmd /c or in batch program),
+         or for console applications                                    */
+      if (!interactive || (console && !HIWORD(console))) {
+          WINE_TRACE("Waiting for process to end\n");
+          WaitForSingleObject (pe.hProcess, INFINITE);
+      }
+
+      GetExitCodeProcess (pe.hProcess, &errorlevel);
+      if (errorlevel == STILL_ACTIVE) {
+        WINE_TRACE("Process still running, but returning anyway\n");
+        errorlevel = 0;
+      } else {
+        WINE_TRACE("Process ended, errorlevel %d\n", errorlevel);
+      }
+
+      CloseHandle(pe.hProcess);
+      CloseHandle(pe.hThread);
+      return;
     }
   }
 

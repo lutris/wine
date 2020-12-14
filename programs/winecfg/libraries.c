@@ -659,6 +659,18 @@ LibrariesDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                         else
                             set_controls_from_selection(hDlg);
                         break;
+            case CBN_DBLCLK:
+                if (LOWORD(wParam) == IDC_DLLS_LIST)
+                {
+                    int index;
+                    POINT p;
+                    if (GetCursorPos(&p) && ScreenToClient((HWND)lParam, &p))
+                    {
+                        index = SendDlgItemMessageW(hDlg, IDC_DLLS_LIST, LB_ITEMFROMPOINT, 0, MAKELPARAM(p.x, p.y));
+                        if (!HIWORD(index)) on_edit_click(hDlg);
+                    }
+                }
+                break;
 		}
 		break;
 	}

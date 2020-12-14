@@ -2299,7 +2299,7 @@ struct d3d_shader_resource_view *unsafe_impl_from_ID3D10ShaderResourceView(ID3D1
     if (!iface)
         return NULL;
     assert(iface->lpVtbl == (ID3D10ShaderResourceViewVtbl *)&d3d10_shader_resource_view_vtbl);
-    return CONTAINING_RECORD(iface, struct d3d_shader_resource_view, ID3D10ShaderResourceView1_iface);
+    return CONTAINING_RECORD((ID3D10ShaderResourceView1 *)iface, struct d3d_shader_resource_view, ID3D10ShaderResourceView1_iface);
 }
 
 /* ID3D11UnorderedAccessView methods */
