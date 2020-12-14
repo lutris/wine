@@ -23,6 +23,7 @@
 
 #include <ntdef.h>
 #include <windef.h>
+#include <apiset.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -316,7 +317,7 @@ typedef struct _PEB
     PVOID                        KernelCallbackTable;               /* 02c/058 */
     ULONG                        Reserved;                          /* 030/060 */
     ULONG                        AtlThunkSListPtr32;                /* 034/064 */
-    PVOID /*PPEB_FREE_BLOCK*/    FreeList;                          /* 038/068 */
+    PAPI_SET_NAMESPACE_ARRAY     ApiSetMap;                         /* 038/068 */
     ULONG                        TlsExpansionCounter;               /* 03c/070 */
     PRTL_BITMAP                  TlsBitmap;                         /* 040/078 */
     ULONG                        TlsBitmapBits[2];                  /* 044/080 */
@@ -1155,7 +1156,7 @@ typedef enum _OBJECT_INFORMATION_CLASS {
     ObjectBasicInformation,
     ObjectNameInformation,
     ObjectTypeInformation,
-    ObjectAllInformation,
+    ObjectTypesInformation,
     ObjectDataInformation
 } OBJECT_INFORMATION_CLASS, *POBJECT_INFORMATION_CLASS;
 
@@ -1300,9 +1301,31 @@ typedef enum _SYSTEM_INFORMATION_CLASS {
     SystemMemoryListInformation = 80,
     SystemFileCacheInformationEx = 81,
     SystemDynamicTimeZoneInformation = 102,
+    SystemCodeIntegrityInformation = 103,
     SystemLogicalProcessorInformationEx = 107,
     SystemInformationClassMax
 } SYSTEM_INFORMATION_CLASS, *PSYSTEM_INFORMATION_CLASS;
+
+typedef struct _SYSTEM_CODEINTEGRITY_INFORMATION
+{
+    ULONG Length;
+    ULONG CodeIntegrityOptions;
+} SYSTEM_CODEINTEGRITY_INFORMATION, *PSYSTEM_CODEINTEGRITY_INFORMATION;
+
+#define CODEINTEGRITY_OPTION_ENABLED                      0x0001
+#define CODEINTEGRITY_OPTION_TESTSIGN                     0x0002
+#define CODEINTEGRITY_OPTION_UMCI_ENABLED                 0x0004
+#define CODEINTEGRITY_OPTION_UMCI_AUDITMODE_ENABLED       0x0008
+#define CODEINTEGRITY_OPTION_UMCI_EXCLUSIONPATHS_ENABLED  0x0010
+#define CODEINTEGRITY_OPTION_TEST_BUILD                   0x0020
+#define CODEINTEGRITY_OPTION_PREPRODUCTION_BUILD          0x0040
+#define CODEINTEGRITY_OPTION_DEBUGMODE_ENABLED            0x0080
+#define CODEINTEGRITY_OPTION_FLIGHT_BUILD                 0x0100
+#define CODEINTEGRITY_OPTION_FLIGHTING_ENABLED            0x0200
+#define CODEINTEGRITY_OPTION_HVCI_KMCI_ENABLED            0x0400
+#define CODEINTEGRITY_OPTION_HVCI_KMCI_AUDITMODE_ENABLED  0x0800
+#define CODEINTEGRITY_OPTION_HVCI_KMCI_STRICTMODE_ENABLED 0x1000
+#define CODEINTEGRITY_OPTION_HVCI_IUM_ENABLED             0x2000
 
 typedef enum _THREADINFOCLASS {
     ThreadBasicInformation = 0,
@@ -1594,8 +1617,34 @@ typedef struct _OBJECT_NAME_INFORMATION {
 
 typedef struct __OBJECT_TYPE_INFORMATION {
     UNICODE_STRING TypeName;
-    ULONG Reserved [22];
+    ULONG TotalNumberOfObjects;
+    ULONG TotalNumberOfHandles;
+    ULONG TotalPagedPoolUsage;
+    ULONG TotalNonPagedPoolUsage;
+    ULONG TotalNamePoolUsage;
+    ULONG TotalHandleTableUsage;
+    ULONG HighWaterNumberOfObjects;
+    ULONG HighWaterNumberOfHandles;
+    ULONG HighWaterPagedPoolUsage;
+    ULONG HighWaterNonPagedPoolUsage;
+    ULONG HighWaterNamePoolUsage;
+    ULONG HighWaterHandleTableUsage;
+    ULONG InvalidAttributes;
+    GENERIC_MAPPING GenericMapping;
+    ULONG ValidAccessMask;
+    BOOLEAN SecurityRequired;
+    BOOLEAN MaintainHandleCount;
+    UCHAR TypeIndex;
+    CHAR Reserved;
+    ULONG PoolType;
+    ULONG DefaultPagedPoolCharge;
+    ULONG DefaultNonPagedPoolCharge;
 } OBJECT_TYPE_INFORMATION, *POBJECT_TYPE_INFORMATION;
+
+typedef struct _OBJECT_TYPES_INFORMATION
+{
+    ULONG NumberOfTypes;
+} OBJECT_TYPES_INFORMATION, *POBJECT_TYPES_INFORMATION;
 
 typedef struct _PROCESS_BASIC_INFORMATION {
 #ifdef __WINESRC__
@@ -1866,6 +1915,27 @@ typedef struct _SYSTEM_HANDLE_INFORMATION {
     ULONG               Count;
     SYSTEM_HANDLE_ENTRY Handle[1];
 } SYSTEM_HANDLE_INFORMATION, *PSYSTEM_HANDLE_INFORMATION;
+
+/* System Information Class 0x40 */
+
+typedef struct _SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX
+{
+    PVOID     Object;
+    ULONG_PTR UniqueProcessId;
+    ULONG_PTR HandleValue;
+    ULONG     GrantedAccess;
+    USHORT    CreatorBackTraceIndex;
+    USHORT    ObjectTypeIndex;
+    ULONG     HandleAttributes;
+    ULONG     Reserved;
+} SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX, *PSYSTEM_HANDLE_TABLE_ENTRY_INFO_EX;
+
+typedef struct _SYSTEM_HANDLE_INFORMATION_EX
+{
+    ULONG_PTR  Count;
+    ULONG_PTR  Reserved;
+    SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX Handle[1];
+} SYSTEM_HANDLE_INFORMATION_EX, *PSYSTEM_HANDLE_INFORMATION_EX;
 
 /* System Information Class 0x15 */
 
@@ -2204,6 +2274,7 @@ typedef struct _RTL_HANDLE_TABLE
 #define FILE_OVERWRITE                  4
 #define FILE_OVERWRITE_IF               5
 #define FILE_MAXIMUM_DISPOSITION        5
+#define FILE_WINE_PATH                  6
 
 /* Characteristics of a File System */
 #define FILE_REMOVABLE_MEDIA                      0x00000001
@@ -2719,8 +2790,8 @@ typedef struct _LDR_DATA_TABLE_ENTRY
     ULONG               Flags;
     SHORT               LoadCount;
     SHORT               TlsIndex;
-    HANDLE              SectionHandle;
     ULONG               CheckSum;
+    LIST_ENTRY          HashLinks;
     ULONG               TimeDateStamp;
     HANDLE              ActivationContext;
     void*               Lock;
