@@ -3118,7 +3118,15 @@ REBAR_MouseMove (REBAR_INFO *infoPtr, LPARAM lParam)
         int yPtMove = (infoPtr->dwStyle & CCS_VERT ? ptMove.x : ptMove.y);
 
         if (GetCapture() != infoPtr->hwndSelf)
-            ERR("We are dragging but haven't got capture?!?\n");
+        {
+            if (infoPtr->fStatus & BEGIN_DRAG_ISSUED)
+            {
+                REBAR_Notify_NMREBAR (infoPtr, infoPtr->iGrabbedBand, RBN_ENDDRAG);
+                infoPtr->fStatus &= ~BEGIN_DRAG_ISSUED;
+            }
+            infoPtr->iGrabbedBand = -1;
+            return 0;
+        }
 
         band = REBAR_GetBand(infoPtr, infoPtr->iGrabbedBand);
 

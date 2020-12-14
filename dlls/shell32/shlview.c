@@ -1573,7 +1573,7 @@ static LRESULT ShellView_OnNotify(IShellViewImpl * This, UINT CtlID, LPNMHDR lpn
 		  }
 
 		  /* perform the item deletion */
-		  ISFHelper_DeleteItems(psfhlp, i, (LPCITEMIDLIST*)pItems);
+		  ISFHelper_DeleteItems(psfhlp, i, (LPCITEMIDLIST *)pItems, TRUE);
 		  ISFHelper_Release(psfhlp);
 
 		  /* free pidl array memory */

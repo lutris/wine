@@ -15,3 +15,27 @@ A copy of the GNU Lesser General Public License is included in the
 Wine distribution in the file COPYING.LIB. If you did not receive this
 copy, write to the Free Software Foundation, Inc., 51 Franklin St,
 Fifth Floor, Boston, MA 02110-1301, USA.
+
+-----------------------------------------------------------------------
+
+Exceptions (for Wine Staging):
+
+The following files are shipped with Wine Staging, but are not linked to
+the rest of the project in any way. They are simply installed for
+end-user convenience and use a different license as explained below.
+
+    * fonts/arial.ttf and fonts/arial.sfd
+      The Liberation Sans font is licensed under the
+      LIBERATION FONT SOFTWARE LICENSE. See COPYING.arial.
+
+    * fonts/times.ttf and fonts/times.sfd
+      The Liberation Serif font is licensed under the
+      LIBERATION FONT SOFTWARE LICENSE. See COPYING.times.
+
+    * fonts/cour.ttf and fonts/cour.sfd
+      The Liberation Mono font is licensed under the
+      LIBERATION FONT SOFTWARE LICENSE. See COPYING.cour.
+
+    * fonts/msyh.ttf and fonts/msyh.sfd
+      The WenQuanYi Micro Hei font is licensed under both the APACHE 2
+      license and GPLv3. See COPYING.msyh for GPLv3.

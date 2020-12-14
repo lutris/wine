@@ -1,5 +1,6 @@
 MODULE = uiautomationcore.dll
 IMPORTLIB = uiautomationcore
+IMPORTS   = uuid
 
 EXTRADLLFLAGS = -mno-cygwin
 

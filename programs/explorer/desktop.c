@@ -792,6 +792,11 @@ static BOOL get_default_enable_shell( const WCHAR *name )
 
 static HMODULE load_graphics_driver( const WCHAR *driver, const GUID *guid )
 {
+    static const WCHAR video_keyW[] = {
+        'S','y','s','t','e','m','\\',
+        'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+        'C','o','n','t','r','o','l','\\',
+        'V','i','d','e','o',0};
     static const WCHAR device_keyW[] = {
         'S','y','s','t','e','m','\\',
         'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
@@ -862,6 +867,10 @@ static HMODULE load_graphics_driver( const WCHAR *driver, const GUID *guid )
         GetModuleFileNameW( module, buffer, MAX_PATH );
         TRACE( "display %s driver %s\n", debugstr_guid(guid), debugstr_w(buffer) );
     }
+
+    /* create video key first without REG_OPTION_VOLATILE attribute */
+    if (!RegCreateKeyExW( HKEY_LOCAL_MACHINE, video_keyW, 0, NULL, 0, KEY_SET_VALUE, NULL, &hkey, NULL ))
+        RegCloseKey( hkey );
 
     swprintf( key, ARRAY_SIZE(key), device_keyW, guid->Data1, guid->Data2, guid->Data3,
               guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
