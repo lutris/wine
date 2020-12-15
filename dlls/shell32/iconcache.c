@@ -345,13 +345,6 @@ static INT SIC_IconAppend (const WCHAR *sourcefile, INT src_index, HICON *hicons
     return ret;
 }
 
-static BOOL get_imagelist_icon_size(int list, SIZE *size)
-{
-    if (list < 0 || list >= ARRAY_SIZE(shell_imagelists)) return FALSE;
-
-    return ImageList_GetIconSize( shell_imagelists[list], &size->cx, &size->cy );
-}
-
 /****************************************************************************
  * SIC_LoadIcon				[internal]
  *
@@ -362,15 +355,67 @@ static INT SIC_LoadIcon (const WCHAR *sourcefile, INT index, DWORD flags)
 {
     HICON hicons[ARRAY_SIZE(shell_imagelists)] = { 0 };
     HICON hshortcuts[ARRAY_SIZE(hicons)] = { 0 };
+    SIZE size[ARRAY_SIZE(shell_imagelists)];
     unsigned int i;
-    SIZE size;
     INT ret = -1;
 
+    /* Keep track of the sizes in case any icon fails to get extracted */
     for (i = 0; i < ARRAY_SIZE(hicons); i++)
     {
-        get_imagelist_icon_size( i, &size );
-        if (!PrivateExtractIconsW( sourcefile, index, size.cx, size.cy, &hicons[i], 0, 1, 0 ))
-            WARN("Failed to load icon %d from %s.\n", index, debugstr_w(sourcefile));
+        ImageList_GetIconSize(shell_imagelists[i], &size[i].cx, &size[i].cy);
+        PrivateExtractIconsW(sourcefile, index, size[i].cx, size[i].cy, &hicons[i], 0, 1, 0);
+    }
+
+    /* Fill any icon handles that failed to get extracted, by resizing
+       another icon handle that succeeded and creating the icon from it.
+       Use a dumb O(n^2) algorithm since ARRAY_SIZE(hicons) is small */
+    for (i = 0; i < ARRAY_SIZE(hicons); i++)
+    {
+        unsigned int k, ix, iy;
+        BOOL failed = TRUE;
+        if (hicons[i]) continue;
+
+        for (k = 0; k < ARRAY_SIZE(hicons); k++)
+        {
+            if (hicons[k])
+            {
+                ix = iy = k;
+                failed = FALSE;
+                break;
+            }
+        }
+        if (failed) goto fail;
+
+        for (k++; k < ARRAY_SIZE(hicons); k++)
+        {
+            if (!hicons[k]) continue;
+
+            /* Find closest-sized icon, but favor larger icons to resize from */
+            if (size[k].cx >= size[i].cx)
+                ix = (size[ix].cx < size[i].cx || size[ix].cx > size[k].cx) ? k : ix;
+            else
+                ix = (size[ix].cx < size[i].cx && size[ix].cx < size[k].cx) ? k : ix;
+
+            if (size[k].cy >= size[i].cy)
+                iy = (size[iy].cy < size[i].cy || size[iy].cy > size[k].cy) ? k : iy;
+            else
+                iy = (size[iy].cy < size[i].cy && size[iy].cy < size[k].cy) ? k : iy;
+        }
+
+        /* Use the closest icon in aspect ratio if ix and iy differ */
+        if (ix != iy)
+        {
+            float i_ratio, ix_ratio, iy_ratio;
+            i_ratio  = (float)size[i].cx  / (float)size[i].cy;
+            ix_ratio = (float)size[ix].cx / (float)size[ix].cy;
+            iy_ratio = (float)size[iy].cx / (float)size[iy].cy;
+            if (fabsf(ix_ratio - i_ratio) > fabsf(iy_ratio - i_ratio))
+                ix = iy;
+        }
+
+        /* If this fails, we have to abort to prevent the image lists from
+           becoming out of sync and completely screwing the icons up */
+        hicons[i] = CopyImage(hicons[ix], IMAGE_ICON, size[i].cx, size[i].cy, 0);
         if (!hicons[i]) goto fail;
     }
 
@@ -991,6 +1036,119 @@ INT WINAPI SHGetIconOverlayIndexW(LPCWSTR pszIconPath, INT iIconIndex)
 }
 
 /****************************************************************************
+ * For SHGetStockIconInfo
+ */
+typedef struct {
+    SHSTOCKICONID id;
+    DWORD iconid;
+} SI_ENTRY;
+
+static const SI_ENTRY si_table[] =
+{
+    [0]   = { SIID_DOCNOASSOC, IDI_SHELL_FILE},
+    [1]   = { SIID_DOCASSOC, IDI_SHELL_DOCUMENT},
+    [2]   = { SIID_APPLICATION, IDI_SHELL_WINDOW},
+    [3]   = { SIID_FOLDER, IDI_SHELL_FOLDER},
+    [4]   = { SIID_FOLDEROPEN, IDI_SHELL_FOLDER_OPEN},
+    [5]   = { SIID_DRIVE525, 0},
+    [6]   = { SIID_DRIVE35, 0},
+    [7]   = { SIID_DRIVERREMOVE, 0},
+    [8]   = { SIID_DRIVERFIXED, IDI_SHELL_DRIVE},
+    [9]   = { SIID_DRIVERNET, IDI_SHELL_NETDRIVE},
+    [10]  = { SIID_DRIVERNETDISABLE, IDI_SHELL_NETDRIVE2},
+    [11]  = { SIID_DRIVERCD, IDI_SHELL_OPTICAL_DRIVE},
+    [12]  = { SIID_DRIVERRAM, IDI_SHELL_RAMDISK},
+    [13]  = { SIID_WORLD, 0},
+    /* Missing: 14 */
+    [15]  = { SIID_SERVER, 0},
+    [16]  = { SIID_PRINTER, IDI_SHELL_PRINT},
+    [17]  = { SIID_MYNETWORK, 0},
+    /* Missing: 18 - 21 */
+    [22]  = { SIID_FIND, 0},
+    [23]  = { SIID_HELP, IDI_SHELL_HELP},
+    /* Missing: 24 - 27 */
+    [28]  = {SIID_SHARE, 0},
+    [29]  = {SIID_LINK, 0},
+    [30]  = {SIID_SLOWFILE, 0},
+    [31]  = {SIID_RECYCLER, IDI_SHELL_TRASH_FOLDER},
+    [32]  = {SIID_RECYCLERFULL, IDI_SHELL_FULL_RECYCLE_BIN},
+    /* Missing: 33 - 39 */
+    [40]  = {SIID_MEDIACDAUDIO, 0},
+    /* Missing: 41 - 46 */
+    [47]  = {SIID_LOCK, IDI_SHELL_PASSWORDS},
+    /* Missing: 48 */
+    [49]  = {SIID_AUTOLIST, 0},
+    [50]  = {SIID_PRINTERNET, 0},
+    [51]  = {SIID_SERVERSHARE, 0},
+    [52]  = {SIID_PRINTERFAX, 0},
+    [53]  = {SIID_PRINTERFAXNET, 0},
+    [54]  = {SIID_PRINTERFILE, 0},
+    [55]  = {SIID_STACK, 0},
+    [56]  = {SIID_MEDIASVCD, 0},
+    [57]  = {SIID_STUFFEDFOLDER, 0},
+    [58]  = {SIID_DRIVEUNKNOWN, 0},
+    [59]  = {SIID_DRIVEDVD, 0},
+    [60]  = {SIID_MEDIADVD, 0},
+    [61]  = {SIID_MEDIADVDRAM, 0},
+    [62]  = {SIID_MEDIADVDRW, 0},
+    [63]  = {SIID_MEDIADVDR, 0},
+    [64]  = {SIID_MEDIADVDROM, 0},
+    [65]  = {SIID_MEDIACDAUDIOPLUS, 0},
+    [66]  = {SIID_MEDIACDRW, 0},
+    [67]  = {SIID_MEDIACDR, 0},
+    [68]  = {SIID_MEDIACDBURN, 0},
+    [69]  = {SIID_MEDIABLANKCD, 0},
+    [70]  = {SIID_MEDIACDROM, 0},
+    [71]  = {SIID_AUDIOFILES, IDI_SHELL_AUDIO_FILE},
+    [72]  = {SIID_IMAGEFILES, IDI_SHELL_IMAGE_FILE},
+    [73]  = {SIID_VIDEOFILES, IDI_SHELL_VIDEO_FILE},
+    [74]  = {SIID_MIXEDFILES, 0},
+    [75]  = {SIID_FOLDERBACK, 0},
+    [76]  = {SIID_FOLDERFRONT, 0},
+    [77]  = {SIID_SHIELD, 0},
+    [78]  = {SIID_WARNING, 0},
+    [79]  = {SIID_INFO, 0},
+    [80]  = {SIID_ERROR, 0},
+    [81]  = {SIID_KEY, 0},
+    [82]  = {SIID_SOFTWARE, 0},
+    [83]  = {SIID_RENAME, IDI_SHELL_RENAME},
+    [84]  = {SIID_DELETE, IDI_SHELL_CONFIRM_DELETE},
+    [85]  = {SIID_MEDIAAUDIODVD, 0},
+    [86]  = {SIID_MEDIAMOVIEDVD, 0},
+    [87]  = {SIID_MEDIAENHANCEDCD, 0},
+    [88]  = {SIID_MEDIAENHANCEDDVD, 0},
+    [89]  = {SIID_MEDIAHDDVD, 0},
+    [90]  = {SIID_MEDIABLUERAY, 0},
+    [91]  = {SIID_MEDIAVCD, 0},
+    [92]  = {SIID_MEDIADVDPLUSR, 0},
+    [93]  = {SIID_MEDIADVDPLUSRW, 0},
+    [94]  = {SIID_DESKTOPPC, IDI_SHELL_MY_COMPUTER},
+    [95]  = {SIID_MOBILEPC, 0},
+    [96]  = {SIID_USERS, IDI_SHELL_USERS},
+    [97]  = {SIID_MEDIASMARTMEDIA, 0},
+    [98]  = {SIID_MEDIACOMPACTFLASH, 0},
+    [99]  = {SIID_DEVICECELLPHONE, 0},
+    [100] = {SIID_DEVICECAMERA, 0},
+    [101] = {SIID_DEVICEVIDEOCAMERA, 0},
+    [102] = {SIID_DEVICEAUDIOPLAYER, 0},
+    [103] = {SIID_NETWORKCONNECT, 0},
+    [104] = {SIID_INTERNET, IDI_SHELL_WEB_BROWSER},
+    [105] = {SIID_ZIPFILE, 0},
+    [106] = {SIID_SETTINGS, IDI_SHELL_SETTINGS},
+    /* Missing: 107 - 131 */
+    [132] = {SIID_DRIVEHDDVD, 0},
+    [133] = {SIID_DRIVEBD, 0},
+    [134] = {SIID_MEDIAHDDVDROM, 0},
+    [135] = {SIID_MEDIAHDDVDR, 0},
+    [136] = {SIID_MEDIAHDDVDRAM, 0},
+    [137] = {SIID_MEDIABDROM, 0},
+    [138] = {SIID_MEDIABDR, 0},
+    [139] = {SIID_MEDIABDRE, 0},
+    [140] = {SIID_CLUSTEREDDRIVE, 0}
+    /* Missing: 141 - 180  and  SIID_MAX_ICONS = 181*/
+ };
+
+/****************************************************************************
  * SHGetStockIconInfo [SHELL32.@]
  *
  * Receive information for builtin icons
@@ -1007,24 +1165,53 @@ INT WINAPI SHGetIconOverlayIndexW(LPCWSTR pszIconPath, INT iIconIndex)
  */
 HRESULT WINAPI SHGetStockIconInfo(SHSTOCKICONID id, UINT flags, SHSTOCKICONINFO *sii)
 {
-    static const WCHAR shell32dll[] = {'\\','s','h','e','l','l','3','2','.','d','l','l',0};
+    static const WCHAR shell32dllW[] = {'s','h','e','l','l','3','2','.','d','l','l',0};
+    static const WCHAR slashW[] = {'\\',0};
+    HMODULE hmod;
 
-    FIXME("(%d, 0x%x, %p) semi-stub\n", id, flags, sii);
+    TRACE("(%d, 0x%x, %p)\n", id, flags, sii);
     if ((id < 0) || (id >= SIID_MAX_ICONS) || !sii || (sii->cbSize != sizeof(SHSTOCKICONINFO))) {
         return E_INVALIDARG;
     }
 
     GetSystemDirectoryW(sii->szPath, MAX_PATH);
-
-    /* no icons defined: use default */
-    sii->iIcon = -IDI_SHELL_FILE;
-    lstrcatW(sii->szPath, shell32dll);
-
-    if (flags)
-        FIXME("flags 0x%x not implemented\n", flags);
+    lstrcatW(sii->szPath, slashW);
+    lstrcatW(sii->szPath, shell32dllW);
 
     sii->hIcon = NULL;
     sii->iSysImageIndex = -1;
+
+    /* this is not how windows does it, on windows picked mostly from imageres.dll !*/
+    if (si_table[id].iconid)
+        sii->iIcon = sii->iSysImageIndex - si_table[id].id;
+    else
+    {
+        FIXME("Couldn`t find SIID %d, returning default values (IDI_SHELL_FILE)\n", id);
+        sii->iIcon = sii->iSysImageIndex - IDI_SHELL_FILE;
+    }
+
+    if (flags & SHGSI_ICON)
+    {
+        flags &= ~SHGSI_ICON;
+
+        hmod = GetModuleHandleW(shell32dllW);
+        if (hmod)
+        {
+            if (si_table[id].iconid)
+                sii->hIcon = LoadIconW(hmod, MAKEINTRESOURCEW(si_table[id].iconid));
+            else
+                sii->hIcon = LoadIconW(hmod, MAKEINTRESOURCEW(IDI_SHELL_FILE));
+        }
+
+        if (!sii->hIcon)
+        {
+            ERR("failed to get an icon handle\n");
+            return E_INVALIDARG;
+        }
+    }
+
+    if (flags)
+        FIXME("flags 0x%x not implemented\n", flags);
 
     TRACE("%3d: returning %s (%d)\n", id, debugstr_w(sii->szPath), sii->iIcon);
 
