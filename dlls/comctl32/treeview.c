@@ -2390,7 +2390,7 @@ TREEVIEW_DrawItemLines(const TREEVIEW_INFO *infoPtr, HDC hdc, const TREEVIEW_ITE
 	/* Get a dotted grey pen */
         lb.lbStyle = BS_SOLID;
         lb.lbColor = GETLINECOLOR(infoPtr->clrLine);
-        hNewPen = ExtCreatePen(PS_COSMETIC|PS_ALTERNATE, 1, &lb, 0, NULL);
+        hNewPen = ExtCreatePen(PS_COSMETIC, 1, &lb, 0, NULL);
 	hOldPen = SelectObject(hdc, hNewPen);
 
         /* Make sure the center is on a dot (using +2 instead
