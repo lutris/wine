@@ -29,6 +29,7 @@
 @ cdecl MsgWaitForMultipleObjectsEx(long ptr long long long) X11DRV_MsgWaitForMultipleObjectsEx
 @ cdecl ReleaseDC(long long) X11DRV_ReleaseDC
 @ cdecl ScrollDC(long long long long) X11DRV_ScrollDC
+@ cdecl SetActiveWindow(long) X11DRV_SetActiveWindow
 @ cdecl SetCapture(long long) X11DRV_SetCapture
 @ cdecl SetFocus(long) X11DRV_SetFocus
 @ cdecl SetLayeredWindowAttributes(long long long long) X11DRV_SetLayeredWindowAttributes
@@ -45,6 +46,7 @@
 @ cdecl WindowPosChanging(long long long ptr ptr ptr ptr) X11DRV_WindowPosChanging
 @ cdecl WindowPosChanged(long long long ptr ptr ptr ptr ptr) X11DRV_WindowPosChanged
 @ cdecl SystemParametersInfo(long long ptr long) X11DRV_SystemParametersInfo
+@ cdecl UpdateCandidatePos(long ptr) X11DRV_UpdateCandidatePos
 @ cdecl ThreadDetach() X11DRV_ThreadDetach
 
 # WinTab32

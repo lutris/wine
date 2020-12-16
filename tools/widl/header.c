@@ -50,6 +50,8 @@ static void write_winrt_type_comments(FILE *header, const type_t *type);
 static void write_apicontract_guard_start(FILE *header, const expr_t *expr);
 static void write_apicontract_guard_end(FILE *header, const expr_t *expr);
 
+static void write_widl_using_macros(FILE *header, type_t *iface);
+
 static void indent(FILE *h, int delta)
 {
   int c;
@@ -107,6 +109,17 @@ int is_attr(const attr_list_t *list, enum attr_type t)
     if (list) LIST_FOR_EACH_ENTRY( attr, list, const attr_t, entry )
         if (attr->type == t) return 1;
     return 0;
+}
+
+static void get_attr_statics(const attr_list_t *attrs, expr_list_t *list)
+{
+    const attr_t *attr;
+    if (!attrs) return;
+    LIST_FOR_EACH_ENTRY( attr, attrs, const attr_t, entry )
+    {
+        if (attr->type != ATTR_STATIC) continue;
+        list_add_tail(list, &((expr_t *)attr->u.pval)->entry);
+    }
 }
 
 void *get_attrp(const attr_list_t *list, enum attr_type t)
@@ -187,6 +200,10 @@ const char *get_name(const var_t *v)
 {
     static char *buffer;
     free( buffer );
+    if (is_attr( v->attrs, ATTR_EVENTADD ))
+        return buffer = strmake( "add_%s", v->name );
+    if (is_attr( v->attrs, ATTR_EVENTREMOVE ))
+        return buffer = strmake( "remove_%s", v->name );
     if (is_attr( v->attrs, ATTR_PROPGET ))
         return buffer = strmake( "get_%s", v->name );
     if (is_attr( v->attrs, ATTR_PROPPUT ))
@@ -465,6 +482,12 @@ void write_type_left(FILE *h, const decl_spec_t *ds, enum name_type name_type, i
       case TYPE_COCLASS:
         fprintf(h, "%s", name);
         break;
+      case TYPE_RUNTIMECLASS:
+        fprintf(h, "%s", type_get_name(type_runtimeclass_get_default_iface(t), name_type));
+        break;
+      case TYPE_DELEGATE:
+        fprintf(h, "%s", type_get_name(type_delegate_get_iface(t), name_type));
+        break;
       case TYPE_VOID:
         fprintf(h, "void");
         break;
@@ -483,6 +506,8 @@ void write_type_left(FILE *h, const decl_spec_t *ds, enum name_type name_type, i
         break;
       }
       case TYPE_APICONTRACT:
+      case TYPE_PARAMETERIZED_TYPE:
+      case TYPE_PARAMETER:
         /* shouldn't be here */
         assert(0);
         break;
@@ -547,8 +572,12 @@ void write_type_right(FILE *h, type_t *t, int is_field)
   case TYPE_MODULE:
   case TYPE_COCLASS:
   case TYPE_INTERFACE:
+  case TYPE_RUNTIMECLASS:
+  case TYPE_DELEGATE:
     break;
   case TYPE_APICONTRACT:
+  case TYPE_PARAMETERIZED_TYPE:
+  case TYPE_PARAMETER:
     /* not supposed to be here */
     assert(0);
     break;
@@ -589,10 +618,11 @@ static void write_type_definition(FILE *f, type_t *t, int declonly)
         t->written = save_written;
         write_namespace_end(f, t->namespace);
         fprintf(f, "extern \"C\" {\n");
-        fprintf(f, "#else\n");
+        fprintf(f, "#else /* __cplusplus */\n");
         write_type_left(f, &ds, NAME_C, declonly, TRUE);
         fprintf(f, ";\n");
-        fprintf(f, "#endif\n\n");
+        if (winrt_mode) write_widl_using_macros(f, t);
+        fprintf(f, "#endif /* __cplusplus */\n\n");
     }
     if (contract) write_apicontract_guard_end(f, contract);
 }
@@ -1033,7 +1063,8 @@ static int is_aggregate_return(const var_t *func)
 {
   enum type_type type = type_get_type(type_function_get_rettype(func->declspec.type));
   return type == TYPE_STRUCT || type == TYPE_UNION ||
-         type == TYPE_COCLASS || type == TYPE_INTERFACE;
+         type == TYPE_COCLASS || type == TYPE_INTERFACE ||
+         type == TYPE_RUNTIMECLASS;
 }
 
 static char *get_vtbl_entry_name(const type_t *iface, const var_t *func)
@@ -1468,7 +1499,8 @@ static void write_forward(FILE *header, type_t *iface)
   fprintf(header, "typedef interface %s %s;\n", iface->c_name, iface->c_name);
   fprintf(header, "#ifdef __cplusplus\n");
   write_namespace_start(header, iface->namespace);
-  write_line(header, 0, "interface %s;", iface->name);
+  if (strchr(iface->name, '<')) write_line(header, 0, "template<> struct %s;", iface->name);
+  else write_line(header, 0, "interface %s;", iface->name);
   write_namespace_end(header, iface->namespace);
   fprintf(header, "#endif /* __cplusplus */\n");
   fprintf(header, "#endif\n\n" );
@@ -1485,6 +1517,11 @@ static char *format_apicontract_macro(const type_t *type)
 static void write_winrt_type_comments(FILE *header, const type_t *type)
 {
     expr_t *contract = get_attrp(type->attrs, ATTR_CONTRACT);
+    expr_t *activatable = get_attrp(type->attrs, ATTR_ACTIVATABLE);
+    type_t *exclusiveto = get_attrp(type->attrs, ATTR_EXCLUSIVETO);
+    type_list_t *requires = type->type_type == TYPE_INTERFACE ? type_iface_get_requires(type) : NULL;
+    expr_list_t statics = LIST_INIT(statics);
+    get_attr_statics(type->attrs, &statics);
     fprintf(header, " *\n");
     if (contract)
     {
@@ -1493,6 +1530,80 @@ static void write_winrt_type_comments(FILE *header, const type_t *type)
         int ver = contract->ref->u.lval;
         fprintf(header, " * Introduced to %s in version %d.%d\n *\n", name, (ver >> 16) & 0xffff, ver & 0xffff);
         free(name);
+    }
+    if (activatable)
+    {
+        const type_t *apicontract = activatable->u.tref.type;
+        int version_req = activatable->ref->u.lval;
+        char *name = format_namespace(apicontract->namespace, "", ".", apicontract->name, NULL);
+        fprintf(header, " * RuntimeClass can be activated.\n");
+        fprintf(header, " *   Type can be activated via RoActivateInstance starting with version %d.%d of the %s API contract\n *\n",
+                (version_req >> 16) & 0xffff, version_req & 0xffff, name);
+        free(name);
+    }
+    if (exclusiveto)
+    {
+        char *name = format_namespace(exclusiveto->namespace, "", ".", exclusiveto->name, NULL);
+        fprintf(header, " * Interface is a part of the implementation of type %s\n *\n", name);
+        free(name);
+    }
+    if (requires)
+    {
+        type_list_t *req;
+        fprintf(header, " * Any object which implements this interface must also implement the following interfaces:\n");
+        for (req = requires; req; req = req->next)
+        {
+            char *name = format_namespace(req->type->namespace, "", ".", req->type->name, NULL);
+            fprintf(header, " *     %s\n", name);
+            free(name);
+        }
+        fprintf(header, " *\n");
+    }
+    if (!list_empty(&statics))
+    {
+        expr_t *expr;
+        fprintf(header, " * RuntimeClass contains static methods.\n");
+        LIST_FOR_EACH_ENTRY(expr, &statics, expr_t, entry)
+        {
+            const type_t *iface = expr->u.tref.type, *apicontract = expr->ref->u.tref.type;
+            int version_req = expr->ref->ref->u.lval;
+            char *iface_name = format_namespace(iface->namespace, "", ".", iface->name, NULL);
+            char *name = format_namespace(apicontract->namespace, "", ".", apicontract->name, NULL);
+            fprintf(header, " *   Static Methods exist on the %s interface starting with version %d.%d of the %s API contract\n",
+                    iface_name, (version_req >> 16) & 0xffff, version_req & 0xffff, name);
+            free(iface_name);
+            free(name);
+        }
+        fprintf(header, " *\n");
+    }
+    if (type_get_type(type) == TYPE_RUNTIMECLASS)
+    {
+        ifref_list_t *ifaces = type_runtimeclass_get_ifaces(type);
+        ifref_t *entry;
+        fprintf(header, " * Class implements the following interfaces:\n");
+        LIST_FOR_EACH_ENTRY(entry, ifaces, ifref_t, entry)
+        {
+            char *name = format_namespace(entry->iface->namespace, "", ".", entry->iface->name, NULL);
+            fprintf(header, " *    %s", name);
+            if (is_attr(entry->attrs, ATTR_DEFAULT)) fprintf(header, " ** Default Interface **");
+            fprintf(header, "\n");
+            free(name);
+        }
+        fprintf(header, " *\n");
+    }
+    switch (get_attrv(type->attrs, ATTR_THREADING))
+    {
+        case THREADING_SINGLE: fprintf(header, " * Class Threading Model:  Single Threaded Apartment\n *\n"); break;
+        case THREADING_BOTH: fprintf(header, " * Class Threading Model:  Both Single and Multi Threaded Apartment\n *\n"); break;
+        case THREADING_MTA: fprintf(header, " * Class Threading Model:  Multi Threaded Apartment\n *\n"); break;
+        default: break;
+    }
+    switch (get_attrv(type->attrs, ATTR_MARSHALING_BEHAVIOR))
+    {
+        case MARSHALING_AGILE: fprintf(header, " * Class Marshaling Behavior:  Agile - Class is agile\n *\n"); break;
+        case MARSHALING_STANDARD: fprintf(header, " * Class Marshaling Behavior:  Standard - Class marshals using the standard marshaler\n *\n"); break;
+        case MARSHALING_NONE: fprintf(header, " * Class Marshaling Behavior:  None - Class cannot be marshaled\n *\n"); break;
+        default: break;
     }
 }
 
@@ -1535,6 +1646,69 @@ static void write_com_interface_start(FILE *header, const type_t *iface)
   fprintf(header,"#define __%s_%sINTERFACE_DEFINED__\n\n", iface->c_name, dispinterface ? "DISP" : "");
 }
 
+static char *get_winrt_guard_macro(type_t *iface)
+{
+    unsigned int len;
+    char *macro, *tmp = (char *)iface->c_name;
+    int i;
+
+    if (!strncmp(tmp, "__x", 3)) tmp += 3;
+    if (!strncmp(tmp, "_ABI", 4)) tmp += 4;
+    macro = xstrdup(tmp);
+
+    len = strlen(macro) + 1;
+    for (tmp = strstr(macro, "__F"); tmp; tmp = strstr(tmp, "__F"))
+        memmove(tmp + 1, tmp + 3, len - (tmp - macro) - 3);
+    for (tmp = strstr(macro, "__C"); tmp; tmp = strstr(tmp, "__C"))
+        memmove(tmp + 1, tmp + 3, len - (tmp - macro) - 3);
+    for (tmp = strstr(macro, "_C"); tmp; tmp = strstr(tmp, "_C"))
+        memmove(tmp + 1, tmp + 2, len - (tmp - macro) - 2);
+
+    for (i = strlen(macro); i > 0; --i) macro[i - 1] = toupper(macro[i - 1]);
+
+    return macro;
+}
+
+static void write_widl_using_method_macros(FILE *header, const type_t *iface, const type_t *top_iface)
+{
+    const statement_t *stmt;
+    const char *name = top_iface->short_name ? top_iface->short_name : top_iface->name;
+
+    if (type_iface_get_inherit(iface)) write_widl_using_method_macros(header, type_iface_get_inherit(iface), top_iface);
+
+    STATEMENTS_FOR_EACH_FUNC(stmt, type_iface_get_stmts(iface))
+    {
+        const var_t *func = stmt->u.var;
+	const char *func_name = get_name(func);
+
+        if (is_override_method(iface, top_iface, func)) continue;
+
+        if (!is_callas(func->attrs))
+            fprintf(header, "#define %s_%s %s_%s\n", name, func_name, top_iface->c_name, func_name);
+    }
+}
+
+static void write_widl_using_macros(FILE *header, type_t *iface)
+{
+    const UUID *uuid = get_attrp(iface->attrs, ATTR_UUID);
+    const char *name = iface->short_name ? iface->short_name : iface->name;
+    char *macro;
+
+    if (!strcmp(iface->name, iface->c_name)) return;
+
+    macro = get_winrt_guard_macro(iface);
+    fprintf(header, "#ifdef WIDL_USING%s\n", macro);
+
+    if (uuid) fprintf(header, "#define IID_%s IID_%s\n", name, iface->c_name);
+    if (iface->type_type == TYPE_INTERFACE) fprintf(header, "#define %sVtbl %sVtbl\n", name, iface->c_name);
+    fprintf(header, "#define %s %s\n", name, iface->c_name);
+
+    if (iface->type_type == TYPE_INTERFACE) write_widl_using_method_macros(header, iface, iface);
+
+    fprintf(header, "#endif /* WIDL_USING_%s */\n", macro);
+    free(macro);
+}
+
 static void write_com_interface_end(FILE *header, type_t *iface)
 {
   int dispinterface = is_attr(iface->attrs, ATTR_DISPINTERFACE);
@@ -1552,11 +1726,13 @@ static void write_com_interface_end(FILE *header, type_t *iface)
       write_namespace_start(header, iface->namespace);
   }
   if (uuid) {
+      if (strchr(iface->name, '<')) write_line(header, 0, "template<>");
       write_line(header, 0, "MIDL_INTERFACE(\"%s\")", uuid_string(uuid));
       indent(header, 0);
   }else {
       indent(header, 0);
-      fprintf(header, "interface ");
+      if (strchr(iface->name, '<')) fprintf(header, "template<> struct ");
+      else fprintf(header, "interface ");
   }
   if (type_iface_get_inherit(iface))
   {
@@ -1605,6 +1781,7 @@ static void write_com_interface_end(FILE *header, type_t *iface)
   fprintf(header, "#else\n");
   write_inline_wrappers(header, type, type, iface->c_name);
   fprintf(header, "#endif\n");
+  if (winrt_mode) write_widl_using_macros(header, iface);
   fprintf(header, "#endif\n");
   fprintf(header, "\n");
   fprintf(header, "#endif\n");
@@ -1707,6 +1884,45 @@ static void write_apicontract(FILE *header, type_t *apicontract)
     free(name);
 }
 
+static void write_runtimeclass(FILE *header, type_t *runtimeclass)
+{
+    expr_t *contract = get_attrp(runtimeclass->attrs, ATTR_CONTRACT);
+    size_t i, len;
+    char *name, *c_name;
+    name = format_namespace(runtimeclass->namespace, "", ".", runtimeclass->name, NULL);
+    c_name = format_namespace(runtimeclass->namespace, "", "_", runtimeclass->name, NULL);
+    fprintf(header, "/*\n");
+    fprintf(header, " * Class %s\n", name);
+    write_winrt_type_comments(header, runtimeclass);
+    fprintf(header, " */\n");
+    if (contract) write_apicontract_guard_start(header, contract);
+    fprintf(header, "#ifndef RUNTIMECLASS_%s_DEFINED\n", c_name);
+    fprintf(header, "#define RUNTIMECLASS_%s_DEFINED\n", c_name);
+    /* MIDL generates extern const here */
+    fprintf(header, "static const DECLSPEC_SELECTANY WCHAR RuntimeClass_%s[] = {", c_name);
+    for (i = 0, len = strlen(name); i < len; ++i) fprintf(header, "'%c',", name[i]);
+    fprintf(header, "0};\n");
+    fprintf(header, "#endif /* RUNTIMECLASS_%s_DEFINED */\n", c_name);
+    free(c_name);
+    free(name);
+    if (contract) write_apicontract_guard_end(header, contract);
+    fprintf(header, "\n");
+}
+
+static void write_runtimeclass_forward(FILE *header, type_t *runtimeclass)
+{
+    fprintf(header, "#ifndef __%s_FWD_DEFINED__\n", runtimeclass->c_name);
+    fprintf(header, "#define __%s_FWD_DEFINED__\n", runtimeclass->c_name);
+    fprintf(header, "#ifdef __cplusplus\n");
+    write_namespace_start(header, runtimeclass->namespace);
+    write_line(header, 0, "class %s;", runtimeclass->name);
+    write_namespace_end(header, runtimeclass->namespace);
+    fprintf(header, "#else\n");
+    fprintf(header, "typedef struct %s %s;\n", runtimeclass->c_name, runtimeclass->c_name);
+    fprintf(header, "#endif /* defined __cplusplus */\n");
+    fprintf(header, "#endif /* defined __%s_FWD_DEFINED__ */\n\n", runtimeclass->c_name);
+}
+
 static void write_import(FILE *header, const char *fname)
 {
   char *hname, *p;
@@ -1759,9 +1975,10 @@ static void write_forward_decls(FILE *header, const statement_list_t *stmts)
     switch (stmt->type)
     {
       case STMT_TYPE:
-        if (type_get_type(stmt->u.type) == TYPE_INTERFACE)
+        if (type_get_type(stmt->u.type) == TYPE_INTERFACE || type_get_type(stmt->u.type) == TYPE_DELEGATE)
         {
           type_t *iface = stmt->u.type;
+          if (type_get_type(iface) == TYPE_DELEGATE) iface = type_delegate_get_iface(iface);
           if (is_object(iface) || is_attr(iface->attrs, ATTR_DISPINTERFACE))
           {
             write_forward(header, iface);
@@ -1771,6 +1988,8 @@ static void write_forward_decls(FILE *header, const statement_list_t *stmts)
         }
         else if (type_get_type(stmt->u.type) == TYPE_COCLASS)
           write_coclass_forward(header, stmt->u.type);
+        else if (type_get_type(stmt->u.type) == TYPE_RUNTIMECLASS)
+          write_runtimeclass_forward(header, stmt->u.type);
         break;
       case STMT_TYPEREF:
       case STMT_IMPORTLIB:
@@ -1799,10 +2018,11 @@ static void write_header_stmts(FILE *header, const statement_list_t *stmts, cons
     switch (stmt->type)
     {
       case STMT_TYPE:
-        if (type_get_type(stmt->u.type) == TYPE_INTERFACE)
+        if (type_get_type(stmt->u.type) == TYPE_INTERFACE || type_get_type(stmt->u.type) == TYPE_DELEGATE)
         {
-          type_t *iface = stmt->u.type;
-          type_t *async_iface = type_iface_get_async_iface(iface);
+          type_t *iface = stmt->u.type, *async_iface;
+          if (type_get_type(stmt->u.type) == TYPE_DELEGATE) iface = type_delegate_get_iface(iface);
+          async_iface = type_iface_get_async_iface(iface);
           if (is_object(iface)) is_object_interface++;
           if (is_attr(stmt->u.type->attrs, ATTR_DISPINTERFACE) || is_object(stmt->u.type))
           {
@@ -1827,10 +2047,10 @@ static void write_header_stmts(FILE *header, const statement_list_t *stmts, cons
           write_coclass(header, stmt->u.type);
         else if (type_get_type(stmt->u.type) == TYPE_APICONTRACT)
           write_apicontract(header, stmt->u.type);
-        else
-        {
+        else if (type_get_type(stmt->u.type) == TYPE_RUNTIMECLASS)
+          write_runtimeclass(header, stmt->u.type);
+        else if (type_get_type(stmt->u.type) != TYPE_PARAMETERIZED_TYPE)
           write_type_definition(header, stmt->u.type, stmt->declonly);
-        }
         break;
       case STMT_TYPEREF:
         /* FIXME: shouldn't write out forward declarations for undefined
