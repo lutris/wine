@@ -2310,13 +2310,13 @@ static void test_move(void)
         ok(!DeleteFileA("d.txt"), "Expected d.txt to not exist\n");
     }
 
-    /* FO_MOVE does not create dest directories */
+    /* FO_MOVE should create dest directories */
     shfo.pFrom = "test2.txt\0";
     shfo.pTo = "dir1\\dir2\\test2.txt\0";
     retval = SHFileOperationA(&shfo);
     if (dir_exists("dir1"))
     {
-        /* Vista and W2K8 (broken or new behavior ?) */
+        /* New behavior on Vista or later */
         ok(retval == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", retval);
         ok(DeleteFileA("dir1\\dir2\\test2.txt"), "Expected dir1\\dir2\\test2.txt to exist\n");
         RemoveDirectoryA("dir1\\dir2");

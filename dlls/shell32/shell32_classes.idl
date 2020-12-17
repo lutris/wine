@@ -82,6 +82,11 @@ coclass KnownFolderManager { interface IKnownFolderManager; }
 
 [
     threading(apartment),
+    uuid(d969a300-e7ff-11d0-a93b-00a0c90f2719)
+] coclass NewMenu { interface IShellExtInit; }
+
+[
+    threading(apartment),
     uuid(00bb2763-6a77-11d0-a535-00c04fd7d062)
 ] coclass AutoComplete { interface IAutoComplete2; }
 
