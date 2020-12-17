@@ -1479,10 +1479,10 @@ static INT scroll_window( HWND hwnd, INT dx, INT dy, const RECT *rect, const REC
     rdw_flags = (flags & SW_ERASE) && (flags & SW_INVALIDATE) ?
                                 RDW_INVALIDATE | RDW_ERASE  : RDW_INVALIDATE ;
 
-    if (!WIN_IsWindowDrawable( hwnd, TRUE )) return ERROR;
     hwnd = WIN_GetFullHandle( hwnd );
 
-    GetClientRect(hwnd, &rc);
+    if (!WIN_IsWindowDrawable( hwnd, TRUE )) SetRectEmpty(&rc);
+    else GetClientRect(hwnd, &rc);
 
     if (clipRect) IntersectRect(&cliprc,&rc,clipRect);
     else cliprc = rc;
