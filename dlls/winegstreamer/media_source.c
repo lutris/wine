@@ -64,6 +64,7 @@ struct media_stream
 enum source_async_op
 {
     SOURCE_ASYNC_START,
+    SOURCE_ASYNC_STOP,
     SOURCE_ASYNC_REQUEST_SAMPLE,
 };
 
@@ -343,6 +344,24 @@ static void start_pipeline(struct media_source *source, struct source_async_comm
     gst_element_set_state(source->container, GST_STATE_PLAYING);
 }
 
+static void stop_pipeline(struct media_source *source)
+{
+    unsigned int i;
+
+    gst_element_set_state(source->container, GST_STATE_PAUSED);
+
+    for (i = 0; i < source->stream_count; i++)
+    {
+        struct media_stream *stream = source->streams[i];
+        if (stream->state != STREAM_INACTIVE)
+            IMFMediaEventQueue_QueueEventParamVar(stream->event_queue, MEStreamStopped, &GUID_NULL, S_OK, NULL);
+    }
+
+    IMFMediaEventQueue_QueueEventParamVar(source->event_queue, MESourceStopped, &GUID_NULL, S_OK, NULL);
+
+    source->state = SOURCE_STOPPED;
+}
+
 static void dispatch_end_of_presentation(struct media_source *source)
 {
     PROPVARIANT empty = {.vt = VT_EMPTY};
@@ -416,6 +435,9 @@ static HRESULT WINAPI source_async_commands_Invoke(IMFAsyncCallback *iface, IMFA
     {
         case SOURCE_ASYNC_START:
             start_pipeline(source, command);
+            break;
+        case SOURCE_ASYNC_STOP:
+            stop_pipeline(source);
             break;
         case SOURCE_ASYNC_REQUEST_SAMPLE:
             wait_on_sample(command->u.request_sample.stream, command->u.request_sample.token);
@@ -1092,13 +1114,18 @@ static HRESULT WINAPI media_source_Start(IMFMediaSource *iface, IMFPresentationD
 static HRESULT WINAPI media_source_Stop(IMFMediaSource *iface)
 {
     struct media_source *source = impl_from_IMFMediaSource(iface);
+    struct source_async_command *command;
+    HRESULT hr;
 
-    FIXME("(%p): stub\n", source);
+    TRACE("(%p)\n", source);
 
     if (source->state == SOURCE_SHUTDOWN)
         return MF_E_SHUTDOWN;
 
-    return E_NOTIMPL;
+    if (SUCCEEDED(hr = source_create_async_op(SOURCE_ASYNC_STOP, &command)))
+        hr = MFPutWorkItem(source->async_commands_queue, &source->async_commands_callback, &command->IUnknown_iface);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_source_Pause(IMFMediaSource *iface)
@@ -1240,6 +1267,7 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     GstStaticPadTemplate src_template =
         GST_STATIC_PAD_TEMPLATE("mf_src", GST_PAD_SRC, GST_PAD_ALWAYS, GST_STATIC_CAPS_ANY);
 
+    BOOL video_selected = FALSE, audio_selected = FALSE;
     IMFStreamDescriptor **descriptors = NULL;
     struct media_source *object;
     gint64 total_pres_time = 0;
@@ -1349,15 +1377,34 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     descriptors = heap_alloc(object->stream_count * sizeof(IMFStreamDescriptor*));
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[i]);
+        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[object->stream_count - 1 - i]);
     }
 
     if (FAILED(hr = MFCreatePresentationDescriptor(object->stream_count, descriptors, &object->pres_desc)))
         goto fail;
 
+    /* Select one of each major type. */
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler *handler;
+        GUID major_type;
+        BOOL select_stream = FALSE;
+
+        IMFStreamDescriptor_GetMediaTypeHandler(descriptors[i], &handler);
+        IMFMediaTypeHandler_GetMajorType(handler, &major_type);
+        if (IsEqualGUID(&major_type, &MFMediaType_Video) && !video_selected)
+        {
+            select_stream = TRUE;
+            video_selected = TRUE;
+        }
+        if (IsEqualGUID(&major_type, &MFMediaType_Audio) && !audio_selected)
+        {
+            select_stream = TRUE;
+            audio_selected = TRUE;
+        }
+        if (select_stream)
+            IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler_Release(handler);
         IMFStreamDescriptor_Release(descriptors[i]);
     }
     heap_free(descriptors);
@@ -1365,17 +1412,43 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
 
     for (i = 0; i < object->stream_count; i++)
     {
+        struct media_stream *stream = object->streams[i];
         gint64 stream_pres_time;
-        if (gst_pad_query_duration(object->streams[i]->their_src, GST_FORMAT_TIME, &stream_pres_time))
-        {
-            TRACE("Stream %u has duration %llu\n", i, (unsigned long long int) stream_pres_time);
+        GstEvent *tag_event;
 
+        if (gst_pad_query_duration(stream->their_src, GST_FORMAT_TIME, &stream_pres_time))
+        {
             if (stream_pres_time > total_pres_time)
                 total_pres_time = stream_pres_time;
         }
         else
         {
             WARN("Unable to get presentation time of stream %u\n", i);
+        }
+
+        tag_event = gst_pad_get_sticky_event(stream->their_src, GST_EVENT_TAG, 0);
+        if (tag_event)
+        {
+            GstTagList *tag_list;
+            gchar *language_code = NULL;
+
+            gst_event_parse_tag(tag_event, &tag_list);
+
+            gst_tag_list_get_string(tag_list, "language-code", &language_code);
+            if (language_code)
+            {
+                DWORD char_count = MultiByteToWideChar(CP_UTF8, 0, language_code, -1, NULL, 0);
+                if (char_count)
+                {
+                    WCHAR *language_codeW = heap_alloc(char_count * sizeof(WCHAR));
+                    MultiByteToWideChar(CP_UTF8, 0, language_code, -1, language_codeW, char_count);
+                    IMFStreamDescriptor_SetString(stream->descriptor, &MF_SD_LANGUAGE, language_codeW);
+                    heap_free(language_codeW);
+                }
+                g_free(language_code);
+            }
+
+            gst_event_unref(tag_event);
         }
     }
 

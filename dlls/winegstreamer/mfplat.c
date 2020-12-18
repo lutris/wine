@@ -26,6 +26,7 @@
 #include "gst_private.h"
 #include "mfapi.h"
 #include "mfidl.h"
+#include "wmcodecdsp.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -417,6 +418,7 @@ class_objects[] =
     { &CLSID_VideoProcessorMFT, &video_processor_create },
     { &CLSID_GStreamerByteStreamHandler, &winegstreamer_stream_handler_create },
     { &CLSID_WINEAudioConverter, &audio_converter_create },
+    { &CLSID_CColorConvertDMO, &color_converter_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -452,6 +454,26 @@ static const GUID *audio_converter_supported_types[] =
     &MFAudioFormat_Float,
 };
 
+static WCHAR color_converterW[] = {'C','o','l','o','r',' ','C','o','n','v','e','r','t','e','r',0};
+const GUID *color_converter_supported_types[] =
+{
+    &MFVideoFormat_RGB24,
+    &MFVideoFormat_RGB32,
+    &MFVideoFormat_RGB555,
+    &MFVideoFormat_RGB8,
+    &MFVideoFormat_AYUV,
+    &MFVideoFormat_I420,
+    &MFVideoFormat_IYUV,
+    &MFVideoFormat_NV11,
+    &MFVideoFormat_NV12,
+    &MFVideoFormat_UYVY,
+    &MFVideoFormat_v216,
+    &MFVideoFormat_v410,
+    &MFVideoFormat_YUY2,
+    &MFVideoFormat_YVYU,
+    &MFVideoFormat_YVYU,
+};
+
 static const struct mft
 {
     const GUID *clsid;
@@ -479,13 +501,25 @@ mfts[] =
         audio_converter_supported_types,
         NULL
     },
+    {
+        &CLSID_CColorConvertDMO,
+        &MFT_CATEGORY_VIDEO_EFFECT,
+        color_converterW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Video,
+        ARRAY_SIZE(color_converter_supported_types),
+        color_converter_supported_types,
+        ARRAY_SIZE(color_converter_supported_types),
+        color_converter_supported_types,
+        NULL
+    },
 };
 
 HRESULT mfplat_DllRegisterServer(void)
 {
     unsigned int i, j;
     HRESULT hr;
-    MFT_REGISTER_TYPE_INFO input_types[2], output_types[2];
+    MFT_REGISTER_TYPE_INFO input_types[15], output_types[15];
 
     for (i = 0; i < ARRAY_SIZE(mfts); i++)
     {
@@ -569,6 +603,7 @@ IMFMediaType *mf_media_type_from_caps(const GstCaps *caps)
             unsigned int i;
 
             IMFMediaType_SetUINT32(media_type, &MF_MT_COMPRESSED, FALSE);
+            IMFMediaType_SetUINT32(media_type, &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
             /* First try FOURCC */
             if ((fourcc_subtype.Data1 = gst_video_format_to_fourcc(video_info.finfo->format)))
@@ -864,4 +899,73 @@ done:
     }
 
     return out;
+}
+
+GstBuffer *gst_buffer_from_mf_sample(IMFSample *mf_sample)
+{
+    GstBuffer *out = gst_buffer_new();
+    IMFMediaBuffer *mf_buffer = NULL;
+    LONGLONG duration, time;
+    DWORD buffer_count;
+    unsigned int i;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFSample_GetSampleDuration(mf_sample, &duration)))
+        goto fail;
+
+    if (FAILED(hr = IMFSample_GetSampleTime(mf_sample, &time)))
+        goto fail;
+
+    GST_BUFFER_DURATION(out) = duration;
+    GST_BUFFER_PTS(out) = time * 100;
+
+    if (FAILED(hr = IMFSample_GetBufferCount(mf_sample, &buffer_count)))
+        goto fail;
+
+    for (i = 0; i < buffer_count; i++)
+    {
+        DWORD buffer_size;
+        GstMapInfo map_info;
+        GstMemory *memory;
+        BYTE *buf_data;
+
+        if (FAILED(hr = IMFSample_GetBufferByIndex(mf_sample, i, &mf_buffer)))
+            goto fail;
+
+        if (FAILED(hr = IMFMediaBuffer_GetCurrentLength(mf_buffer, &buffer_size)))
+            goto fail;
+
+        memory = gst_allocator_alloc(NULL, buffer_size, NULL);
+        gst_memory_resize(memory, 0, buffer_size);
+
+        if (!gst_memory_map(memory, &map_info, GST_MAP_WRITE))
+        {
+            hr = E_FAIL;
+            goto fail;
+        }
+
+        if (FAILED(hr = IMFMediaBuffer_Lock(mf_buffer, &buf_data, NULL, NULL)))
+            goto fail;
+
+        memcpy(map_info.data, buf_data, buffer_size);
+
+        if (FAILED(hr = IMFMediaBuffer_Unlock(mf_buffer)))
+            goto fail;
+
+        gst_memory_unmap(memory, &map_info);
+
+        gst_buffer_append_memory(out, memory);
+
+        IMFMediaBuffer_Release(mf_buffer);
+        mf_buffer = NULL;
+    }
+
+    return out;
+
+fail:
+    ERR("Failed to copy IMFSample to GstBuffer, hr = %#x\n", hr);
+    if (mf_buffer)
+        IMFMediaBuffer_Release(mf_buffer);
+    gst_buffer_unref(out);
+    return NULL;
 }

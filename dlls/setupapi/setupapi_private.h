@@ -94,6 +94,8 @@ extern const WCHAR *DIRID_get_string( int dirid ) DECLSPEC_HIDDEN;
 extern const WCHAR *PARSER_get_inf_filename( HINF hinf ) DECLSPEC_HIDDEN;
 extern WCHAR *PARSER_get_dest_dir( INFCONTEXT *context ) DECLSPEC_HIDDEN;
 
+extern WCHAR *get_destination_dir( HINF hinf, const WCHAR *section );
+
 /* support for Ascii queue callback functions */
 
 struct callback_WtoA_context

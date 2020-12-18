@@ -1026,8 +1026,28 @@ static HRESULT WINAPI OleInPlaceActiveObject_ContextSensitiveHelp(IOleInPlaceAct
 static HRESULT WINAPI OleInPlaceActiveObject_TranslateAccelerator(IOleInPlaceActiveObject *iface, LPMSG lpmsg)
 {
     HTMLDocument *This = impl_from_IOleInPlaceActiveObject(iface);
-    FIXME("(%p)->(%p)\n", This, lpmsg);
-    return E_NOTIMPL;
+    HRESULT hres = S_FALSE;
+
+    TRACE("(%p)->(%p)\n", This, lpmsg);
+
+    switch(lpmsg->message)
+    {
+        case WM_KEYDOWN:
+            break;
+        case WM_KEYUP:
+        {
+            TRACE("Processing key %ld\n", lpmsg->wParam);
+            if (lpmsg->wParam == VK_F5)
+                hres = IOleCommandTarget_Exec(&This->IOleCommandTarget_iface, NULL, OLECMDID_REFRESH, 0, NULL, NULL);
+
+            break;
+        }
+        default:
+            FIXME("Unsupported message %04x\n", lpmsg->message);
+    }
+
+    TRACE("result 0x%08x\n", hres);
+    return hres;
 }
 
 static HRESULT WINAPI OleInPlaceActiveObject_OnFrameWindowActivate(IOleInPlaceActiveObject *iface,

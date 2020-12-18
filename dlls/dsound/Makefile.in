@@ -11,6 +11,7 @@ C_SRCS = \
 	dsound_convert.c \
 	dsound_main.c \
 	duplex.c \
+	eax.c \
 	mixer.c \
 	primary.c \
 	propset.c \
