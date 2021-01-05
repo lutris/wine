@@ -48,7 +48,7 @@ static inline IWSDMessageParametersImpl *impl_from_IWSDMessageParameters(IWSDMes
 
 static inline IWSDUdpMessageParametersImpl *impl_from_IWSDUdpMessageParameters(IWSDUdpMessageParameters *iface)
 {
-    return CONTAINING_RECORD(iface, IWSDUdpMessageParametersImpl, base.IWSDMessageParameters_iface);
+    return CONTAINING_RECORD((IWSDMessageParameters *)iface, IWSDUdpMessageParametersImpl, base.IWSDMessageParameters_iface);
 }
 
 /* IWSDMessageParameters implementation */

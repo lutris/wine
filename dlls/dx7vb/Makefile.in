@@ -1,0 +1,8 @@
+MODULE    = dx7vb.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	dx7vb_main.c
+
+RC_SRCS = version.rc

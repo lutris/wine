@@ -1,0 +1,8 @@
+MODULE    = dpvacm.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	dpvacm_main.c
+
+RC_SRCS = version.rc

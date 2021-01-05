@@ -1,0 +1,8 @@
+MODULE    = diactfrm.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	diactfrm_main.c
+
+RC_SRCS = version.rc

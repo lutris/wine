@@ -1,0 +1,8 @@
+MODULE    = qedwipes.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	qedwipes_main.c
+
+RC_SRCS = version.rc
