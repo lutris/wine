@@ -3477,6 +3477,19 @@ void CDECL virtual_release_address_space(void)
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
 }
 
+BOOL CDECL __wine_needs_override_large_address_aware(void)
+{
+    static int needs_override = -1;
+
+    if (needs_override == -1)
+    {
+        const char *str = getenv( "WINE_LARGE_ADDRESS_AWARE" );
+
+        needs_override = !str || atoi(str) == 1;
+    }
+    return needs_override;
+}
+
 
 /***********************************************************************
  *           virtual_set_large_address_space

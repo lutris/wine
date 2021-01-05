@@ -167,6 +167,8 @@ static BOOL UITOOLS95_DrawDiagEdge(HDC hdc, LPRECT rc,
     int add = (LTRBInnerMono[uType & (BDR_INNER|BDR_OUTER)] != -1 ? 1 : 0)
             + (LTRBOuterMono[uType & (BDR_INNER|BDR_OUTER)] != -1 ? 1 : 0);
 
+    uFlags |= BF_FLAT;
+
     /* Init some vars */
     OuterPen = InnerPen = GetStockObject(NULL_PEN);
     SavePen = SelectObject(hdc, InnerPen);
@@ -473,6 +475,8 @@ static BOOL UITOOLS95_DrawRectEdge(HDC hdc, LPRECT rc,
     BOOL retval = !(   ((uType & BDR_INNER) == BDR_INNER
                        || (uType & BDR_OUTER) == BDR_OUTER)
                       && !(uFlags & (BF_FLAT|BF_MONO)) );
+
+    uFlags |= BF_FLAT;
 
     lti_brush = lto_brush = rbi_brush = rbo_brush = GetStockObject(NULL_BRUSH);
 
@@ -1484,28 +1488,8 @@ INT WINAPI FrameRect( HDC hdc, const RECT *rect, HBRUSH hbrush )
  */
 BOOL WINAPI DrawFocusRect( HDC hdc, const RECT* rc )
 {
-    HBRUSH hOldBrush;
-    HPEN hOldPen, hNewPen;
-    INT oldDrawMode, oldBkMode;
-    LOGBRUSH lb;
-
-    hOldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    lb.lbStyle = BS_SOLID;
-    lb.lbColor = 0;
-    hNewPen = ExtCreatePen(PS_COSMETIC|PS_ALTERNATE, 1, &lb, 0, NULL);
-    hOldPen = SelectObject(hdc, hNewPen);
-    oldDrawMode = SetROP2(hdc, R2_NOT);
-    oldBkMode = SetBkMode(hdc, TRANSPARENT);
-
-    Rectangle(hdc, rc->left, rc->top, rc->right, rc->bottom);
-
-    SetBkMode(hdc, oldBkMode);
-    SetROP2(hdc, oldDrawMode);
-    SelectObject(hdc, hOldPen);
-    DeleteObject(hNewPen);
-    SelectObject(hdc, hOldBrush);
-
-    return TRUE;
+    HBRUSH brush = CreateSolidBrush(RGB(153, 209, 255));
+    return FrameRect( hdc, rc, brush );
 }
 
 

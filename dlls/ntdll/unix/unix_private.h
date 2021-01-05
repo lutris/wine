@@ -484,4 +484,6 @@ static inline int ntdll_wcsnicmp( const WCHAR *str1, const WCHAR *str2, int n )
 #define towupper(c)        ntdll_towupper(c)
 #define towlower(c)        ntdll_towlower(c)
 
+BOOL CDECL __wine_needs_override_large_address_aware(void);
+
 #endif /* __NTDLL_UNIX_PRIVATE_H */

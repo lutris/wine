@@ -32,6 +32,7 @@
 #include "wine/debug.h"
 #include "wine/heap.h"
 #include "x11drv.h"
+#include "xcomposite.h"
 
 #define VK_NO_PROTOTYPES
 #define WINE_VK_HOST
@@ -56,6 +57,9 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 static CRITICAL_SECTION context_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static XContext vulkan_hwnd_context;
+static XContext vulkan_swapchain_surface_context;
+
+static struct vulkan_funcs vulkan_funcs;
 
 #define VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR 1000004000
 
@@ -63,6 +67,7 @@ struct wine_vk_surface
 {
     LONG ref;
     Window window;
+    HDC child_window_dc;
     VkSurfaceKHR surface; /* native surface */
 };
 
@@ -144,10 +149,18 @@ static BOOL WINAPI wine_vk_init(INIT_ONCE *once, void *param, void **context)
     LOAD_FUNCPTR(vkQueuePresentKHR);
     LOAD_OPTIONAL_FUNCPTR(vkGetDeviceGroupSurfacePresentModesKHR);
     LOAD_OPTIONAL_FUNCPTR(vkGetPhysicalDevicePresentRectanglesKHR);
+
+    if(!pvkGetPhysicalDeviceSurfaceCapabilities2KHR){
+        vulkan_funcs.p_vkGetPhysicalDeviceSurfaceCapabilities2KHR = NULL;
+    }
+    if(!pvkGetPhysicalDeviceSurfaceFormats2KHR){
+        vulkan_funcs.p_vkGetPhysicalDeviceSurfaceFormats2KHR = NULL;
+    }
 #undef LOAD_FUNCPTR
 #undef LOAD_OPTIONAL_FUNCPTR
 
     vulkan_hwnd_context = XUniqueContext();
+    vulkan_swapchain_surface_context = XUniqueContext();
 
     return TRUE;
 
@@ -265,16 +278,24 @@ static VkResult X11DRV_vkCreateSwapchainKHR(VkDevice device,
         const VkSwapchainCreateInfoKHR *create_info,
         const VkAllocationCallbacks *allocator, VkSwapchainKHR *swapchain)
 {
+    VkResult res;
     VkSwapchainCreateInfoKHR create_info_host;
+    struct wine_vk_surface *x11_surface = surface_from_handle(create_info->surface);
+
     TRACE("%p %p %p %p\n", device, create_info, allocator, swapchain);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
     create_info_host = *create_info;
-    create_info_host.surface = surface_from_handle(create_info->surface)->surface;
+    create_info_host.surface = x11_surface->surface;
 
-    return pvkCreateSwapchainKHR(device, &create_info_host, NULL /* allocator */, swapchain);
+    res = pvkCreateSwapchainKHR(device, &create_info_host, NULL /* allocator */, swapchain);
+    if (res == VK_SUCCESS)
+    {
+        XSaveContext(gdi_display, (XID)(*swapchain), vulkan_swapchain_surface_context, (char *)x11_surface);
+    }
+    return res;
 }
 
 static VkResult X11DRV_vkCreateWin32SurfaceKHR(VkInstance instance,
@@ -290,13 +311,6 @@ static VkResult X11DRV_vkCreateWin32SurfaceKHR(VkInstance instance,
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
-    /* TODO: support child window rendering. */
-    if (GetAncestor(create_info->hwnd, GA_PARENT) != GetDesktopWindow())
-    {
-        FIXME("Application requires child window rendering, which is not implemented yet!\n");
-        return VK_ERROR_INCOMPATIBLE_DRIVER;
-    }
-
     x11_surface = heap_alloc_zero(sizeof(*x11_surface));
     if (!x11_surface)
         return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -311,6 +325,27 @@ static VkResult X11DRV_vkCreateWin32SurfaceKHR(VkInstance instance,
         /* VK_KHR_win32_surface only allows out of host and device memory as errors. */
         res = VK_ERROR_OUT_OF_HOST_MEMORY;
         goto err;
+    }
+
+    /* child window rendering. */
+    if (GetAncestor(create_info->hwnd, GA_PARENT) != GetDesktopWindow())
+    {
+#ifdef SONAME_LIBXCOMPOSITE
+        if (usexcomposite)
+        {
+            pXCompositeRedirectWindow(gdi_display, x11_surface->window, CompositeRedirectManual);
+            x11_surface->child_window_dc = GetDC(create_info->hwnd);
+        }
+#else
+        if (0)
+        {
+        }
+#endif
+        else
+        {
+            FIXME("Child window rendering is not supported without X Composite Extension!\n");
+            return VK_ERROR_INCOMPATIBLE_DRIVER;
+        }
     }
 
     create_info_host.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
@@ -382,6 +417,7 @@ static void X11DRV_vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapcha
         FIXME("Support for allocation callbacks not implemented yet\n");
 
     pvkDestroySwapchainKHR(device, swapchain, NULL /* allocator */);
+    XDeleteContext(gdi_display, (XID)swapchain, vulkan_swapchain_surface_context);
 }
 
 static VkResult X11DRV_vkEnumerateInstanceExtensionProperties(const char *layer_name,
@@ -608,10 +644,25 @@ static VkResult X11DRV_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *
         }
     }
 
+    for (uint32_t i = 0 ; i < present_info->swapchainCount; ++i)
+    {
+        struct wine_vk_surface *x11_surface;
+        if (!XFindContext(gdi_display, (XID)present_info->pSwapchains[i],
+                          vulkan_swapchain_surface_context, (char **)&x11_surface) &&
+            x11_surface->child_window_dc)
+        {
+            struct x11drv_escape_flush_gl_drawable escape;
+            escape.code = X11DRV_FLUSH_GL_DRAWABLE;
+            escape.gl_drawable = x11_surface->window;
+            escape.flush = TRUE;
+            ExtEscape(x11_surface->child_window_dc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL);
+        }
+    }
+
     return res;
 }
 
-static const struct vulkan_funcs vulkan_funcs =
+static struct vulkan_funcs vulkan_funcs =
 {
     X11DRV_vkCreateInstance,
     X11DRV_vkCreateSwapchainKHR,
