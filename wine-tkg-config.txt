@@ -1,0 +1,29 @@
+# Last wine-tkg-staging-fsync-git configuration - Сб 09 янв 2021 22:46:03 MSK :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 6.0rc6.r0.g7d3186e029f
+Using wine-staging patchset (version 6.0rc6.r0.g7ab49f09)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
+
+Done applying reverting hotfixes (if any) - list available in prepare.log
+
+use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
+childwindow.patch -- ( Applied child window for vk patch )
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: 
+
+mk11.patch -- ( Applied Mortal Kombat 11 fix )
+fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
+
+LAA-unix-staging.patch -- ( Applied large address aware override support )
+
+proton-winevulkan-nofshack.patch -- ( Using Proton winevulkan patches (nofshack) )
+josh-flat-theme.patch -- ( Add Josh's better-theme )
+
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )
