@@ -37,9 +37,13 @@ struct audio_converter
 {
     IMFTransform IMFTransform_iface;
     LONG refcount;
+    IMFAttributes *attributes;
+    IMFAttributes *output_attributes;
     IMFMediaType *input_type;
     IMFMediaType *output_type;
     CRITICAL_SECTION cs;
+    BOOL inflight;
+    GstElement *container, *appsrc, *audioconvert, *resampler, *appsink;
 };
 
 static struct audio_converter *impl_audio_converter_from_IMFTransform(IMFTransform *iface)
@@ -85,6 +89,11 @@ static ULONG WINAPI audio_converter_Release(IMFTransform *iface)
     {
         transform->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&transform->cs);
+        if (transform->attributes)
+            IMFAttributes_Release(transform->attributes);
+        if (transform->output_attributes)
+            IMFAttributes_Release(transform->output_attributes);
+        gst_object_unref(transform->container);
         heap_free(transform);
     }
 
@@ -120,23 +129,43 @@ static HRESULT WINAPI audio_converter_GetStreamIDs(IMFTransform *iface, DWORD in
 
 static HRESULT WINAPI audio_converter_GetInputStreamInfo(IMFTransform *iface, DWORD id, MFT_INPUT_STREAM_INFO *info)
 {
-    FIXME("%p %u %p.\n", iface, id, info);
+    TRACE("%p %u %p.\n", iface, id, info);
 
-    return E_NOTIMPL;
+    if (id != 0)
+        return MF_E_INVALIDSTREAMNUMBER;
+
+    info->dwFlags = MFT_INPUT_STREAM_WHOLE_SAMPLES | MFT_INPUT_STREAM_DOES_NOT_ADDREF;
+    info->cbMaxLookahead = 0;
+    info->cbAlignment = 0;
+    info->hnsMaxLatency = 0;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI audio_converter_GetOutputStreamInfo(IMFTransform *iface, DWORD id, MFT_OUTPUT_STREAM_INFO *info)
 {
-    FIXME("%p %u %p.\n", iface, id, info);
+    TRACE("%p %u %p.\n", iface, id, info);
 
-    return E_NOTIMPL;
+    if (id != 0)
+        return MF_E_INVALIDSTREAMNUMBER;
+
+    info->dwFlags = MFT_OUTPUT_STREAM_PROVIDES_SAMPLES;
+    info->cbSize = 0;
+    info->cbAlignment = 0;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI audio_converter_GetAttributes(IMFTransform *iface, IMFAttributes **attributes)
 {
-    FIXME("%p, %p.\n", iface, attributes);
+    struct audio_converter *converter = impl_audio_converter_from_IMFTransform(iface);
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, attributes);
+
+    *attributes = converter->attributes;
+    IMFAttributes_AddRef(*attributes);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI audio_converter_GetInputStreamAttributes(IMFTransform *iface, DWORD id,
@@ -150,9 +179,14 @@ static HRESULT WINAPI audio_converter_GetInputStreamAttributes(IMFTransform *ifa
 static HRESULT WINAPI audio_converter_GetOutputStreamAttributes(IMFTransform *iface, DWORD id,
         IMFAttributes **attributes)
 {
-    FIXME("%p, %u, %p.\n", iface, id, attributes);
+    struct audio_converter *converter = impl_audio_converter_from_IMFTransform(iface);
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %p.\n", iface, id, attributes);
+
+    *attributes = converter->output_attributes;
+    IMFAttributes_AddRef(*attributes);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI audio_converter_DeleteInputStream(IMFTransform *iface, DWORD id)
@@ -311,7 +345,8 @@ static HRESULT WINAPI audio_converter_SetInputType(IMFTransform *iface, DWORD id
         if (!(input_caps = caps_from_mf_media_type(type)))
             return MF_E_INVALIDTYPE;
 
-        gst_caps_unref(input_caps);
+        if (flags & MFT_SET_TYPE_TEST_ONLY)
+            gst_caps_unref(input_caps);
     }
 
     if (flags & MFT_SET_TYPE_TEST_ONLY)
@@ -320,6 +355,7 @@ static HRESULT WINAPI audio_converter_SetInputType(IMFTransform *iface, DWORD id
     EnterCriticalSection(&converter->cs);
 
     hr = S_OK;
+    gst_element_set_state(converter->container, GST_STATE_READY);
 
     if (type)
     {
@@ -328,6 +364,9 @@ static HRESULT WINAPI audio_converter_SetInputType(IMFTransform *iface, DWORD id
 
         if (SUCCEEDED(hr))
             hr = IMFMediaType_CopyAllItems(type, (IMFAttributes *) converter->input_type);
+
+        g_object_set(converter->appsrc, "caps", input_caps, NULL);
+        gst_caps_unref(input_caps);
 
         if (FAILED(hr))
         {
@@ -340,6 +379,9 @@ static HRESULT WINAPI audio_converter_SetInputType(IMFTransform *iface, DWORD id
         IMFMediaType_Release(converter->input_type);
         converter->input_type = NULL;
     }
+
+    if (converter->input_type && converter->output_type)
+        gst_element_set_state(converter->container, GST_STATE_PLAYING);
 
     LeaveCriticalSection(&converter->cs);
 
@@ -386,7 +428,8 @@ static HRESULT WINAPI audio_converter_SetOutputType(IMFTransform *iface, DWORD i
         if (!(output_caps = caps_from_mf_media_type(type)))
             return MF_E_INVALIDTYPE;
 
-        gst_caps_unref(output_caps);
+        if (flags & MFT_SET_TYPE_TEST_ONLY)
+            gst_caps_unref(output_caps);
     }
 
     if (flags & MFT_SET_TYPE_TEST_ONLY)
@@ -395,6 +438,7 @@ static HRESULT WINAPI audio_converter_SetOutputType(IMFTransform *iface, DWORD i
     EnterCriticalSection(&converter->cs);
 
     hr = S_OK;
+    gst_element_set_state(converter->container, GST_STATE_READY);
 
     if (type)
     {
@@ -403,6 +447,9 @@ static HRESULT WINAPI audio_converter_SetOutputType(IMFTransform *iface, DWORD i
 
         if (SUCCEEDED(hr))
             hr = IMFMediaType_CopyAllItems(type, (IMFAttributes *) converter->output_type);
+
+        g_object_set(converter->appsink, "caps", output_caps, NULL);
+        gst_caps_unref(output_caps);
 
         if (FAILED(hr))
         {
@@ -415,6 +462,9 @@ static HRESULT WINAPI audio_converter_SetOutputType(IMFTransform *iface, DWORD i
         IMFMediaType_Release(converter->output_type);
         converter->output_type = NULL;
     }
+
+    if (converter->input_type && converter->output_type)
+        gst_element_set_state(converter->container, GST_STATE_PLAYING);
 
     LeaveCriticalSection(&converter->cs);
 
@@ -517,7 +567,7 @@ static HRESULT WINAPI audio_converter_ProcessMessage(IMFTransform *iface, MFT_ME
 
     switch(message)
     {
-        case MFT_MESSAGE_NOTIFY_START_OF_STREAM:
+        case MFT_MESSAGE_NOTIFY_BEGIN_STREAMING:
             return S_OK;
         default:
             FIXME("Unhandled message type %x.\n", message);
@@ -527,17 +577,102 @@ static HRESULT WINAPI audio_converter_ProcessMessage(IMFTransform *iface, MFT_ME
 
 static HRESULT WINAPI audio_converter_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
 {
-    FIXME("%p, %u, %p, %#x.\n", iface, id, sample, flags);
+    GstBuffer *gst_buffer;
+    int ret;
 
-    return E_NOTIMPL;
+    struct audio_converter *converter = impl_audio_converter_from_IMFTransform(iface);
+
+    TRACE("%p, %u, %p, %#x.\n", iface, id, sample, flags);
+
+    if (flags)
+        WARN("Unsupported flags %#x\n", flags);
+
+    if (id != 0)
+        return MF_E_INVALIDSTREAMNUMBER;
+
+    EnterCriticalSection(&converter->cs);
+
+    if (!converter->input_type || !converter->output_type)
+    {
+        LeaveCriticalSection(&converter->cs);
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+    }
+
+    if (converter->inflight)
+    {
+        LeaveCriticalSection(&converter->cs);
+        return MF_E_NOTACCEPTING;
+    }
+
+    if (!(gst_buffer = gst_buffer_from_mf_sample(sample)))
+    {
+        LeaveCriticalSection(&converter->cs);
+        return E_FAIL;
+    }
+
+    g_signal_emit_by_name(converter->appsrc, "push-buffer", gst_buffer, &ret);
+    gst_buffer_unref(gst_buffer);
+    if (ret != GST_FLOW_OK)
+    {
+        ERR("Couldn't push buffer ret = %d (%s)\n", ret, gst_flow_get_name(ret));
+        LeaveCriticalSection(&converter->cs);
+        return E_FAIL;
+    }
+
+    converter->inflight = TRUE;
+    LeaveCriticalSection(&converter->cs);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI audio_converter_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
         MFT_OUTPUT_DATA_BUFFER *samples, DWORD *status)
 {
-    FIXME("%p, %#x, %u, %p, %p.\n", iface, flags, count, samples, status);
+    GstSample *sample;
 
-    return E_NOTIMPL;
+    struct audio_converter *converter = impl_audio_converter_from_IMFTransform(iface);
+
+    TRACE("%p, %#x, %u, %p, %p.\n", iface, flags, count, samples, status);
+
+    if (flags)
+        WARN("Unsupported flags %#x\n", flags);
+
+    if (!count)
+        return S_OK;
+
+    if (count != 1)
+        return MF_E_INVALIDSTREAMNUMBER;
+
+    if (samples[0].dwStreamID != 0)
+        return MF_E_INVALIDSTREAMNUMBER;
+
+    EnterCriticalSection(&converter->cs);
+
+    if (!converter->input_type || !converter->output_type)
+    {
+        LeaveCriticalSection(&converter->cs);
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+    }
+
+    if (!converter->inflight)
+    {
+        LeaveCriticalSection(&converter->cs);
+        return MF_E_TRANSFORM_NEED_MORE_INPUT;
+    }
+
+    g_signal_emit_by_name(converter->appsink, "pull-sample", &sample);
+
+    converter->inflight =  FALSE;
+
+    samples[0].pSample = mf_sample_from_gst_buffer(gst_sample_get_buffer(sample));
+    gst_sample_unref(sample);
+    samples[0].dwStatus = S_OK;
+    samples[0].pEvents = NULL;
+    *status = 0;
+
+    LeaveCriticalSection(&converter->cs);
+
+    return S_OK;
 }
 
 static const IMFTransformVtbl audio_converter_vtbl =
@@ -573,6 +708,7 @@ static const IMFTransformVtbl audio_converter_vtbl =
 HRESULT audio_converter_create(REFIID riid, void **ret)
 {
     struct audio_converter *object;
+    HRESULT hr;
 
     TRACE("%s %p\n", debugstr_guid(riid), ret);
 
@@ -584,6 +720,77 @@ HRESULT audio_converter_create(REFIID riid, void **ret)
 
     InitializeCriticalSection(&object->cs);
     object->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": audio_converter_lock");
+
+    if (FAILED(hr = MFCreateAttributes(&object->attributes, 0)))
+    {
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return hr;
+    }
+
+    if (FAILED(hr = MFCreateAttributes(&object->output_attributes, 0)))
+    {
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return hr;
+    }
+
+    object->container = gst_bin_new(NULL);
+
+    if (!(object->appsrc = gst_element_factory_make("appsrc", NULL)))
+    {
+        ERR("Failed to create appsrc, are %u-bit Gstreamer \"base\" plugins installed?\n",
+                8 * (int)sizeof(void *));
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return E_FAIL;
+    }
+    gst_bin_add(GST_BIN(object->container), object->appsrc);
+
+    if (!(object->audioconvert = gst_element_factory_make("audioconvert", NULL)))
+    {
+        ERR("Failed to create audioconvert, are %u-bit Gstreamer \"base\" plugins installed?\n",
+                8 * (int)sizeof(void *));
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return E_FAIL;
+    }
+    gst_bin_add(GST_BIN(object->container), object->audioconvert);
+
+    if (!(object->resampler = gst_element_factory_make("audioresample", NULL)))
+    {
+        ERR("Failed to create audioresample, are %u-bit Gstreamer \"base\" plugins installed?\n",
+                8 * (int)sizeof(void *));
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return E_FAIL;
+    }
+    gst_bin_add(GST_BIN(object->container), object->resampler);
+
+    if (!(object->appsink = gst_element_factory_make("appsink", NULL)))
+    {
+        ERR("Failed to create appsink, are %u-bit Gstreamer \"base\" plugins installed?\n",
+                8 * (int)sizeof(void *));
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return E_FAIL;
+    }
+    gst_bin_add(GST_BIN(object->container), object->appsink);
+
+    if (!gst_element_link(object->appsrc, object->audioconvert))
+    {
+        ERR("Failed to link appsrc to audioconvert\n");
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return E_FAIL;
+    }
+
+    if (!gst_element_link(object->audioconvert, object->resampler))
+    {
+        ERR("Failed to link audioconvert to resampler\n");
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return E_FAIL;
+    }
+
+    if (!gst_element_link(object->resampler, object->appsink))
+    {
+        ERR("Failed to link resampler to appsink\n");
+        IMFTransform_Release(&object->IMFTransform_iface);
+        return E_FAIL;
+    }
 
     *ret = &object->IMFTransform_iface;
     return S_OK;

@@ -422,7 +422,7 @@ static IDirectDraw4 *create_ddraw(void)
     return ddraw4;
 }
 
-static IDirect3DDevice3 *create_device(HWND window, DWORD coop_level)
+static IDirect3DDevice3 *create_device_ex(HWND window, DWORD coop_level, BOOL software)
 {
     IDirectDrawSurface4 *surface, *ds;
     IDirect3DDevice3 *device = NULL;
@@ -442,6 +442,8 @@ static IDirect3DDevice3 *create_device(HWND window, DWORD coop_level)
     surface_desc.dwSize = sizeof(surface_desc);
     surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
     surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE;
+    if (software)
+        surface_desc.ddsCaps.dwCaps |= DDSCAPS_SYSTEMMEMORY;
     surface_desc.dwWidth = 640;
     surface_desc.dwHeight = 480;
 
@@ -470,7 +472,8 @@ static IDirect3DDevice3 *create_device(HWND window, DWORD coop_level)
     }
 
     memset(&z_fmt, 0, sizeof(z_fmt));
-    hr = IDirect3D3_EnumZBufferFormats(d3d3, &IID_IDirect3DHALDevice, enum_z_fmt, &z_fmt);
+    hr = IDirect3D3_EnumZBufferFormats(d3d3, software ? &IID_IDirect3DRGBDevice
+            : &IID_IDirect3DHALDevice, enum_z_fmt, &z_fmt);
     if (FAILED(hr) || !z_fmt.dwSize)
     {
         IDirect3D3_Release(d3d3);
@@ -482,6 +485,8 @@ static IDirect3DDevice3 *create_device(HWND window, DWORD coop_level)
     surface_desc.dwSize = sizeof(surface_desc);
     surface_desc.dwFlags = DDSD_CAPS | DDSD_PIXELFORMAT | DDSD_WIDTH | DDSD_HEIGHT;
     surface_desc.ddsCaps.dwCaps = DDSCAPS_ZBUFFER;
+    if (software)
+        surface_desc.ddsCaps.dwCaps |= DDSCAPS_SYSTEMMEMORY;
     U4(surface_desc).ddpfPixelFormat = z_fmt;
     surface_desc.dwWidth = 640;
     surface_desc.dwHeight = 480;
@@ -504,13 +509,19 @@ static IDirect3DDevice3 *create_device(HWND window, DWORD coop_level)
         return NULL;
     }
 
-    hr = IDirect3D3_CreateDevice(d3d3, &IID_IDirect3DHALDevice, surface, &device, NULL);
+    hr = IDirect3D3_CreateDevice(d3d3, software ? &IID_IDirect3DRGBDevice
+            : &IID_IDirect3DHALDevice, surface, &device, NULL);
     IDirect3D3_Release(d3d3);
     IDirectDrawSurface4_Release(surface);
     if (FAILED(hr))
         return NULL;
 
     return device;
+}
+
+static IDirect3DDevice3 *create_device(HWND window, DWORD coop_level)
+{
+    return create_device_ex(window, coop_level, FALSE);
 }
 
 static IDirect3DViewport3 *create_viewport(IDirect3DDevice3 *device, UINT x, UINT y, UINT w, UINT h)
@@ -18271,6 +18282,116 @@ done:
     IDirectDraw4_Release(ddraw);
 }
 
+static void test_texture_wrong_caps_(BOOL software)
+{
+    static struct
+    {
+        struct vec3 position;
+        struct vec2 texcoord;
+    }
+    quad[] =
+    {
+        {{-1.0f, -1.0f, 0.0f}, {0.0f, 1.0f}},
+        {{-1.0f,  1.0f, 0.0f}, {0.0f, 0.0f}},
+        {{ 1.0f, -1.0f, 0.0f}, {1.0f, 1.0f}},
+        {{ 1.0f,  1.0f, 0.0f}, {1.0f, 0.0f}},
+    };
+    static DDPIXELFORMAT fmt =
+    {
+        sizeof(DDPIXELFORMAT), DDPF_RGB | DDPF_ALPHAPIXELS, 0,
+                {32}, {0x00ff0000}, {0x0000ff00}, {0x000000ff}, {0xff000000}
+    };
+    D3DRECT clear_rect = {{0}, {0}, {640}, {480}};
+    IDirectDrawSurface4 *surface, *rt;
+    D3DCOLOR color, expected_color;
+    IDirect3DViewport3 *viewport;
+    IDirect3DTexture2 *texture;
+    IDirect3DDevice3 *device;
+    IDirectDraw4 *ddraw;
+    DDSURFACEDESC2 ddsd;
+    IDirect3D3 *d3d;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+
+    window = create_window();
+    if (!(device = create_device_ex(window, DDSCL_NORMAL, software)))
+    {
+        skip("Failed to create a 3D device, skipping test.\n");
+        DestroyWindow(window);
+        return;
+    }
+    hr = IDirect3DDevice3_GetDirect3D(device, &d3d);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3D3_QueryInterface(d3d, &IID_IDirectDraw4, (void **)&ddraw);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_GetRenderTarget(device, &rt);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    viewport = create_viewport(device, 0, 0, 640, 480);
+    hr = IDirect3DDevice3_SetCurrentViewport(device, viewport);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+    ddsd.dwHeight = 16;
+    ddsd.dwWidth = 16;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    U4(ddsd).ddpfPixelFormat = fmt;
+    hr = IDirectDraw4_CreateSurface(ddraw, &ddsd, &surface, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface4_QueryInterface(surface, &IID_IDirect3DTexture2, (void **)&texture);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    fill_surface(surface, 0xff00ff00);
+
+    hr = IDirect3DDevice3_SetRenderState(device, D3DRENDERSTATE_ZENABLE, D3DZB_FALSE);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice3_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_SetTextureStageState(device, 0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_SetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_SetTextureStageState(device, 0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_SetTexture(device, 0, texture);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DViewport3_Clear2(viewport, 1, &clear_rect, D3DCLEAR_TARGET, 0x000000ff, 0.0f, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_BeginScene(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_DrawPrimitive(device, D3DPT_TRIANGLESTRIP,
+            D3DFVF_XYZ | D3DFVF_TEX1, quad, 4, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_EndScene(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    expected_color = software ? 0x0000ff00 : 0x00ffffff;
+    color = get_surface_color(rt, 320, 240);
+    ok(color == expected_color, "Got color 0x%08x, expected 0x%08x.\n", color, expected_color);
+
+    IDirect3DTexture2_Release(texture);
+    IDirectDrawSurface4_Release(surface);
+    IDirectDraw4_Release(ddraw);
+    IDirect3D3_Release(d3d);
+    refcount = IDirect3DDevice3_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_texture_wrong_caps(void)
+{
+    trace("Hardware device.\n");
+    test_texture_wrong_caps_(FALSE);
+
+    trace("Software device.\n");
+    test_texture_wrong_caps_(TRUE);
+}
+
 START_TEST(ddraw4)
 {
     DDDEVICEIDENTIFIER identifier;
@@ -18403,6 +18524,7 @@ START_TEST(ddraw4)
     test_gdi_surface();
     test_alphatest();
     test_clipper_refcount();
+    test_texture_wrong_caps();
     test_caps();
     test_d32_support();
     test_surface_format_conversion_alpha();

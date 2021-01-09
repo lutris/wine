@@ -54,6 +54,8 @@ struct thread
     struct process        *process;
     thread_id_t            id;            /* thread id */
     struct list            mutex_list;    /* list of currently owned mutexes */
+    int                    esync_fd;      /* esync file descriptor (signalled on exit) */
+    int                    esync_apc_fd;  /* esync apc fd (signalled when APCs are present) */
     struct debug_ctx      *debug_ctx;     /* debugger context if this thread is a debugger */
     unsigned int           system_regs;   /* which system regs have been set */
     struct msg_queue      *queue;         /* message queue */
@@ -91,6 +93,7 @@ struct thread
     struct list            kernel_object; /* list of kernel object pointers */
     data_size_t            desc_len;      /* thread description length in bytes */
     WCHAR                 *desc;          /* thread description string */
+    struct timeout_user   *exit_poll;     /* poll if the thread/process has exited already */
 };
 
 extern struct thread *current;
@@ -143,5 +146,10 @@ static inline void clear_error(void)             { set_error(0); }
 static inline void set_win32_error( unsigned int err ) { set_error( 0xc0010000 | err ); }
 
 static inline thread_id_t get_thread_id( struct thread *thread ) { return thread->id; }
+
+/* scheduler functions */
+
+extern void init_scheduler( void );
+extern void set_scheduler_priority( struct thread *thread );
 
 #endif  /* __WINE_SERVER_THREAD_H */
