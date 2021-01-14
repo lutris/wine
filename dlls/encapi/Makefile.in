@@ -1,0 +1,8 @@
+MODULE    = encapi.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	encapi_main.c
+
+RC_SRCS = version.rc

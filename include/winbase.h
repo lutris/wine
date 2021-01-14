@@ -2928,14 +2928,18 @@ extern WCHAR * CDECL wine_get_dos_file_name( LPCSTR str );
 #pragma intrinsic(_InterlockedExchange)
 #pragma intrinsic(_InterlockedExchangeAdd)
 #pragma intrinsic(_InterlockedIncrement)
+#pragma intrinsic(_InterlockedIncrement16)
 #pragma intrinsic(_InterlockedDecrement)
+#pragma intrinsic(_InterlockedDecrement16)
 
 long      _InterlockedCompareExchange(long volatile*,long,long);
 long long _InterlockedCompareExchange64(long long volatile*,long long,long long);
 long      _InterlockedDecrement(long volatile*);
+short     _InterlockedDecrement16(short volatile*);
 long      _InterlockedExchange(long volatile*,long);
 long      _InterlockedExchangeAdd(long volatile*,long);
 long      _InterlockedIncrement(long volatile*);
+short     _InterlockedIncrement16(short volatile *);
 
 static FORCEINLINE LONG WINAPI InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
 {
@@ -2962,9 +2966,19 @@ static FORCEINLINE LONG WINAPI InterlockedIncrement( LONG volatile *dest )
     return _InterlockedIncrement( (long volatile *)dest );
 }
 
+static FORCEINLINE short WINAPI InterlockedIncrement16( short volatile *dest )
+{
+    return _InterlockedIncrement16( (short volatile *)dest );
+}
+
 static FORCEINLINE LONG WINAPI InterlockedDecrement( LONG volatile *dest )
 {
     return _InterlockedDecrement( (long volatile *)dest );
+}
+
+static FORCEINLINE short WINAPI InterlockedDecrement16( short volatile *dest )
+{
+    return _InterlockedDecrement16( (short volatile *)dest );
 }
 
 #ifndef __i386__
@@ -3031,7 +3045,17 @@ static FORCEINLINE LONG WINAPI InterlockedIncrement( LONG volatile *dest )
     return __sync_add_and_fetch( dest, 1 );
 }
 
+static FORCEINLINE short WINAPI InterlockedIncrement16( short volatile *dest )
+{
+    return __sync_add_and_fetch( dest, 1 );
+}
+
 static FORCEINLINE LONG WINAPI InterlockedDecrement( LONG volatile *dest )
+{
+    return __sync_add_and_fetch( dest, -1 );
+}
+
+static FORCEINLINE short WINAPI InterlockedDecrement16( short volatile *dest )
 {
     return __sync_add_and_fetch( dest, -1 );
 }
