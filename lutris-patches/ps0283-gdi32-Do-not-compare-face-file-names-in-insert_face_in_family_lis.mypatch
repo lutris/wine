@@ -1,0 +1,28 @@
+From: Zebediah Figura <z.figura12@gmail.com>
+Subject: [PATCH] gdi32: Do not compare face file names in insert_face_in_family_list() if either is NULL.
+Message-Id: <20210111221133.514693-1-z.figura12@gmail.com>
+Date: Mon, 11 Jan 2021 16:11:33 -0600
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=50486
+Signed-off-by: Zebediah Figura <z.figura12@gmail.com>
+---
+ dlls/gdi32/font.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/dlls/gdi32/font.c b/dlls/gdi32/font.c
+index 7f243192cc3..6f50cc92a83 100644
+--- a/dlls/gdi32/font.c
++++ b/dlls/gdi32/font.c
+@@ -913,7 +913,7 @@ static BOOL insert_face_in_family_list( struct gdi_font_face *face, struct gdi_f
+                    debugstr_w(face->full_name), debugstr_w(family->family_name),
+                    cursor->version, face->version );
+ 
+-            if (face->file && !wcsicmp( face->file, cursor->file ))
++            if (face->file && cursor->file && !wcsicmp( face->file, cursor->file ))
+             {
+                 cursor->refcount++;
+                 TRACE("Font %s already in list, refcount now %d\n",
+
+-- 
+2.29.2
+

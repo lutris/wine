@@ -1,0 +1,24 @@
+From: Damjan Jovanovic <damjan.jov@gmail.com>
+Subject: [PATCH] mmsystem: Win16 DllEntryPoint uses HINSTANCE16, not HINSTANCE
+Message-Id: <CAJm2B-k6G3pxTfacXOspkS=uwCz6fYL4B_unLByLh5kgK6rjBQ@mail.gmail.com>
+Date: Tue, 12 Jan 2021 17:42:50 +0200
+
+Signed-off-by: Damjan Jovanovic <damjan.jov@gmail.com>
+---
+ dlls/mmsystem.dll16/mmsystem.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/dlls/mmsystem.dll16/mmsystem.c b/dlls/mmsystem.dll16/mmsystem.c
+index 083ec2d6da6..445fc48d50e 100644
+--- a/dlls/mmsystem.dll16/mmsystem.c
++++ b/dlls/mmsystem.dll16/mmsystem.c
+@@ -66,7 +66,7 @@ CRITICAL_SECTION mmdrv_cs = { &mmdrv_critsect_debug, -1, 0, 0, 0, 0 };
+  * MMSYSTEM DLL entry point
+  *
+  */
+-BOOL WINAPI MMSYSTEM_LibMain(DWORD fdwReason, HINSTANCE hinstDLL, WORD ds,
++BOOL WINAPI MMSYSTEM_LibMain(DWORD fdwReason, HINSTANCE16 hinstDLL, WORD ds,
+ 			     WORD wHeapSize, DWORD dwReserved1, WORD wReserved2)
+ {
+     static int done;
+

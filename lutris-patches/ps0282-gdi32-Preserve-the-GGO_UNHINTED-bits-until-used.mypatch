@@ -1,0 +1,58 @@
+From: Byeongsik Jeon <bsjeon@hanmail.net>
+Subject: [PATCH] gdi32: Preserve the GGO_UNHINTED bits until used.
+Message-Id: <20210111041842.69731-1-bsjeon@hanmail.net>
+Date: Mon, 11 Jan 2021 13:18:42 +0900
+
+1. Fixes a regression caused by 044315c0b3890676d9fd751d8191b0b7381e0b97.
+   GGO_UNHINTED bit is used by freetype.c::get_load_flags().
+
+2. The pre-044315c0b38 code get/set the metrics cache, regardless of
+   whether GGO_UNHINTED bit is turned on. The problem must be corrected
+   because the metrics vary depending on the GGO_UNHINTED on/off.
+   Since the structural change of 044315c0b38, this possibility is
+   excluded naturally by this patch.
+
+Signed-off-by: Byeongsik Jeon <bsjeon@hanmail.net>
+---
+ dlls/gdi32/font.c     | 3 +--
+ dlls/gdi32/freetype.c | 2 ++
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/gdi32/font.c b/dlls/gdi32/font.c
+index 7f243192cc3..e1b26a8ee4d 100644
+--- a/dlls/gdi32/font.c
++++ b/dlls/gdi32/font.c
+@@ -2955,6 +2955,7 @@ static DWORD get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
+         /* Windows bitmap font, e.g. Small Fonts, uses ANSI character code
+            as glyph index. "Treasure Adventure Game" depends on this. */
+         font_funcs->get_glyph_index( font, &index, FALSE );
++        format &= ~GGO_GLYPH_INDEX;
+         /* TODO: Window also turns off tategaki for glyphs passed in by index
+             if their unicode code points fall outside of the range that is
+             rotated. */
+@@ -2970,8 +2971,6 @@ static DWORD get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
+         }
+     }
+ 
+-    format &= ~(GGO_GLYPH_INDEX | GGO_UNHINTED);
+-
+     if (mat && !memcmp( mat, &identity, sizeof(*mat) )) mat = NULL;
+ 
+     if (format == GGO_METRICS && !mat && get_gdi_font_glyph_metrics( font, index, &gm, &abc ))
+diff --git a/dlls/gdi32/freetype.c b/dlls/gdi32/freetype.c
+index fffa3288503..b3fc565afe8 100644
+--- a/dlls/gdi32/freetype.c
++++ b/dlls/gdi32/freetype.c
+@@ -3515,6 +3515,8 @@ static DWORD CDECL freetype_get_glyph_outline( struct gdi_font *font, UINT glyph
+           font->matrix.eM11, font->matrix.eM12,
+           font->matrix.eM21, font->matrix.eM22);
+ 
++    format &= ~GGO_UNHINTED;
++
+     needsTransform = get_transform_matrices( font, tategaki, lpmat, matrices );
+ 
+     vertical_metrics = (tategaki && FT_HAS_VERTICAL(ft_face));
+
+-- 
+2.30.0
+

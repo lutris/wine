@@ -1,0 +1,39 @@
+From: Jacek Caban <jacek@codeweavers.com>
+Subject: [PATCH] ntdll: Honour alertable argument in NtContinue.
+Message-Id: <057a2c12-d93c-4760-a0f8-3166ab78b723@codeweavers.com>
+Date: Mon, 11 Jan 2021 20:04:33 +0100
+
+Signed-off-by: Jacek Caban <jacek@codeweavers.com>
+---
+
+Since 7a71f98640bf, NtContinue always performs alertable wait, meaning 
+that dispatch_exception can cause APC to be invoked, ignoring that 
+alertable is FALSE.
+
+I found it while debugging a win16 application, which crashed in APC 
+unexpectedly invoked when returning from an emulated DOS call. The 
+problem is more likely to happen in win16, where we have a lot of 
+exceptions, but it's more generic.
+
+  dlls/ntdll/unix/server.c | 4 +++-
+  1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index a9608abfb73..b5a32ca3cd9 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -718,10 +718,12 @@ unsigned int server_wait( const select_op_t *select_op, data_size_t size, UINT f
+  */
+ NTSTATUS WINAPI NtContinue( CONTEXT *context, BOOLEAN alertable )
+ {
++    unsigned int flags = SELECT_INTERRUPTIBLE;
+     user_apc_t apc;
+     NTSTATUS status;
+ 
+-    status = server_select( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, 0, NULL, NULL, &apc );
++    if (alertable) flags |= SELECT_ALERTABLE;
++    status = server_select( NULL, 0, flags, 0, NULL, NULL, &apc );
+     if (status == STATUS_USER_APC) invoke_apc( context, &apc );
+     return NtSetContextThread( GetCurrentThread(), context );
+ }
+

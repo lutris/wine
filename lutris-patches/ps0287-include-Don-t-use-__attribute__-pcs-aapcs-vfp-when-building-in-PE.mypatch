@@ -1,0 +1,63 @@
+From: Martin Storsjo <martin@martin.st>
+Subject: [PATCH] include: Don't use __attribute__((pcs("aapcs-vfp"))) when building in PE mode
+Message-Id: <20210111210021.29841-1-martin@martin.st>
+Date: Mon, 11 Jan 2021 23:00:21 +0200
+
+Clang doesn't support this attribute for windows targets right now;
+the attribute is only needed for selecting a potentially non-default
+calling convention on e.g. linux.
+
+Signed-off-by: Martin Storsjo <martin@martin.st>
+---
+ include/msvcrt/corecrt.h | 4 ++--
+ include/windef.h         | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/include/msvcrt/corecrt.h b/include/msvcrt/corecrt.h
+index a66f43877ac..4adbe0920f6 100644
+--- a/include/msvcrt/corecrt.h
++++ b/include/msvcrt/corecrt.h
+@@ -79,7 +79,7 @@
+ #  else
+ #   define __stdcall __attribute__((ms_abi))
+ #  endif
+-# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
++# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
+ #   define __stdcall __attribute__((pcs("aapcs-vfp")))
+ # elif defined(__aarch64__) && defined (__GNUC__) && __has_attribute(ms_abi)
+ #  define __stdcall __attribute__((ms_abi))
+@@ -120,7 +120,7 @@
+ #endif
+ 
+ #ifndef WINAPIV
+-# if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
++# if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
+ #  define WINAPIV __attribute__((pcs("aapcs")))
+ # else
+ #  define WINAPIV __cdecl
+diff --git a/include/windef.h b/include/windef.h
+index 5351afe66db..ac2ec619fbd 100644
+--- a/include/windef.h
++++ b/include/windef.h
+@@ -72,7 +72,7 @@ extern "C" {
+ #  else
+ #   define __stdcall __attribute__((ms_abi))
+ #  endif
+-# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
++# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
+ #   define __stdcall __attribute__((pcs("aapcs-vfp")))
+ # elif defined(__aarch64__) && defined (__GNUC__) && __has_attribute(ms_abi)
+ #  define __stdcall __attribute__((ms_abi))
+@@ -120,7 +120,7 @@ extern "C" {
+ # endif
+ #endif
+ 
+-#if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
++#if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
+ # define WINAPIV __attribute__((pcs("aapcs")))
+ #else
+ # define WINAPIV __cdecl
+
+-- 
+2.17.1
+

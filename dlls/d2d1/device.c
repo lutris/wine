@@ -1171,10 +1171,14 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext *if
 
     if (measuring_mode == DWRITE_MEASURING_MODE_NATURAL)
         hr = IDWriteFactory_CreateTextLayout(dwrite_factory, string, string_len, text_format,
-                layout_rect->right - layout_rect->left, layout_rect->bottom - layout_rect->top, &text_layout);
+                layout_rect->left > layout_rect->right ? layout_rect->left : (layout_rect->right - layout_rect->left),
+                layout_rect->top > layout_rect->bottom ? layout_rect->top : (layout_rect->bottom - layout_rect->top),
+                &text_layout);
     else
         hr = IDWriteFactory_CreateGdiCompatibleTextLayout(dwrite_factory, string, string_len, text_format,
-                layout_rect->right - layout_rect->left, layout_rect->bottom - layout_rect->top, render_target->desc.dpiX / 96.0f,
+                layout_rect->left > layout_rect->right ? layout_rect->left : (layout_rect->right - layout_rect->left),
+                layout_rect->top > layout_rect->bottom ? layout_rect->top : (layout_rect->bottom - layout_rect->top),
+                render_target->desc.dpiX / 96.0f,
                 (DWRITE_MATRIX*)&render_target->drawing_state.transform, measuring_mode == DWRITE_MEASURING_MODE_GDI_NATURAL, &text_layout);
     IDWriteFactory_Release(dwrite_factory);
     if (FAILED(hr))
@@ -1183,7 +1187,9 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext *if
         return;
     }
 
-    d2d_point_set(&origin, layout_rect->left, layout_rect->top);
+    d2d_point_set(&origin, layout_rect->left <  layout_rect->right ? layout_rect->left : layout_rect->right,
+            layout_rect->top < layout_rect->bottom ? layout_rect->top : layout_rect->bottom);
+
     ID2D1DeviceContext_DrawTextLayout(iface, origin, text_layout, brush, options);
     IDWriteTextLayout_Release(text_layout);
 }

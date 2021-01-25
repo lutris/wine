@@ -1624,6 +1624,7 @@
 
 # Virtual memory
 @ cdecl -syscall __wine_locked_recvmsg(long ptr long)
+@ cdecl -syscall __wine_needs_override_large_address_aware()
 
 # Version
 @ cdecl -syscall wine_get_version()
@@ -1632,6 +1633,8 @@
 
 # Codepages
 @ cdecl __wine_get_unix_codepage()
+
+@ cdecl IsTransgaming()
 
 # Filesystem
 @ cdecl -syscall wine_nt_to_unix_file_name(ptr ptr ptr long)

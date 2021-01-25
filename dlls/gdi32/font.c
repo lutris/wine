@@ -913,7 +913,7 @@ static BOOL insert_face_in_family_list( struct gdi_font_face *face, struct gdi_f
                    debugstr_w(face->full_name), debugstr_w(family->family_name),
                    cursor->version, face->version );
 
-            if (face->file && !wcsicmp( face->file, cursor->file ))
+            if (face->file && cursor->file && !wcsicmp( face->file, cursor->file ))
             {
                 cursor->refcount++;
                 TRACE("Font %s already in list, refcount now %d\n",
@@ -2955,6 +2955,7 @@ static DWORD get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
         /* Windows bitmap font, e.g. Small Fonts, uses ANSI character code
            as glyph index. "Treasure Adventure Game" depends on this. */
         font_funcs->get_glyph_index( font, &index, FALSE );
+        format &= ~GGO_GLYPH_INDEX;
         /* TODO: Window also turns off tategaki for glyphs passed in by index
             if their unicode code points fall outside of the range that is
             rotated. */
@@ -2969,8 +2970,6 @@ static DWORD get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
             if (index == orig) tategaki = check_unicode_tategaki( glyph );
         }
     }
-
-    format &= ~(GGO_GLYPH_INDEX | GGO_UNHINTED);
 
     if (mat && !memcmp( mat, &identity, sizeof(*mat) )) mat = NULL;
 

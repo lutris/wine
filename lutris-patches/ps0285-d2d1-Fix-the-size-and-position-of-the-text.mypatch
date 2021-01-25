@@ -1,0 +1,53 @@
+From: Haoyang Chen <chenhaoyang@uniontech.com>
+Subject: [PATCH v3] d2d1: Fix the size and position of the text.
+Message-Id: <150bac09-0879-1db1-85ee-ca3afa2b656c@uniontech.com>
+Date: Wed, 13 Jan 2021 11:19:14 +0800
+In-Reply-To: <a3b6968d-e246-b04c-bf77-7e2cfc809d58@uniontech.com>
+References: <a3b6968d-e246-b04c-bf77-7e2cfc809d58@uniontech.com>
+
+From b595de2e73338524fb28c8b34cb5ca7c57df91f2 Mon Sep 17 00:00:00 2001
+From: Haoyang Chen <chenhaoyang@uniontech.com>
+Date: Tue, 12 Jan 2021 16:59:24 +0800
+#Subject: [PATCH] d2d1: Fix the size and position of the text.
+
+Signed-off-by: Haoyang Chen <chenhaoyang@uniontech.com>
+---
+ dlls/d2d1/device.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
+index 3c8431ce8f4..d25c9ec7b4b 100644
+--- a/dlls/d2d1/device.c
++++ b/dlls/d2d1/device.c
+@@ -1171,10 +1171,14 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext *if
+ 
+     if (measuring_mode == DWRITE_MEASURING_MODE_NATURAL)
+         hr = IDWriteFactory_CreateTextLayout(dwrite_factory, string, string_len, text_format,
+-                layout_rect->right - layout_rect->left, layout_rect->bottom - layout_rect->top, &text_layout);
++                layout_rect->left > layout_rect->right ? layout_rect->left : (layout_rect->right - layout_rect->left),
++                layout_rect->top > layout_rect->bottom ? layout_rect->top : (layout_rect->bottom - layout_rect->top),
++                &text_layout);
+     else
+         hr = IDWriteFactory_CreateGdiCompatibleTextLayout(dwrite_factory, string, string_len, text_format,
+-                layout_rect->right - layout_rect->left, layout_rect->bottom - layout_rect->top, render_target->desc.dpiX / 96.0f,
++                layout_rect->left > layout_rect->right ? layout_rect->left : (layout_rect->right - layout_rect->left),
++                layout_rect->top > layout_rect->bottom ? layout_rect->top : (layout_rect->bottom - layout_rect->top),
++                render_target->desc.dpiX / 96.0f,
+                 (DWRITE_MATRIX*)&render_target->drawing_state.transform, measuring_mode == DWRITE_MEASURING_MODE_GDI_NATURAL, &text_layout);
+     IDWriteFactory_Release(dwrite_factory);
+     if (FAILED(hr))
+@@ -1183,7 +1187,9 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext *if
+         return;
+     }
+ 
+-    d2d_point_set(&origin, layout_rect->left, layout_rect->top);
++    d2d_point_set(&origin, layout_rect->left <  layout_rect->right ? layout_rect->left : layout_rect->right,
++            layout_rect->top < layout_rect->bottom ? layout_rect->top : layout_rect->bottom);
++
+     ID2D1DeviceContext_DrawTextLayout(iface, origin, text_layout, brush, options);
+     IDWriteTextLayout_Release(text_layout);
+ }
+
+-- 
+2.20.1
+

@@ -95,6 +95,7 @@
 #include "wine/debug.h"
 #include "unix_private.h"
 #include "esync.h"
+#include "fsync.h"
 #include "ddk/wdm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(server);
@@ -749,10 +750,12 @@ unsigned int server_wait( const select_op_t *select_op, data_size_t size, UINT f
  */
 NTSTATUS WINAPI NtContinue( CONTEXT *context, BOOLEAN alertable )
 {
+    unsigned int flags = SELECT_INTERRUPTIBLE;
     user_apc_t apc;
     NTSTATUS status;
 
-    status = server_select( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, 0, NULL, NULL, &apc );
+    if (alertable) flags |= SELECT_ALERTABLE;
+    status = server_select( NULL, 0, flags, 0, NULL, NULL, &apc );
     if (status == STATUS_USER_APC) invoke_apc( context, &apc );
     return NtSetContextThread( GetCurrentThread(), context );
 }
@@ -1550,7 +1553,8 @@ void server_init_process_done(void)
 #ifdef __APPLE__
     send_server_task_port();
 #endif
-    if (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) virtual_set_large_address_space();
+    if (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE
+            || __wine_needs_override_large_address_aware()) virtual_set_large_address_space();
 
     /* Install signal handlers; this cannot be done earlier, since we cannot
      * send exceptions to the debugger before the create process event that
@@ -1722,6 +1726,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
     HANDLE port;
     NTSTATUS ret;
     int fd = remove_fd_from_cache( handle );
+
+    if (do_fsync())
+        fsync_close( handle );
 
     if (do_esync())
         esync_close( handle );

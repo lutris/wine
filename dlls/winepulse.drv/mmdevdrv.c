@@ -700,6 +700,7 @@ static HRESULT pulse_connect(void)
 
     TRACE("Name: %s\n", str);
     pulse_ctx = pa_context_new(pa_mainloop_get_api(pulse_ml), str);
+    setenv("PULSE_PROP_application.name", str, 1);
     pa_xfree(str);
     if (!pulse_ctx) {
         ERR("Failed to create context\n");
