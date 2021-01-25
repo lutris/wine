@@ -453,6 +453,19 @@ static HRESULT WINAPI enum_devtype_cb(char *desc_str, char *name, D3DDEVICEDESC7
     return DDENUMRET_OK;
 }
 
+static HRESULT WINAPI enum_devtype_software_cb(char *desc_str, char *name, D3DDEVICEDESC7 *desc, void *ctx)
+{
+    BOOL *software_ok = ctx;
+    if (IsEqualGUID(&desc->deviceGUID, &IID_IDirect3DRGBDevice))
+    {
+        ok(!(desc->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT),
+           "RGB emulation device shouldn't have HWTRANSFORMANDLIGHT flag\n");
+        *software_ok = TRUE;
+        return DDENUMRET_CANCEL;
+    }
+    return DDENUMRET_OK;
+}
+
 static IDirect3DDevice7 *create_device(HWND window, DWORD coop_level)
 {
     IDirectDrawSurface7 *surface, *ds;
@@ -463,6 +476,7 @@ static IDirect3DDevice7 *create_device(HWND window, DWORD coop_level)
     IDirect3D7 *d3d7;
     HRESULT hr;
     BOOL hal_ok = FALSE;
+    BOOL software_ok = FALSE;
     const GUID *devtype = &IID_IDirect3DHALDevice;
 
     if (!(ddraw = create_ddraw()))
@@ -505,6 +519,10 @@ static IDirect3DDevice7 *create_device(HWND window, DWORD coop_level)
     hr = IDirect3D7_EnumDevices(d3d7, enum_devtype_cb, &hal_ok);
     ok(SUCCEEDED(hr), "Failed to enumerate devices, hr %#x.\n", hr);
     if (hal_ok) devtype = &IID_IDirect3DTnLHalDevice;
+
+    hr = IDirect3D7_EnumDevices(d3d7, enum_devtype_software_cb , &software_ok);
+    ok(SUCCEEDED(hr), "Failed to enumerate devices, hr %#x.\n", hr);
+    if (!software_ok) win_skip("RGB device not found, unable to check flags\n");
 
     memset(&z_fmt, 0, sizeof(z_fmt));
     hr = IDirect3D7_EnumZBufferFormats(d3d7, devtype, enum_z_fmt, &z_fmt);

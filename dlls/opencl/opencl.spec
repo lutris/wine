@@ -94,3 +94,31 @@
 # @ stdcall clGetGLTextureInfo( long long long ptr ptr ) wine_clGetGLTextureInfo
 # @ stdcall clEnqueueAcquireGLObjects( long long ptr long ptr ptr ) wine_clEnqueueAcquireGLObjects
 # @ stdcall clEnqueueReleaseGLObjects( long long ptr long ptr ptr ) wine_clEnqueueReleaseGLObjects
+
+# OpenCL 1.1
+@ stdcall clCreateSubBuffer( long long long ptr ptr ) wine_clCreateSubBuffer
+@ stdcall clCreateUserEvent( long ptr ) wine_clCreateUserEvent
+@ stdcall clEnqueueCopyBufferRect( long long long ptr ptr ptr long long long long long ptr ptr ) wine_clEnqueueCopyBufferRect
+@ stdcall clEnqueueReadBufferRect( long long long ptr ptr ptr long long long long ptr long ptr ptr ) wine_clEnqueueReadBufferRect
+@ stdcall clEnqueueWriteBufferRect( long long long ptr ptr ptr long long long long ptr long ptr ptr ) wine_clEnqueueWriteBufferRect
+@ stdcall clSetEventCallback( long long ptr ptr ) wine_clSetEventCallback
+@ stdcall clSetMemObjectDestructorCallback( long ptr ptr ) wine_clSetMemObjectDestructorCallback
+@ stdcall clSetUserEventStatus( long long ) wine_clSetUserEventStatus
+
+# OpenCL 1.2
+@ stdcall clCompileProgram( long long ptr str long ptr ptr ptr ptr ) wine_clCompileProgram
+@ stub clCreateFromGLTexture
+@ stdcall clCreateImage( long long ptr ptr ptr ptr ) wine_clCreateImage
+@ stdcall clCreateProgramWithBuiltInKernels( long long ptr str ptr ) wine_clCreateProgramWithBuiltInKernels
+@ stdcall clCreateSubDevices( long ptr long ptr ptr ) wine_clCreateSubDevices
+@ stdcall clEnqueueBarrierWithWaitList( long long ptr ptr ) wine_clEnqueueBarrierWithWaitList
+@ stdcall clEnqueueFillBuffer( long long ptr long long long long ptr ptr ) wine_clEnqueueFillBuffer
+@ stdcall clEnqueueFillImage( long long ptr ptr ptr long ptr ptr ) wine_clEnqueueFillImage
+@ stdcall clEnqueueMarkerWithWaitList( long long ptr ptr ) wine_clEnqueueMarkerWithWaitList
+@ stdcall clEnqueueMigrateMemObjects( long long ptr long long ptr ptr ) wine_clEnqueueMigrateMemObjects
+@ stdcall clGetExtensionFunctionAddressForPlatform( long str ) wine_clGetExtensionFunctionAddressForPlatform
+@ stdcall clGetKernelArgInfo( long long long long ptr ptr ) wine_clGetKernelArgInfo
+@ stdcall clLinkProgram( long long ptr str long ptr ptr ptr ptr ) wine_clLinkProgram
+@ stdcall clReleaseDevice( long ) wine_clReleaseDevice
+@ stdcall clRetainDevice( long ) wine_clRetainDevice
+@ stdcall clUnloadPlatformCompiler( long ) wine_clUnloadPlatformCompiler

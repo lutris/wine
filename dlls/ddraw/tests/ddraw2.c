@@ -1430,8 +1430,10 @@ static void test_texture_load_ckey(void)
     IDirectDraw2 *ddraw = NULL;
     IDirectDrawSurface *src = NULL;
     IDirectDrawSurface *dst = NULL;
+    IDirectDrawSurface *dst2 = NULL;
     IDirect3DTexture *src_tex = NULL;
     IDirect3DTexture *dst_tex = NULL;
+    IDirect3DTexture *dst2_tex = NULL;
     DDSURFACEDESC ddsd;
     HRESULT hr;
     DDCOLORKEY ckey;
@@ -1443,14 +1445,29 @@ static void test_texture_load_ckey(void)
 
     memset(&ddsd, 0, sizeof(ddsd));
     ddsd.dwSize = sizeof(ddsd);
-    ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
     ddsd.dwHeight = 128;
     ddsd.dwWidth = 128;
     ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_SYSTEMMEMORY;
+    ddsd.ddpfPixelFormat.dwSize = sizeof(ddsd.ddpfPixelFormat);
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(ddsd.ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(ddsd.ddpfPixelFormat).dwRBitMask = 0x00FF0000;
+    U3(ddsd.ddpfPixelFormat).dwGBitMask = 0x0000FF00;
+    U4(ddsd.ddpfPixelFormat).dwBBitMask = 0x000000FF;
+
     hr = IDirectDraw2_CreateSurface(ddraw, &ddsd, &src, NULL);
     ok(SUCCEEDED(hr), "Failed to create source texture, hr %#x.\n", hr);
     ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
     hr = IDirectDraw2_CreateSurface(ddraw, &ddsd, &dst, NULL);
+    ok(SUCCEEDED(hr), "Failed to create destination texture, hr %#x.\n", hr);
+
+    U1(ddsd.ddpfPixelFormat).dwRGBBitCount = 16;
+    U2(ddsd.ddpfPixelFormat).dwRBitMask = 0xf800;
+    U3(ddsd.ddpfPixelFormat).dwGBitMask = 0x07e0;
+    U4(ddsd.ddpfPixelFormat).dwBBitMask = 0x001f;
+
+    hr = IDirectDraw2_CreateSurface(ddraw, &ddsd, &dst2, NULL);
     ok(SUCCEEDED(hr), "Failed to create destination texture, hr %#x.\n", hr);
 
     hr = IDirectDrawSurface_QueryInterface(src, &IID_IDirect3DTexture, (void **)&src_tex);
@@ -1462,6 +1479,8 @@ static void test_texture_load_ckey(void)
         goto done;
     }
     hr = IDirectDrawSurface_QueryInterface(dst, &IID_IDirect3DTexture, (void **)&dst_tex);
+    ok(SUCCEEDED(hr), "Failed to get Direct3DTexture interface, hr %#x.\n", hr);
+    hr = IDirectDrawSurface_QueryInterface(dst2, &IID_IDirect3DTexture, (void **)&dst2_tex);
     ok(SUCCEEDED(hr), "Failed to get Direct3DTexture interface, hr %#x.\n", hr);
 
     /* No surface has a color key */
@@ -1491,6 +1510,11 @@ static void test_texture_load_ckey(void)
     ok(ckey.dwColorSpaceLowValue == 0x0000ff00, "dwColorSpaceLowValue is %#x.\n", ckey.dwColorSpaceLowValue);
     ok(ckey.dwColorSpaceHighValue == 0x0000ff00, "dwColorSpaceHighValue is %#x.\n", ckey.dwColorSpaceHighValue);
 
+    /* Source surface has a color key but destination differs in format */
+    ckey.dwColorSpaceLowValue = ckey.dwColorSpaceHighValue = 0x0;
+    hr = IDirect3DTexture_Load(dst2_tex, src_tex);
+    ok(hr == E_FAIL, "Got unexpected hr %#x, expected E_FAIL.\n", hr);
+
     /* Both surfaces have a color key: Dest ckey is overwritten */
     ckey.dwColorSpaceLowValue = ckey.dwColorSpaceHighValue = 0x000000ff;
     hr = IDirectDrawSurface_SetColorKey(dst, DDCKEY_SRCBLT, &ckey);
@@ -1515,8 +1539,10 @@ static void test_texture_load_ckey(void)
     ok(ckey.dwColorSpaceHighValue == 0x0000ff00, "dwColorSpaceHighValue is %#x.\n", ckey.dwColorSpaceHighValue);
 
 done:
+    if (dst2_tex) IDirect3DTexture_Release(dst2_tex);
     if (dst_tex) IDirect3DTexture_Release(dst_tex);
     if (src_tex) IDirect3DTexture_Release(src_tex);
+    if (dst2) IDirectDrawSurface_Release(dst2);
     if (dst) IDirectDrawSurface_Release(dst);
     if (src) IDirectDrawSurface_Release(src);
     if (ddraw) IDirectDraw2_Release(ddraw);

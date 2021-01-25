@@ -28,10 +28,6 @@
 static VOID     (WINAPI *pRtlInitUnicodeString)( PUNICODE_STRING, LPCWSTR );
 static NTSTATUS (WINAPI *pNtCreateEvent) ( PHANDLE, ACCESS_MASK, const POBJECT_ATTRIBUTES, BOOLEAN, BOOLEAN);
 static NTSTATUS (WINAPI *pNtOpenEvent)   ( PHANDLE, ACCESS_MASK, const POBJECT_ATTRIBUTES);
-static NTSTATUS (WINAPI *pNtPulseEvent)  ( HANDLE, PLONG );
-static NTSTATUS (WINAPI *pNtQueryEvent)  ( HANDLE, EVENT_INFORMATION_CLASS, PVOID, ULONG, PULONG );
-static NTSTATUS (WINAPI *pNtResetEvent)  ( HANDLE, LONG* );
-static NTSTATUS (WINAPI *pNtSetEvent)    ( HANDLE, LONG* );
 static NTSTATUS (WINAPI *pNtCreateJobObject)( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES );
 static NTSTATUS (WINAPI *pNtOpenJobObject)( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES );
 static NTSTATUS (WINAPI *pNtCreateKey)( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, ULONG,
@@ -42,8 +38,6 @@ static NTSTATUS (WINAPI *pNtCreateMailslotFile)( PHANDLE, ACCESS_MASK, POBJECT_A
                                                  ULONG, ULONG, ULONG, PLARGE_INTEGER );
 static NTSTATUS (WINAPI *pNtCreateMutant)( PHANDLE, ACCESS_MASK, const POBJECT_ATTRIBUTES, BOOLEAN );
 static NTSTATUS (WINAPI *pNtOpenMutant)  ( PHANDLE, ACCESS_MASK, const POBJECT_ATTRIBUTES );
-static NTSTATUS (WINAPI *pNtQueryMutant) ( HANDLE, MUTANT_INFORMATION_CLASS, PVOID, ULONG, PULONG );
-static NTSTATUS (WINAPI *pNtReleaseMutant)( HANDLE, PLONG );
 static NTSTATUS (WINAPI *pNtCreateSemaphore)( PHANDLE, ACCESS_MASK,const POBJECT_ATTRIBUTES,LONG,LONG );
 static NTSTATUS (WINAPI *pNtOpenSemaphore)( PHANDLE, ACCESS_MASK, const POBJECT_ATTRIBUTES );
 static NTSTATUS (WINAPI *pNtCreateTimer) ( PHANDLE, ACCESS_MASK, const POBJECT_ATTRIBUTES, TIMER_TYPE );
@@ -64,20 +58,26 @@ static NTSTATUS (WINAPI *pNtQueryObject)(HANDLE,OBJECT_INFORMATION_CLASS,PVOID,U
 static NTSTATUS (WINAPI *pNtReleaseSemaphore)(HANDLE, ULONG, PULONG);
 static NTSTATUS (WINAPI *pNtCreateKeyedEvent)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, ULONG );
 static NTSTATUS (WINAPI *pNtOpenKeyedEvent)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES * );
-static NTSTATUS (WINAPI *pNtWaitForKeyedEvent)( HANDLE, const void *, BOOLEAN, const LARGE_INTEGER * );
-static NTSTATUS (WINAPI *pNtReleaseKeyedEvent)( HANDLE, const void *, BOOLEAN, const LARGE_INTEGER * );
 static NTSTATUS (WINAPI *pNtCreateIoCompletion)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, ULONG);
 static NTSTATUS (WINAPI *pNtOpenIoCompletion)( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES );
 static NTSTATUS (WINAPI *pNtQueryInformationFile)(HANDLE, PIO_STATUS_BLOCK, void *, ULONG, FILE_INFORMATION_CLASS);
-static NTSTATUS (WINAPI *pNtQuerySystemTime)( LARGE_INTEGER * );
-static NTSTATUS (WINAPI *pRtlWaitOnAddress)( const void *, const void *, SIZE_T, const LARGE_INTEGER * );
-static void     (WINAPI *pRtlWakeAddressAll)( const void * );
-static void     (WINAPI *pRtlWakeAddressSingle)( const void * );
 static NTSTATUS (WINAPI *pNtOpenProcess)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, const CLIENT_ID * );
+static NTSTATUS (WINAPI *pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 
-#define KEYEDEVENT_WAIT       0x0001
-#define KEYEDEVENT_WAKE       0x0002
-#define KEYEDEVENT_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | 0x0003)
+#define ROUND_UP(value, alignment) (((value) + ((alignment) - 1)) & ~((alignment)-1))
+
+static LPCSTR wine_dbgstr_us( const UNICODE_STRING *us )
+{
+    if (!us) return "(null)";
+    return wine_dbgstr_wn(us->Buffer, us->Length / sizeof(WCHAR));
+}
+
+static inline int strncmpW( const WCHAR *str1, const WCHAR *str2, int n )
+{
+    if (n <= 0) return 0;
+    while ((--n > 0) && *str1 && (*str1 == *str2)) { str1++; str2++; }
+    return *str1 - *str2;
+}
 
 static void test_case_sensitive (void)
 {
@@ -1556,6 +1556,108 @@ static void test_query_object(void)
     pNtClose(handle);
 }
 
+static BOOL winver_equal_or_newer(WORD major, WORD minor)
+{
+    OSVERSIONINFOEXW info = {sizeof(info)};
+    ULONGLONG mask = 0;
+
+    info.dwMajorVersion = major;
+    info.dwMinorVersion = minor;
+
+    VER_SET_CONDITION(mask, VER_MAJORVERSION, VER_GREATER_EQUAL);
+    VER_SET_CONDITION(mask, VER_MINORVERSION, VER_GREATER_EQUAL);
+
+    return VerifyVersionInfoW(&info, VER_MAJORVERSION | VER_MINORVERSION, mask);
+}
+
+static void test_query_object_types(void)
+{
+    static const WCHAR typeW[] = {'T','y','p','e'};
+    static const WCHAR eventW[] = {'E','v','e','n','t'};
+    SYSTEM_HANDLE_INFORMATION_EX *shi;
+    OBJECT_TYPES_INFORMATION *buffer;
+    OBJECT_TYPE_INFORMATION *type;
+    NTSTATUS status;
+    HANDLE handle;
+    BOOL found;
+    ULONG len, i, event_type_index = 0;
+
+    buffer = HeapAlloc( GetProcessHeap(), 0, sizeof(OBJECT_TYPES_INFORMATION) );
+    ok( buffer != NULL, "Failed to allocate memory\n" );
+
+    status = pNtQueryObject( NULL, ObjectTypesInformation, buffer, sizeof(OBJECT_TYPES_INFORMATION), &len );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %x\n", status );
+    ok( len, "len is zero\n");
+
+    buffer = HeapReAlloc( GetProcessHeap(), 0, buffer, len );
+    ok( buffer != NULL, "Failed to allocate memory\n" );
+
+    memset( buffer, 0, len );
+    status = pNtQueryObject( NULL, ObjectTypesInformation, buffer, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryObject failed %x\n", status );
+    ok( buffer->NumberOfTypes, "NumberOfTypes is zero\n" );
+
+    type = (OBJECT_TYPE_INFORMATION *)(buffer + 1);
+    for (i = 0; i < buffer->NumberOfTypes; i++)
+    {
+        USHORT length = type->TypeName.MaximumLength;
+        trace( "Type %u: %s\n", i, wine_dbgstr_us(&type->TypeName) );
+
+        if (i == 0)
+        {
+            ok( type->TypeName.Length == sizeof(typeW) && !strncmpW(typeW, type->TypeName.Buffer, 4),
+                "Expected 'Type' as first type, got %s\n", wine_dbgstr_us(&type->TypeName) );
+        }
+        if (type->TypeName.Length == sizeof(eventW) && !strncmpW(eventW, type->TypeName.Buffer, 5))
+        {
+            if (winver_equal_or_newer( 6, 2 ))
+                event_type_index = type->TypeIndex;
+            else
+                event_type_index = winver_equal_or_newer( 6, 1 ) ? i + 2 : i + 1;
+        }
+
+        type = (OBJECT_TYPE_INFORMATION *)ROUND_UP( (DWORD_PTR)(type + 1) + length, sizeof(DWORD_PTR) );
+    }
+
+    HeapFree( GetProcessHeap(), 0, buffer );
+
+    ok( event_type_index, "Could not find object type for events\n" );
+
+    handle = CreateEventA( NULL, FALSE, FALSE, NULL );
+    ok( handle != NULL, "Failed to create event\n" );
+
+    shi = HeapAlloc( GetProcessHeap(), 0, sizeof(*shi) );
+    ok( shi != NULL, "Failed to allocate memory\n" );
+
+    status = pNtQuerySystemInformation( SystemExtendedHandleInformation, shi, sizeof(*shi), &len );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status );
+
+    shi = HeapReAlloc( GetProcessHeap(), 0, shi, len );
+    ok( shi != NULL, "Failed to allocate memory\n" );
+
+    status = pNtQuerySystemInformation( SystemExtendedHandleInformation, shi, len, &len );
+    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status );
+
+    found = FALSE;
+    for (i = 0; i < shi->Count; i++)
+    {
+        if (shi->Handle[i].UniqueProcessId != GetCurrentProcessId())
+            continue;
+        if ((HANDLE)(ULONG_PTR)shi->Handle[i].HandleValue != handle)
+            continue;
+
+        ok( shi->Handle[i].ObjectTypeIndex == event_type_index, "Event type does not match: %u vs %u\n",
+            shi->Handle[i].ObjectTypeIndex, event_type_index );
+
+        found = TRUE;
+        break;
+    }
+    ok( found, "Expected to find event handle %p (pid %x) in handle list\n", handle, GetCurrentProcessId() );
+
+    HeapFree( GetProcessHeap(), 0, shi );
+    CloseHandle( handle );
+}
+
 static void test_type_mismatch(void)
 {
     HANDLE h;
@@ -1576,266 +1678,6 @@ static void test_type_mismatch(void)
     ok(res == STATUS_OBJECT_TYPE_MISMATCH, "expected 0xc0000024, got %x\n", res);
 
     pNtClose( h );
-}
-
-static void test_event(void)
-{
-    HANDLE Event;
-    HANDLE Event2;
-    LONG prev_state = 0xdeadbeef;
-    NTSTATUS status;
-    UNICODE_STRING str;
-    OBJECT_ATTRIBUTES attr;
-    EVENT_BASIC_INFORMATION info;
-
-    pRtlInitUnicodeString( &str, L"\\BaseNamedObjects\\testEvent" );
-    InitializeObjectAttributes(&attr, &str, 0, 0, NULL);
-
-    status = pNtCreateEvent(&Event, GENERIC_ALL, &attr, 1, 0);
-    ok( status == STATUS_SUCCESS, "NtCreateEvent failed %08x\n", status );
-
-    status = pNtPulseEvent(Event, &prev_state);
-    ok( status == STATUS_SUCCESS, "NtPulseEvent failed %08x\n", status );
-    ok( !prev_state, "prev_state = %x\n", prev_state );
-
-    status = pNtQueryEvent(Event, EventBasicInformation, &info, sizeof(info), NULL);
-    ok( status == STATUS_SUCCESS, "NtQueryEvent failed %08x\n", status );
-    ok( info.EventType == 1 && info.EventState == 0,
-        "NtQueryEvent failed, expected 1 0, got %d %d\n", info.EventType, info.EventState );
-
-    status = pNtOpenEvent(&Event2, GENERIC_ALL, &attr);
-    ok( status == STATUS_SUCCESS, "NtOpenEvent failed %08x\n", status );
-
-    pNtClose(Event);
-    Event = Event2;
-
-    status = pNtQueryEvent(Event, EventBasicInformation, &info, sizeof(info), NULL);
-    ok( status == STATUS_SUCCESS, "NtQueryEvent failed %08x\n", status );
-    ok( info.EventType == 1 && info.EventState == 0,
-        "NtQueryEvent failed, expected 1 0, got %d %d\n", info.EventType, info.EventState );
-
-    status = pNtSetEvent( Event, &prev_state );
-    ok( status == STATUS_SUCCESS, "NtSetEvent failed: %08x\n", status );
-    ok( !prev_state, "prev_state = %x\n", prev_state );
-
-    status = pNtSetEvent( Event, &prev_state );
-    ok( status == STATUS_SUCCESS, "NtSetEvent failed: %08x\n", status );
-    ok( prev_state == 1, "prev_state = %x\n", prev_state );
-
-    status = pNtResetEvent( Event, &prev_state );
-    ok( status == STATUS_SUCCESS, "NtSetEvent failed: %08x\n", status );
-    ok( prev_state == 1, "prev_state = %x\n", prev_state );
-
-    status = pNtResetEvent( Event, &prev_state );
-    ok( status == STATUS_SUCCESS, "NtSetEvent failed: %08x\n", status );
-    ok( !prev_state, "prev_state = %x\n", prev_state );
-
-    status = pNtPulseEvent( Event, &prev_state );
-    ok( status == STATUS_SUCCESS, "NtPulseEvent failed %08x\n", status );
-    ok( !prev_state, "prev_state = %x\n", prev_state );
-
-    status = pNtSetEvent( Event, &prev_state );
-    ok( status == STATUS_SUCCESS, "NtSetEvent failed: %08x\n", status );
-    ok( !prev_state, "prev_state = %x\n", prev_state );
-
-    status = pNtPulseEvent( Event, &prev_state );
-    ok( status == STATUS_SUCCESS, "NtPulseEvent failed %08x\n", status );
-    ok( prev_state == 1, "prev_state = %x\n", prev_state );
-
-    pNtClose(Event);
-}
-
-static const WCHAR keyed_nameW[] = L"\\BaseNamedObjects\\WineTestEvent";
-
-static DWORD WINAPI keyed_event_thread( void *arg )
-{
-    HANDLE handle;
-    NTSTATUS status;
-    LARGE_INTEGER timeout;
-    OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING str;
-    ULONG_PTR i;
-
-    attr.Length                   = sizeof(attr);
-    attr.RootDirectory            = 0;
-    attr.ObjectName               = &str;
-    attr.Attributes               = 0;
-    attr.SecurityDescriptor       = NULL;
-    attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &str, keyed_nameW );
-
-    status = pNtOpenKeyedEvent( &handle, KEYEDEVENT_ALL_ACCESS, &attr );
-    ok( !status, "NtOpenKeyedEvent failed %x\n", status );
-
-    for (i = 0; i < 20; i++)
-    {
-        if (i & 1)
-            status = pNtWaitForKeyedEvent( handle, (void *)(i * 2), 0, NULL );
-        else
-            status = pNtReleaseKeyedEvent( handle, (void *)(i * 2), 0, NULL );
-        ok( status == STATUS_SUCCESS, "%li: failed %x\n", i, status );
-        Sleep( 20 - i );
-    }
-
-    status = pNtReleaseKeyedEvent( handle, (void *)0x1234, 0, NULL );
-    ok( status == STATUS_SUCCESS, "NtReleaseKeyedEvent %x\n", status );
-
-    timeout.QuadPart = -10000;
-    status = pNtWaitForKeyedEvent( handle, (void *)0x5678, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)0x9abc, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtReleaseKeyedEvent %x\n", status );
-
-    NtClose( handle );
-    return 0;
-}
-
-static void test_keyed_events(void)
-{
-    OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING str;
-    HANDLE handle, event, thread;
-    NTSTATUS status;
-    LARGE_INTEGER timeout;
-    ULONG_PTR i;
-
-    if (!pNtCreateKeyedEvent)
-    {
-        win_skip( "Keyed events not supported\n" );
-        return;
-    }
-
-    attr.Length                   = sizeof(attr);
-    attr.RootDirectory            = 0;
-    attr.ObjectName               = &str;
-    attr.Attributes               = 0;
-    attr.SecurityDescriptor       = NULL;
-    attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &str, keyed_nameW );
-
-    status = pNtCreateKeyedEvent( &handle, KEYEDEVENT_ALL_ACCESS | SYNCHRONIZE, &attr, 0 );
-    ok( !status, "NtCreateKeyedEvent failed %x\n", status );
-
-    status = WaitForSingleObject( handle, 1000 );
-    ok( status == 0, "WaitForSingleObject %x\n", status );
-
-    timeout.QuadPart = -100000;
-    status = pNtWaitForKeyedEvent( handle, (void *)255, 0, &timeout );
-    ok( status == STATUS_INVALID_PARAMETER_1, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)255, 0, &timeout );
-    ok( status == STATUS_INVALID_PARAMETER_1, "NtReleaseKeyedEvent %x\n", status );
-
-    status = pNtWaitForKeyedEvent( handle, (void *)254, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)254, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtReleaseKeyedEvent %x\n", status );
-
-    status = pNtWaitForKeyedEvent( handle, NULL, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, NULL, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtReleaseKeyedEvent %x\n", status );
-
-    status = pNtWaitForKeyedEvent( NULL, (void *)8, 0, &timeout );
-    ok( status == STATUS_TIMEOUT || broken(status == STATUS_INVALID_HANDLE), /* XP/2003 */
-        "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( NULL, (void *)8, 0, &timeout );
-    ok( status == STATUS_TIMEOUT || broken(status == STATUS_INVALID_HANDLE), /* XP/2003 */
-        "NtReleaseKeyedEvent %x\n", status );
-
-    status = pNtWaitForKeyedEvent( (HANDLE)0xdeadbeef, (void *)9, 0, &timeout );
-    ok( status == STATUS_INVALID_PARAMETER_1, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( (HANDLE)0xdeadbeef, (void *)9, 0, &timeout );
-    ok( status == STATUS_INVALID_PARAMETER_1, "NtReleaseKeyedEvent %x\n", status );
-
-    status = pNtWaitForKeyedEvent( (HANDLE)0xdeadbeef, (void *)8, 0, &timeout );
-    ok( status == STATUS_INVALID_HANDLE, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( (HANDLE)0xdeadbeef, (void *)8, 0, &timeout );
-    ok( status == STATUS_INVALID_HANDLE, "NtReleaseKeyedEvent %x\n", status );
-
-    thread = CreateThread( NULL, 0, keyed_event_thread, 0, 0, NULL );
-    for (i = 0; i < 20; i++)
-    {
-        if (i & 1)
-            status = pNtReleaseKeyedEvent( handle, (void *)(i * 2), 0, NULL );
-        else
-            status = pNtWaitForKeyedEvent( handle, (void *)(i * 2), 0, NULL );
-        ok( status == STATUS_SUCCESS, "%li: failed %x\n", i, status );
-        Sleep( i );
-    }
-    status = pNtWaitForKeyedEvent( handle, (void *)0x1234, 0, &timeout );
-    ok( status == STATUS_SUCCESS, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtWaitForKeyedEvent( handle, (void *)0x5678, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)0x9abc, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtReleaseKeyedEvent %x\n", status );
-
-    ok( WaitForSingleObject( thread, 30000 ) == 0, "wait failed\n" );
-
-    NtClose( handle );
-
-    /* test access rights */
-
-    status = pNtCreateKeyedEvent( &handle, KEYEDEVENT_WAIT, &attr, 0 );
-    ok( !status, "NtCreateKeyedEvent failed %x\n", status );
-    status = pNtWaitForKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_ACCESS_DENIED, "NtReleaseKeyedEvent %x\n", status );
-    NtClose( handle );
-
-    status = pNtCreateKeyedEvent( &handle, KEYEDEVENT_WAKE, &attr, 0 );
-    ok( !status, "NtCreateKeyedEvent failed %x\n", status );
-    status = pNtWaitForKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_ACCESS_DENIED, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtReleaseKeyedEvent %x\n", status );
-    NtClose( handle );
-
-    status = pNtCreateKeyedEvent( &handle, KEYEDEVENT_ALL_ACCESS, &attr, 0 );
-    ok( !status, "NtCreateKeyedEvent failed %x\n", status );
-    status = WaitForSingleObject( handle, 1000 );
-    ok( status == WAIT_FAILED && GetLastError() == ERROR_ACCESS_DENIED,
-        "WaitForSingleObject %x err %u\n", status, GetLastError() );
-    status = pNtWaitForKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtReleaseKeyedEvent %x\n", status );
-    NtClose( handle );
-
-    /* GENERIC_READ gives wait access */
-    status = pNtCreateKeyedEvent( &handle, GENERIC_READ, &attr, 0 );
-    ok( !status, "NtCreateKeyedEvent failed %x\n", status );
-    status = pNtWaitForKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_ACCESS_DENIED, "NtReleaseKeyedEvent %x\n", status );
-    NtClose( handle );
-
-    /* GENERIC_WRITE gives wake access */
-    status = pNtCreateKeyedEvent( &handle, GENERIC_WRITE, &attr, 0 );
-    ok( !status, "NtCreateKeyedEvent failed %x\n", status );
-    status = pNtWaitForKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_ACCESS_DENIED, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( handle, (void *)8, 0, &timeout );
-    ok( status == STATUS_TIMEOUT, "NtReleaseKeyedEvent %x\n", status );
-
-    /* it's not an event */
-    status = pNtPulseEvent( handle, NULL );
-    ok( status == STATUS_OBJECT_TYPE_MISMATCH, "NtPulseEvent %x\n", status );
-
-    status = pNtCreateEvent( &event, GENERIC_ALL, &attr, FALSE, FALSE );
-    ok( status == STATUS_OBJECT_NAME_COLLISION || status == STATUS_OBJECT_TYPE_MISMATCH /* 7+ */,
-        "CreateEvent %x\n", status );
-
-    NtClose( handle );
-
-    status = pNtCreateEvent( &event, GENERIC_ALL, &attr, FALSE, FALSE );
-    ok( status == 0, "CreateEvent %x\n", status );
-    status = pNtWaitForKeyedEvent( event, (void *)8, 0, &timeout );
-    ok( status == STATUS_OBJECT_TYPE_MISMATCH, "NtWaitForKeyedEvent %x\n", status );
-    status = pNtReleaseKeyedEvent( event, (void *)8, 0, &timeout );
-    ok( status == STATUS_OBJECT_TYPE_MISMATCH, "NtReleaseKeyedEvent %x\n", status );
-    NtClose( event );
 }
 
 static void test_null_device(void)
@@ -1911,192 +1753,6 @@ static void test_null_device(void)
     CloseHandle(ov.hEvent);
 }
 
-static DWORD WINAPI mutant_thread( void *arg )
-{
-    MUTANT_BASIC_INFORMATION info;
-    NTSTATUS status;
-    HANDLE mutant;
-    DWORD ret;
-
-    mutant = arg;
-    ret = WaitForSingleObject( mutant, 1000 );
-    ok( ret == WAIT_OBJECT_0, "WaitForSingleObject failed %08x\n", ret );
-
-    memset(&info, 0xcc, sizeof(info));
-    status = pNtQueryMutant(mutant, MutantBasicInformation, &info, sizeof(info), NULL);
-    ok( status == STATUS_SUCCESS, "NtQueryMutant failed %08x\n", status );
-    ok( info.CurrentCount == 0, "expected 0, got %d\n", info.CurrentCount );
-    ok( info.OwnedByCaller == TRUE, "expected TRUE, got %d\n", info.OwnedByCaller );
-    ok( info.AbandonedState == FALSE, "expected FALSE, got %d\n", info.AbandonedState );
-    /* abandon mutant */
-
-    return 0;
-}
-
-static void test_mutant(void)
-{
-    MUTANT_BASIC_INFORMATION info;
-    OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING str;
-    NTSTATUS status;
-    HANDLE mutant;
-    HANDLE thread;
-    DWORD ret;
-    ULONG len;
-    LONG prev;
-
-    pRtlInitUnicodeString(&str, L"\\BaseNamedObjects\\test_mutant");
-    InitializeObjectAttributes(&attr, &str, 0, 0, NULL);
-    status = pNtCreateMutant(&mutant, GENERIC_ALL, &attr, TRUE);
-    ok( status == STATUS_SUCCESS, "Failed to create Mutant(%08x)\n", status );
-
-    /* bogus */
-    status = pNtQueryMutant(mutant, MutantBasicInformation, &info, 0, NULL);
-    ok( status == STATUS_INFO_LENGTH_MISMATCH,
-        "Failed to NtQueryMutant, expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status );
-    status = pNtQueryMutant(mutant, 0x42, &info, sizeof(info), NULL);
-    ok( status == STATUS_INVALID_INFO_CLASS || broken(status == STATUS_NOT_IMPLEMENTED), /* 32-bit on Vista/2k8 */
-        "Failed to NtQueryMutant, expected STATUS_INVALID_INFO_CLASS, got %08x\n", status );
-    status = pNtQueryMutant((HANDLE)0xdeadbeef, MutantBasicInformation, &info, sizeof(info), NULL);
-    ok( status == STATUS_INVALID_HANDLE,
-        "Failed to NtQueryMutant, expected STATUS_INVALID_HANDLE, got %08x\n", status );
-
-    /* new */
-    len = -1;
-    memset(&info, 0xcc, sizeof(info));
-    status = pNtQueryMutant(mutant, MutantBasicInformation, &info, sizeof(info), &len);
-    ok( status == STATUS_SUCCESS, "NtQueryMutant failed %08x\n", status );
-    ok( info.CurrentCount == 0, "expected 0, got %d\n", info.CurrentCount );
-    ok( info.OwnedByCaller == TRUE, "expected TRUE, got %d\n", info.OwnedByCaller );
-    ok( info.AbandonedState == FALSE, "expected FALSE, got %d\n", info.AbandonedState );
-    ok( len == sizeof(info), "got %u\n", len );
-
-    ret = WaitForSingleObject( mutant, 1000 );
-    ok( ret == WAIT_OBJECT_0, "WaitForSingleObject failed %08x\n", ret );
-
-    memset(&info, 0xcc, sizeof(info));
-    status = pNtQueryMutant(mutant, MutantBasicInformation, &info, sizeof(info), NULL);
-    ok( status == STATUS_SUCCESS, "NtQueryMutant failed %08x\n", status );
-    ok( info.CurrentCount == -1, "expected -1, got %d\n", info.CurrentCount );
-    ok( info.OwnedByCaller == TRUE, "expected TRUE, got %d\n", info.OwnedByCaller );
-    ok( info.AbandonedState == FALSE, "expected FALSE, got %d\n", info.AbandonedState );
-
-    prev = 0xdeadbeef;
-    status = pNtReleaseMutant(mutant, &prev);
-    ok( status == STATUS_SUCCESS, "NtQueryRelease failed %08x\n", status );
-    ok( prev == -1, "NtQueryRelease failed, expected -1, got %d\n", prev );
-
-    prev = 0xdeadbeef;
-    status = pNtReleaseMutant(mutant, &prev);
-    ok( status == STATUS_SUCCESS, "NtQueryRelease failed %08x\n", status );
-    ok( prev == 0, "NtQueryRelease failed, expected 0, got %d\n", prev );
-
-    memset(&info, 0xcc, sizeof(info));
-    status = pNtQueryMutant(mutant, MutantBasicInformation, &info, sizeof(info), NULL);
-    ok( status == STATUS_SUCCESS, "NtQueryMutant failed %08x\n", status );
-    ok( info.CurrentCount == 1, "expected 1, got %d\n", info.CurrentCount );
-    ok( info.OwnedByCaller == FALSE, "expected FALSE, got %d\n", info.OwnedByCaller );
-    ok( info.AbandonedState == FALSE, "expected FALSE, got %d\n", info.AbandonedState );
-
-    /* abandoned */
-    thread = CreateThread( NULL, 0, mutant_thread, mutant, 0, NULL );
-    ret = WaitForSingleObject( thread, 1000 );
-    ok( ret == WAIT_OBJECT_0, "WaitForSingleObject failed %08x\n", ret );
-    CloseHandle( thread );
-
-    memset(&info, 0xcc, sizeof(info));
-    status = pNtQueryMutant(mutant, MutantBasicInformation, &info, sizeof(info), NULL);
-    ok( status == STATUS_SUCCESS, "NtQueryMutant failed %08x\n", status );
-    ok( info.CurrentCount == 1, "expected 0, got %d\n", info.CurrentCount );
-    ok( info.OwnedByCaller == FALSE, "expected FALSE, got %d\n", info.OwnedByCaller );
-    ok( info.AbandonedState == TRUE, "expected TRUE, got %d\n", info.AbandonedState );
-
-    ret = WaitForSingleObject( mutant, 1000 );
-    ok( ret == WAIT_ABANDONED_0, "WaitForSingleObject failed %08x\n", ret );
-
-    memset(&info, 0xcc, sizeof(info));
-    status = pNtQueryMutant(mutant, MutantBasicInformation, &info, sizeof(info), NULL);
-    ok( status == STATUS_SUCCESS, "NtQueryMutant failed %08x\n", status );
-    ok( info.CurrentCount == 0, "expected 0, got %d\n", info.CurrentCount );
-    ok( info.OwnedByCaller == TRUE, "expected TRUE, got %d\n", info.OwnedByCaller );
-    ok( info.AbandonedState == FALSE, "expected FALSE, got %d\n", info.AbandonedState );
-
-    NtClose( mutant );
-}
-
-static void test_wait_on_address(void)
-{
-    DWORD ticks;
-    SIZE_T size;
-    NTSTATUS status;
-    LARGE_INTEGER timeout;
-    LONG64 address, compare;
-
-    if (!pRtlWaitOnAddress)
-    {
-        win_skip("RtlWaitOnAddress not supported, skipping test\n");
-        return;
-    }
-
-    if (0) /* crash on Windows */
-    {
-        pRtlWaitOnAddress(&address, NULL, 8, NULL);
-        pRtlWaitOnAddress(NULL, &compare, 8, NULL);
-        pRtlWaitOnAddress(NULL, NULL, 8, NULL);
-    }
-
-    /* don't crash */
-    pRtlWakeAddressSingle(NULL);
-    pRtlWakeAddressAll(NULL);
-
-    /* invalid values */
-    address = 0;
-    compare = 0;
-    status = pRtlWaitOnAddress(&address, &compare, 5, NULL);
-    ok(status == STATUS_INVALID_PARAMETER, "got %x\n", status);
-
-    /* values match */
-    address = 0;
-    compare = 0;
-    pNtQuerySystemTime(&timeout);
-    timeout.QuadPart += 100*10000;
-    ticks = GetTickCount();
-    status = pRtlWaitOnAddress(&address, &compare, 8, &timeout);
-    ticks = GetTickCount() - ticks;
-    ok(status == STATUS_TIMEOUT, "got 0x%08x\n", status);
-    ok(ticks >= 90 && ticks <= 1000, "got %u\n", ticks);
-    ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
-    ok(compare == 0, "got %s\n", wine_dbgstr_longlong(compare));
-
-    /* different address size */
-    for (size = 1; size <= 4; size <<= 1)
-    {
-        compare = ~0;
-        compare <<= size * 8;
-
-        timeout.QuadPart = -100 * 10000;
-        ticks = GetTickCount();
-        status = pRtlWaitOnAddress(&address, &compare, size, &timeout);
-        ticks = GetTickCount() - ticks;
-        ok(status == STATUS_TIMEOUT, "got 0x%08x\n", status);
-        ok(ticks >= 90 && ticks <= 1000, "got %u\n", ticks);
-
-        status = pRtlWaitOnAddress(&address, &compare, size << 1, &timeout);
-        ok(!status, "got 0x%08x\n", status);
-    }
-    address = 0;
-    compare = 1;
-    status = pRtlWaitOnAddress(&address, &compare, 8, NULL);
-    ok(!status, "got 0x%08x\n", status);
-
-    /* no waiters */
-    address = 0;
-    pRtlWakeAddressSingle(&address);
-    ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
-    pRtlWakeAddressAll(&address);
-    ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
-}
-
 static void test_process(void)
 {
     OBJECT_ATTRIBUTES attr;
@@ -2160,13 +1816,7 @@ START_TEST(om)
     pNtCreateMailslotFile   = (void *)GetProcAddress(hntdll, "NtCreateMailslotFile");
     pNtCreateMutant         = (void *)GetProcAddress(hntdll, "NtCreateMutant");
     pNtOpenEvent            = (void *)GetProcAddress(hntdll, "NtOpenEvent");
-    pNtQueryEvent           = (void *)GetProcAddress(hntdll, "NtQueryEvent");
-    pNtPulseEvent           = (void *)GetProcAddress(hntdll, "NtPulseEvent");
-    pNtResetEvent           = (void *)GetProcAddress(hntdll, "NtResetEvent");
-    pNtSetEvent             = (void *)GetProcAddress(hntdll, "NtSetEvent");
     pNtOpenMutant           = (void *)GetProcAddress(hntdll, "NtOpenMutant");
-    pNtQueryMutant          = (void *)GetProcAddress(hntdll, "NtQueryMutant");
-    pNtReleaseMutant        = (void *)GetProcAddress(hntdll, "NtReleaseMutant");
     pNtOpenFile             = (void *)GetProcAddress(hntdll, "NtOpenFile");
     pNtClose                = (void *)GetProcAddress(hntdll, "NtClose");
     pRtlInitUnicodeString   = (void *)GetProcAddress(hntdll, "RtlInitUnicodeString");
@@ -2186,16 +1836,11 @@ START_TEST(om)
     pNtReleaseSemaphore     =  (void *)GetProcAddress(hntdll, "NtReleaseSemaphore");
     pNtCreateKeyedEvent     =  (void *)GetProcAddress(hntdll, "NtCreateKeyedEvent");
     pNtOpenKeyedEvent       =  (void *)GetProcAddress(hntdll, "NtOpenKeyedEvent");
-    pNtWaitForKeyedEvent    =  (void *)GetProcAddress(hntdll, "NtWaitForKeyedEvent");
-    pNtReleaseKeyedEvent    =  (void *)GetProcAddress(hntdll, "NtReleaseKeyedEvent");
     pNtCreateIoCompletion   =  (void *)GetProcAddress(hntdll, "NtCreateIoCompletion");
     pNtOpenIoCompletion     =  (void *)GetProcAddress(hntdll, "NtOpenIoCompletion");
     pNtQueryInformationFile =  (void *)GetProcAddress(hntdll, "NtQueryInformationFile");
-    pNtQuerySystemTime      =  (void *)GetProcAddress(hntdll, "NtQuerySystemTime");
-    pRtlWaitOnAddress       =  (void *)GetProcAddress(hntdll, "RtlWaitOnAddress");
-    pRtlWakeAddressAll      =  (void *)GetProcAddress(hntdll, "RtlWakeAddressAll");
-    pRtlWakeAddressSingle   =  (void *)GetProcAddress(hntdll, "RtlWakeAddressSingle");
     pNtOpenProcess          =  (void *)GetProcAddress(hntdll, "NtOpenProcess");
+    pNtQuerySystemInformation = (void *)GetProcAddress(hntdll, "NtQuerySystemInformation");
 
     test_case_sensitive();
     test_namespace_pipe();
@@ -2204,11 +1849,8 @@ START_TEST(om)
     test_directory();
     test_symboliclink();
     test_query_object();
+    test_query_object_types();
     test_type_mismatch();
-    test_event();
-    test_mutant();
-    test_keyed_events();
     test_null_device();
-    test_wait_on_address();
     test_process();
 }
