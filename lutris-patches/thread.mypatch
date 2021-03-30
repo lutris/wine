@@ -1,0 +1,662 @@
+From 925e700e416862e1ed62839734422c070345aca6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Thu, 17 Dec 2020 20:24:12 +0100
+Subject: [PATCH 1/7] server: Introduce new set_thread_priority helper.
+
+---
+ server/thread.c | 47 +++++++++++++++++++++++++++++++----------------
+ server/thread.h |  1 +
+ 2 files changed, 32 insertions(+), 16 deletions(-)
+
+diff --git a/server/thread.c b/server/thread.c
+index 19d592f2beb..b27edfad0d9 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -627,28 +627,39 @@ affinity_t get_thread_affinity( struct thread *thread )
+ #define THREAD_PRIORITY_REALTIME_HIGHEST 6
+ #define THREAD_PRIORITY_REALTIME_LOWEST -7
+ 
++int set_thread_priority( struct thread *thread, int priority_class, int priority )
++{
++    int max = THREAD_PRIORITY_HIGHEST;
++    int min = THREAD_PRIORITY_LOWEST;
++    if (priority_class == PROCESS_PRIOCLASS_REALTIME)
++    {
++        max = THREAD_PRIORITY_REALTIME_HIGHEST;
++        min = THREAD_PRIORITY_REALTIME_LOWEST;
++    }
++    if ((priority < min || priority > max) &&
++        priority != THREAD_PRIORITY_IDLE &&
++        priority != THREAD_PRIORITY_TIME_CRITICAL)
++    {
++        errno = EINVAL;
++        return -1;
++    }
++
++    if (thread->process->priority == priority_class &&
++        thread->priority == priority)
++        return 0;
++    thread->priority = priority;
++
++    return 0;
++}
++
+ /* set all information about a thread */
+ static void set_thread_info( struct thread *thread,
+                              const struct set_thread_info_request *req )
+ {
+     if (req->mask & SET_THREAD_INFO_PRIORITY)
+     {
+-        int max = THREAD_PRIORITY_HIGHEST;
+-        int min = THREAD_PRIORITY_LOWEST;
+-        if (thread->process->priority == PROCESS_PRIOCLASS_REALTIME)
+-        {
+-            max = THREAD_PRIORITY_REALTIME_HIGHEST;
+-            min = THREAD_PRIORITY_REALTIME_LOWEST;
+-        }
+-        if ((req->priority >= min && req->priority <= max) ||
+-            req->priority == THREAD_PRIORITY_IDLE ||
+-            req->priority == THREAD_PRIORITY_TIME_CRITICAL)
+-        {
+-            thread->priority = req->priority;
+-            set_scheduler_priority( thread );
+-        }
+-        else
+-            set_error( STATUS_INVALID_PARAMETER );
++        if (set_thread_priority( thread, thread->process->priority, req->priority ))
++            file_set_error();
+     }
+     if (req->mask & SET_THREAD_INFO_AFFINITY)
+     {
+@@ -1515,7 +1526,10 @@ DECL_HANDLER(init_first_thread)
+     if (!process->parent_id)
+         process->affinity = current->affinity = get_thread_affinity( current );
+     else
++    {
++        set_thread_priority( current, current->process->priority, current->priority );
+         set_thread_affinity( current, current->affinity );
++    }
+ 
+     debug_level = max( debug_level, req->debug_level );
+ 
+@@ -1544,6 +1558,7 @@ DECL_HANDLER(init_thread)
+ 
+     init_thread_context( current );
+     generate_debug_event( current, DbgCreateThreadStateChange, &req->entry );
++    set_thread_priority( current, current->process->priority, current->priority );
+     set_thread_affinity( current, current->affinity );
+ 
+     reply->pid     = get_process_id( current->process );
+diff --git a/server/thread.h b/server/thread.h
+index f41c3ddd61e..df2d1c3e8dc 100644
+--- a/server/thread.h
++++ b/server/thread.h
+@@ -121,6 +121,7 @@ extern void thread_cancel_apc( struct thread *thread, struct object *owner, enum
+ extern int thread_add_inflight_fd( struct thread *thread, int client, int server );
+ extern int thread_get_inflight_fd( struct thread *thread, int client );
+ extern struct token *thread_get_impersonation_token( struct thread *thread );
++extern int set_thread_priority( struct thread *thread, int priority_class, int priority );
+ extern int set_thread_affinity( struct thread *thread, affinity_t affinity );
+ extern int is_cpu_supported( enum cpu_type cpu );
+ extern unsigned int get_supported_cpu_mask(void);
+-- 
+2.31.1
+
+From e14942d12473d41a3f8b179f71be56175d5f11a9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Thu, 17 Dec 2020 20:27:10 +0100
+Subject: [PATCH 2/7] server: Update individual thread priority when process
+ priority changes.
+
+---
+ server/process.c | 18 +++++++++++++++++-
+ 1 file changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/server/process.c b/server/process.c
+index 9a8eef9802e..27a2b4f08c4 100644
+--- a/server/process.c
++++ b/server/process.c
+@@ -1439,6 +1439,22 @@ DECL_HANDLER(get_process_vm_counters)
+     release_object( process );
+ }
+ 
++static void set_process_priority( struct process *process, int priority )
++{
++    struct thread *thread;
++
++    if (!process->running_threads)
++    {
++        set_error( STATUS_PROCESS_IS_TERMINATING );
++        return;
++    }
++
++    LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
++        set_thread_priority( thread, priority, thread->priority );
++
++    process->priority = priority;
++}
++
+ static void set_process_affinity( struct process *process, affinity_t affinity )
+ {
+     struct thread *thread;
+@@ -1464,7 +1480,7 @@ DECL_HANDLER(set_process_info)
+ 
+     if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
+     {
+-        if (req->mask & SET_PROCESS_INFO_PRIORITY) process->priority = req->priority;
++        if (req->mask & SET_PROCESS_INFO_PRIORITY) set_process_priority( process, req->priority );
+         if (req->mask & SET_PROCESS_INFO_AFFINITY) set_process_affinity( process, req->affinity );
+         release_object( process );
+     }
+-- 
+2.31.1
+
+From 5c65b970a48455897662e1811a6a6ff848e6c979 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Fri, 18 Dec 2020 14:43:00 +0100
+Subject: [PATCH 3/7] server: Delay set_thread_priority until unix_tid is
+ known.
+
+---
+ server/thread.c | 26 ++++++++++++++++++++++++++
+ server/thread.h |  1 +
+ 2 files changed, 27 insertions(+)
+
+diff --git a/server/thread.c b/server/thread.c
+index b27edfad0d9..ae49943d31f 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -256,6 +256,7 @@ static inline void init_thread_structure( struct thread *thread )
+     thread->state           = RUNNING;
+     thread->exit_code       = 0;
+     thread->priority        = 0;
++    thread->delay_priority  = NULL;
+     thread->suspend         = 0;
+     thread->dbg_hidden      = 0;
+     thread->desktop_users   = 0;
+@@ -413,6 +414,9 @@ static void cleanup_thread( struct thread *thread )
+ {
+     int i;
+ 
++    if (thread->delay_priority) remove_timeout_user( thread->delay_priority );
++    thread->delay_priority = NULL;
++
+     if (thread->context)
+     {
+         thread->context->status = STATUS_ACCESS_DENIED;
+@@ -627,6 +631,27 @@ affinity_t get_thread_affinity( struct thread *thread )
+ #define THREAD_PRIORITY_REALTIME_HIGHEST 6
+ #define THREAD_PRIORITY_REALTIME_LOWEST -7
+ 
++static void apply_thread_priority( struct thread *thread, int priority_class, int priority, int delayed );
++
++static void delayed_set_thread_priority( void *private )
++{
++    struct thread *thread = private;
++    int priority_class = thread->process->priority, priority = thread->priority;
++    apply_thread_priority( thread, priority_class, priority, TRUE );
++}
++
++static void apply_thread_priority( struct thread *thread, int priority_class, int priority, int delayed )
++{
++    if (!delayed && thread->delay_priority) remove_timeout_user( thread->delay_priority );
++    thread->delay_priority = NULL;
++
++    if (thread->unix_tid == -1)
++    {
++        thread->delay_priority = add_timeout_user( -TICKS_PER_SEC, delayed_set_thread_priority, thread );
++        return;
++    }
++}
++
+ int set_thread_priority( struct thread *thread, int priority_class, int priority )
+ {
+     int max = THREAD_PRIORITY_HIGHEST;
+@@ -649,6 +674,7 @@ int set_thread_priority( struct thread *thread, int priority_class, int priority
+         return 0;
+     thread->priority = priority;
+ 
++    apply_thread_priority( thread, priority_class, priority, FALSE );
+     return 0;
+ }
+ 
+diff --git a/server/thread.h b/server/thread.h
+index df2d1c3e8dc..92150262332 100644
+--- a/server/thread.h
++++ b/server/thread.h
+@@ -82,6 +82,7 @@ struct thread
+     client_ptr_t           entry_point;   /* entry point (in client address space) */
+     affinity_t             affinity;      /* affinity mask */
+     int                    priority;      /* priority level */
++    struct timeout_user   *delay_priority;/* delayed set_thread_priority */
+     int                    suspend;       /* suspend count */
+     int                    dbg_hidden;    /* hidden from debugger */
+     obj_handle_t           desktop;       /* desktop handle */
+-- 
+2.31.1
+
+From 60251a5c45566e65acdfba348688fad011fb2a3a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Thu, 17 Dec 2020 20:48:54 +0100
+Subject: [PATCH 4/7] ntdll: Set RLIMIT_NICE to its hard limit and inform the
+ server.
+
+---
+ dlls/ntdll/unix/loader.c |  3 +++
+ dlls/ntdll/unix/server.c | 14 ++++++++++++++
+ server/process.h         |  1 +
+ server/protocol.def      |  1 +
+ server/thread.c          |  7 +++++++
+ 5 files changed, 26 insertions(+)
+
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index df5c92afd29..f666b8b9607 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -2132,6 +2132,9 @@ void __wine_main( int argc, char *argv[], char *envp[] )
+ #ifdef RLIMIT_AS
+     set_max_limit( RLIMIT_AS );
+ #endif
++#ifdef RLIMIT_NICE
++    set_max_limit( RLIMIT_NICE );
++#endif
+ 
+     virtual_init();
+     signal_init_early();
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index 72d68ed62f1..f38eb0e94a8 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -64,6 +64,9 @@
+ #ifdef HAVE_SYS_PRCTL_H
+ # include <sys/prctl.h>
+ #endif
++#ifdef HAVE_SYS_RESOURCE_H
++# include <sys/resource.h>
++#endif
+ #ifdef HAVE_SYS_STAT_H
+ # include <sys/stat.h>
+ #endif
+@@ -1538,6 +1541,8 @@ size_t server_init_process(void)
+     int ret, reply_pipe;
+     struct sigaction sig_act;
+     size_t info_size;
++    struct rlimit rlimit;
++    int nice_limit = 0;
+ 
+     server_pid = -1;
+     if (env_socket)
+@@ -1599,10 +1604,19 @@ size_t server_init_process(void)
+ 
+     reply_pipe = init_thread_pipe();
+ 
++#ifdef RLIMIT_NICE
++    if (!getrlimit( RLIMIT_NICE, &rlimit ))
++    {
++        if (rlimit.rlim_cur <= 40) nice_limit = 20 - rlimit.rlim_cur;
++        else if (rlimit.rlim_cur == -1 /* RLIMIT_INFINITY */) nice_limit = -20;
++    }
++#endif
++
+     SERVER_START_REQ( init_first_thread )
+     {
+         req->unix_pid    = getpid();
+         req->unix_tid    = get_unix_tid();
++        req->nice_limit  = nice_limit;
+         req->teb         = wine_server_client_ptr( NtCurrentTeb() );
+         req->peb         = wine_server_client_ptr( NtCurrentTeb()->Peb );
+ #ifdef __i386__
+diff --git a/server/process.h b/server/process.h
+index 638497857b3..fcf0bda4459 100644
+--- a/server/process.h
++++ b/server/process.h
+@@ -54,6 +54,7 @@ struct process
+     struct timeout_user *sigkill_timeout; /* timeout for final SIGKILL */
+     enum cpu_type        cpu;             /* client CPU type */
+     int                  unix_pid;        /* Unix pid for final SIGKILL */
++    int                  nice_limit;      /* RLIMIT_NICE of the process */
+     int                  exit_code;       /* process exit code */
+     int                  running_threads; /* number of threads running in this process */
+     timeout_t            start_time;      /* absolute time at process start */
+diff --git a/server/protocol.def b/server/protocol.def
+index d956c1cb5e8..f7792e694a5 100644
+--- a/server/protocol.def
++++ b/server/protocol.def
+@@ -934,6 +934,7 @@ typedef struct
+     int          reply_fd;     /* fd for reply pipe */
+     int          wait_fd;      /* fd for blocking calls pipe */
+     client_cpu_t cpu;          /* CPU that this thread is running on */
++    char         nice_limit;   /* RLIMIT_NICE of new thread */
+ @REPLY
+     process_id_t pid;          /* process id of the new thread's process */
+     thread_id_t  tid;          /* thread id of the new thread */
+diff --git a/server/thread.c b/server/thread.c
+index ae49943d31f..15144cc2689 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -38,6 +38,12 @@
+ #ifdef HAVE_SCHED_H
+ #include <sched.h>
+ #endif
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#endif
++#ifdef HAVE_SYS_RESOURCE_H
++#include <sys/resource.h>
++#endif
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+@@ -1548,6 +1554,7 @@ DECL_HANDLER(init_first_thread)
+     process->peb      = req->peb;
+     process->ldt_copy = req->ldt_copy;
+     process->cpu      = req->cpu;
++    process->nice_limit = req->nice_limit;
+ 
+     if (!process->parent_id)
+         process->affinity = current->affinity = get_thread_affinity( current );
+-- 
+2.31.1
+
+From 2ff98c42c5324dc382fd1d18654f57d41a8e3409 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Fri, 18 Dec 2020 12:13:19 +0100
+Subject: [PATCH 5/7] server: Use setpriority to update thread niceness when
+ safe.
+
+---
+ configure.ac    | 10 ++++++++++
+ server/main.c   |  1 +
+ server/object.h |  4 ++++
+ server/thread.c | 49 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 64 insertions(+)
+
+diff --git a/configure.ac b/configure.ac
+index c1b846586e4..a9ff23143c5 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -2362,6 +2362,16 @@ then
+   AC_DEFINE(HAVE_SCHED_SETAFFINITY, 1, [Define to 1 if you have the `sched_setaffinity' function.])
+ fi
+ 
++AC_CACHE_CHECK([for setpriority],wine_cv_have_setpriority,
++                AC_LINK_IFELSE([AC_LANG_PROGRAM(
++[[#define _GNU_SOURCE
++#include <sys/resource.h>
++#include <sys/time.h>]], [[setpriority(0, 0, 0);]])],[wine_cv_have_setpriority=yes],[wine_cv_have_setpriority=no]))
++if test "$wine_cv_have_setpriority" = "yes"
++then
++  AC_DEFINE(HAVE_SETPRIORITY, 1, [Define to 1 if you have the `setpriority' function.])
++fi
++
+ AC_CACHE_CHECK([for fallocate],wine_cv_have_fallocate,
+                 AC_LINK_IFELSE([AC_LANG_PROGRAM(
+ [[#define _GNU_SOURCE
+diff --git a/server/main.c b/server/main.c
+index f68888d0fa8..7a949de382e 100644
+--- a/server/main.c
++++ b/server/main.c
+@@ -150,6 +150,7 @@ int main( int argc, char *argv[] )
+     init_scheduler();
+     init_signals();
+     init_directories( load_intl_file() );
++    init_threading();
+     init_registry();
+     main_loop();
+     return 0;
+diff --git a/server/object.h b/server/object.h
+index 37946ea710b..b0a295e3214 100644
+--- a/server/object.h
++++ b/server/object.h
+@@ -268,6 +268,10 @@ extern struct object *get_directory_obj( struct process *process, obj_handle_t h
+ extern int directory_link_name( struct object *obj, struct object_name *name, struct object *parent );
+ extern void init_directories( struct fd *intl_fd );
+ 
++/* thread functions */
++
++extern void init_threading(void);
++
+ /* symbolic link functions */
+ 
+ extern struct object *create_obj_symlink( struct object *root, const struct unicode_str *name,
+diff --git a/server/thread.c b/server/thread.c
+index 15144cc2689..7ccf133598c 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -235,6 +235,23 @@ static const struct fd_ops thread_fd_ops =
+ };
+ 
+ static struct list thread_list = LIST_INIT(thread_list);
++static int nice_limit;
++
++void init_threading(void)
++{
++#ifdef RLIMIT_NICE
++    struct rlimit rlimit;
++    if (!getrlimit( RLIMIT_NICE, &rlimit ))
++    {
++        rlimit.rlim_cur = rlimit.rlim_max;
++        setrlimit( RLIMIT_NICE, &rlimit );
++        if (rlimit.rlim_max <= 40) nice_limit = 20 - rlimit.rlim_max;
++        else if (rlimit.rlim_max == -1) nice_limit = -20;
++        if (nice_limit >= 0) fprintf(stderr, "wine: RLIMIT_NICE is <= 20, unable to use setpriority safely\n");
++    }
++#endif
++    if (nice_limit < 0) fprintf(stderr, "wine: Using setpriority to control niceness in the [%d,%d] range\n", nice_limit, -nice_limit );
++}
+ 
+ /* initialize the structure for a newly allocated thread */
+ static inline void init_thread_structure( struct thread *thread )
+@@ -634,6 +651,21 @@ affinity_t get_thread_affinity( struct thread *thread )
+     return mask;
+ }
+ 
++static int get_base_priority( int priority_class, int priority )
++{
++    static const int class_offsets[] = { 4, 8, 13, 24, 6, 10 };
++    assert(priority_class <= ARRAY_SIZE(class_offsets));
++    if (priority == THREAD_PRIORITY_IDLE) return (priority_class == PROCESS_PRIOCLASS_REALTIME ? 16 : 1);
++    else if (priority == THREAD_PRIORITY_TIME_CRITICAL) return (priority_class == PROCESS_PRIOCLASS_REALTIME ? 31 : 15);
++    else return class_offsets[priority_class - 1] + priority;
++}
++
++static int get_unix_niceness( int base_priority, int limit )
++{
++    int min = -limit, max = limit, range = max - min;
++    return min + (base_priority - 1) * range / 14;
++}
++
+ #define THREAD_PRIORITY_REALTIME_HIGHEST 6
+ #define THREAD_PRIORITY_REALTIME_LOWEST -7
+ 
+@@ -648,6 +680,8 @@ static void delayed_set_thread_priority( void *private )
+ 
+ static void apply_thread_priority( struct thread *thread, int priority_class, int priority, int delayed )
+ {
++    int niceness, limit = min( nice_limit, thread->process->nice_limit );
++
+     if (!delayed && thread->delay_priority) remove_timeout_user( thread->delay_priority );
+     thread->delay_priority = NULL;
+ 
+@@ -656,6 +690,21 @@ static void apply_thread_priority( struct thread *thread, int priority_class, in
+         thread->delay_priority = add_timeout_user( -TICKS_PER_SEC, delayed_set_thread_priority, thread );
+         return;
+     }
++
++    /* FIXME: handle REALTIME class using SCHED_RR if possible, for now map it to HIGH */
++    if (priority_class == PROCESS_PRIOCLASS_REALTIME) priority_class = PROCESS_PRIOCLASS_HIGH;
++
++#ifdef __linux__
++#ifdef HAVE_SETPRIORITY
++    if (limit < 0)
++    {
++        niceness = get_unix_niceness( get_base_priority( priority_class, priority ), limit );
++        if (setpriority( PRIO_PROCESS, thread->unix_tid, niceness ) != 0)
++            fprintf( stderr, "wine: setpriority %d for pid %d failed: %d\n", niceness, thread->unix_tid, errno );
++        return;
++    }
++#endif
++#endif
+ }
+ 
+ int set_thread_priority( struct thread *thread, int priority_class, int priority )
+-- 
+2.31.1
+
+From 268ed61a7362b104fb2ace36f3cc3c4979b5c91a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Fri, 18 Dec 2020 13:58:07 +0100
+Subject: [PATCH 6/7] server: Check wineserver privileges on init with -20
+ niceness.
+
+---
+ server/thread.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/server/thread.c b/server/thread.c
+index 7ccf133598c..f5225902393 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -241,7 +241,13 @@ void init_threading(void)
+ {
+ #ifdef RLIMIT_NICE
+     struct rlimit rlimit;
+-    if (!getrlimit( RLIMIT_NICE, &rlimit ))
++#endif
++#ifdef HAVE_SETPRIORITY
++    if (setpriority( PRIO_PROCESS, getpid(), -20 ) == 0) nice_limit = -19;
++    setpriority( PRIO_PROCESS, getpid(), 0 );
++#endif
++#ifdef RLIMIT_NICE
++    if (!nice_limit && !getrlimit( RLIMIT_NICE, &rlimit ))
+     {
+         rlimit.rlim_cur = rlimit.rlim_max;
+         setrlimit( RLIMIT_NICE, &rlimit );
+-- 
+2.31.1
+
+From 4a1091c7e6c55bd12a8b29769782624aed1d5dad Mon Sep 17 00:00:00 2001
+From: Torge Matthies <openglfreak@googlemail.com>
+Date: Tue, 30 Mar 2021 22:25:46 +0200
+Subject: [PATCH 7/7] make_req
+
+---
+ configure                      | 37 ++++++++++++++++++++++++++++++++++
+ include/config.h.in            |  3 +++
+ include/wine/server_protocol.h |  5 +++--
+ server/request.h               |  1 +
+ server/trace.c                 |  1 +
+ 5 files changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/configure b/configure
+index daf64ddc8dc..7a29e5a4957 100755
+--- a/configure
++++ b/configure
+@@ -21610,6 +21610,43 @@ printf "%s\n" "#define HAVE_SCHED_SETAFFINITY 1" >>confdefs.h
+ 
+ fi
+ 
++{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for setpriority" >&5
++printf %s "checking for setpriority... " >&6; }
++if test ${wine_cv_have_setpriority+y}
++then :
++  printf %s "(cached) " >&6
++else $as_nop
++  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
++/* end confdefs.h.  */
++#define _GNU_SOURCE
++#include <sys/resource.h>
++#include <sys/time.h>
++int
++main (void)
++{
++setpriority(0, 0, 0);
++  ;
++  return 0;
++}
++_ACEOF
++if ac_fn_c_try_link "$LINENO"
++then :
++  wine_cv_have_setpriority=yes
++else $as_nop
++  wine_cv_have_setpriority=no
++fi
++rm -f core conftest.err conftest.$ac_objext conftest.beam \
++    conftest$ac_exeext conftest.$ac_ext
++fi
++{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $wine_cv_have_setpriority" >&5
++printf "%s\n" "$wine_cv_have_setpriority" >&6; }
++if test "$wine_cv_have_setpriority" = "yes"
++then
++
++printf "%s\n" "#define HAVE_SETPRIORITY 1" >>confdefs.h
++
++fi
++
+ { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for fallocate" >&5
+ printf %s "checking for fallocate... " >&6; }
+ if test ${wine_cv_have_fallocate+y}
+diff --git a/include/config.h.in b/include/config.h.in
+index f11b01306f6..6eabfb6dc98 100644
+--- a/include/config.h.in
++++ b/include/config.h.in
+@@ -762,6 +762,9 @@
+ /* Define to 1 if you have the <Security/Security.h> header file. */
+ #undef HAVE_SECURITY_SECURITY_H
+ 
++/* Define to 1 if you have the `setpriority' function. */
++#undef HAVE_SETPRIORITY
++
+ /* Define to 1 if you have the `setproctitle' function. */
+ #undef HAVE_SETPROCTITLE
+ 
+diff --git a/include/wine/server_protocol.h b/include/wine/server_protocol.h
+index 6b60c95b85a..296889166d4 100644
+--- a/include/wine/server_protocol.h
++++ b/include/wine/server_protocol.h
+@@ -952,7 +952,8 @@ struct init_first_thread_request
+     int          reply_fd;
+     int          wait_fd;
+     client_cpu_t cpu;
+-    char __pad_60[4];
++    char         nice_limit;
++    char __pad_61[3];
+ };
+ struct init_first_thread_reply
+ {
+@@ -6384,7 +6385,7 @@ union generic_reply
+ 
+ /* ### protocol_version begin ### */
+ 
+-#define SERVER_PROTOCOL_VERSION 685
++#define SERVER_PROTOCOL_VERSION 690
+ 
+ /* ### protocol_version end ### */
+ 
+diff --git a/server/request.h b/server/request.h
+index 42cf726e827..513b00ae294 100644
+--- a/server/request.h
++++ b/server/request.h
+@@ -762,6 +762,7 @@ C_ASSERT( FIELD_OFFSET(struct init_first_thread_request, ldt_copy) == 40 );
+ C_ASSERT( FIELD_OFFSET(struct init_first_thread_request, reply_fd) == 48 );
+ C_ASSERT( FIELD_OFFSET(struct init_first_thread_request, wait_fd) == 52 );
+ C_ASSERT( FIELD_OFFSET(struct init_first_thread_request, cpu) == 56 );
++C_ASSERT( FIELD_OFFSET(struct init_first_thread_request, nice_limit) == 60 );
+ C_ASSERT( sizeof(struct init_first_thread_request) == 64 );
+ C_ASSERT( FIELD_OFFSET(struct init_first_thread_reply, pid) == 8 );
+ C_ASSERT( FIELD_OFFSET(struct init_first_thread_reply, tid) == 12 );
+diff --git a/server/trace.c b/server/trace.c
+index 0853c64b89c..7716d9b15e9 100644
+--- a/server/trace.c
++++ b/server/trace.c
+@@ -1450,6 +1450,7 @@ static void dump_init_first_thread_request( const struct init_first_thread_reque
+     fprintf( stderr, ", reply_fd=%d", req->reply_fd );
+     fprintf( stderr, ", wait_fd=%d", req->wait_fd );
+     dump_client_cpu( ", cpu=", &req->cpu );
++    fprintf( stderr, ", nice_limit=%c", req->nice_limit );
+ }
+ 
+ static void dump_init_first_thread_reply( const struct init_first_thread_reply *req )
+-- 
+2.31.1
+

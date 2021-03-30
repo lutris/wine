@@ -54,6 +54,7 @@ struct process
     struct timeout_user *sigkill_timeout; /* timeout for final SIGKILL */
     enum cpu_type        cpu;             /* client CPU type */
     int                  unix_pid;        /* Unix pid for final SIGKILL */
+    int                  nice_limit;      /* RLIMIT_NICE of the process */
     int                  exit_code;       /* process exit code */
     int                  running_threads; /* number of threads running in this process */
     timeout_t            start_time;      /* absolute time at process start */
@@ -88,6 +89,7 @@ struct process
     const struct rawinput_device *rawinput_kbd;   /* rawinput keyboard device, if any */
     struct list          kernel_object;   /* list of kernel object pointers */
     int                  esync_fd;        /* esync file descriptor (signaled on exit) */
+    unsigned int         fsync_idx;
 };
 
 #define CPU_FLAG(cpu) (1 << (cpu))

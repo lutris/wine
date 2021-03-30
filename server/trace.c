@@ -1449,6 +1449,7 @@ static void dump_init_first_thread_request( const struct init_first_thread_reque
     fprintf( stderr, ", reply_fd=%d", req->reply_fd );
     fprintf( stderr, ", wait_fd=%d", req->wait_fd );
     dump_client_cpu( ", cpu=", &req->cpu );
+    fprintf( stderr, ", nice_limit=%c", req->nice_limit );
 }
 
 static void dump_init_first_thread_reply( const struct init_first_thread_reply *req )
@@ -1947,6 +1948,7 @@ static void dump_alloc_file_handle_reply( const struct alloc_file_handle_reply *
 static void dump_get_handle_unix_name_request( const struct get_handle_unix_name_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", nofollow=%d", req->nofollow );
 }
 
 static void dump_get_handle_unix_name_reply( const struct get_handle_unix_name_reply *req )
@@ -2069,6 +2071,7 @@ static void dump_get_socket_info_reply( const struct get_socket_info_reply *req 
     fprintf( stderr, " family=%d", req->family );
     fprintf( stderr, ", type=%d", req->type );
     fprintf( stderr, ", protocol=%d", req->protocol );
+    dump_timeout( ", connect_time=", &req->connect_time );
 }
 
 static void dump_enable_socket_event_request( const struct enable_socket_event_request *req )
@@ -2646,6 +2649,7 @@ static void dump_send_hardware_message_request( const struct send_hardware_messa
     fprintf( stderr, " win=%08x", req->win );
     dump_hw_input( ", input=", &req->input );
     fprintf( stderr, ", flags=%08x", req->flags );
+    dump_varargs_bytes( ", data=", cur_size );
 }
 
 static void dump_send_hardware_message_reply( const struct send_hardware_message_reply *req )
@@ -2875,6 +2879,7 @@ static void dump_create_window_reply( const struct create_window_reply *req )
     dump_uint64( ", class_ptr=", &req->class_ptr );
     fprintf( stderr, ", dpi=%d", req->dpi );
     fprintf( stderr, ", awareness=%d", req->awareness );
+    fprintf( stderr, ", needs_cloak=%d", req->needs_cloak );
 }
 
 static void dump_destroy_window_request( const struct destroy_window_request *req )
@@ -2903,6 +2908,7 @@ static void dump_set_window_owner_reply( const struct set_window_owner_reply *re
 {
     fprintf( stderr, " full_owner=%08x", req->full_owner );
     fprintf( stderr, ", prev_owner=%08x", req->prev_owner );
+    fprintf( stderr, ", needs_cloak=%d", req->needs_cloak );
 }
 
 static void dump_get_window_info_request( const struct get_window_info_request *req )
@@ -2945,6 +2951,28 @@ static void dump_set_window_info_reply( const struct set_window_info_reply *req 
     dump_uint64( ", old_user_data=", &req->old_user_data );
     dump_uint64( ", old_extra_value=", &req->old_extra_value );
     fprintf( stderr, ", old_id=%08x", req->old_id );
+}
+
+static void dump_get_window_cloaked_request( const struct get_window_cloaked_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+}
+
+static void dump_get_window_cloaked_reply( const struct get_window_cloaked_reply *req )
+{
+    fprintf( stderr, " cloaked=%08x", req->cloaked );
+}
+
+static void dump_set_window_cloaked_request( const struct set_window_cloaked_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", cloaked=%08x", req->cloaked );
+}
+
+static void dump_set_window_cloaked_reply( const struct set_window_cloaked_reply *req )
+{
+    fprintf( stderr, " count=%08x", req->count );
+    dump_varargs_user_handles( ", windows=", cur_size );
 }
 
 static void dump_set_parent_request( const struct set_parent_request *req )
@@ -3124,6 +3152,12 @@ static void dump_set_window_region_request( const struct set_window_region_reque
 {
     fprintf( stderr, " window=%08x", req->window );
     fprintf( stderr, ", redraw=%d", req->redraw );
+    dump_varargs_rectangles( ", region=", cur_size );
+}
+
+static void dump_set_layer_region_request( const struct set_layer_region_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
     dump_varargs_rectangles( ", region=", cur_size );
 }
 
@@ -4287,6 +4321,12 @@ static void dump_set_fd_name_info_request( const struct set_fd_name_info_request
     dump_varargs_string( ", filename=", cur_size );
 }
 
+static void dump_set_fd_eof_info_request( const struct set_fd_eof_info_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", eof=", &req->eof );
+}
+
 static void dump_get_window_layered_info_request( const struct get_window_layered_info_request *req )
 {
     fprintf( stderr, " handle=%08x", req->handle );
@@ -4457,6 +4497,115 @@ static void dump_resume_process_request( const struct resume_process_request *re
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_create_esync_request( const struct create_esync_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", initval=%d", req->initval );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", max=%d", req->max );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_create_esync_reply( const struct create_esync_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_open_esync_request( const struct open_esync_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", rootdir=%04x", req->rootdir );
+    fprintf( stderr, ", type=%d", req->type );
+    dump_varargs_unicode_str( ", name=", cur_size );
+}
+
+static void dump_open_esync_reply( const struct open_esync_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_get_esync_fd_request( const struct get_esync_fd_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_esync_fd_reply( const struct get_esync_fd_reply *req )
+{
+    fprintf( stderr, " type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_esync_msgwait_request( const struct esync_msgwait_request *req )
+{
+    fprintf( stderr, " in_msgwait=%d", req->in_msgwait );
+}
+
+static void dump_get_esync_apc_fd_request( const struct get_esync_apc_fd_request *req )
+{
+}
+
+static void dump_create_fsync_request( const struct create_fsync_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", low=%d", req->low );
+    fprintf( stderr, ", high=%d", req->high );
+    fprintf( stderr, ", type=%d", req->type );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_create_fsync_reply( const struct create_fsync_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_open_fsync_request( const struct open_fsync_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", rootdir=%04x", req->rootdir );
+    fprintf( stderr, ", type=%d", req->type );
+    dump_varargs_unicode_str( ", name=", cur_size );
+}
+
+static void dump_open_fsync_reply( const struct open_fsync_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_get_fsync_idx_request( const struct get_fsync_idx_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_fsync_idx_reply( const struct get_fsync_idx_reply *req )
+{
+    fprintf( stderr, " type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_fsync_msgwait_request( const struct fsync_msgwait_request *req )
+{
+    fprintf( stderr, " in_msgwait=%d", req->in_msgwait );
+}
+
+static void dump_get_fsync_apc_idx_request( const struct get_fsync_apc_idx_request *req )
+{
+}
+
+static void dump_get_fsync_apc_idx_reply( const struct get_fsync_apc_idx_reply *req )
+{
+    fprintf( stderr, " shm_idx=%08x", req->shm_idx );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_exec_process_request,
@@ -4596,6 +4745,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_window_owner_request,
     (dump_func)dump_get_window_info_request,
     (dump_func)dump_set_window_info_request,
+    (dump_func)dump_get_window_cloaked_request,
+    (dump_func)dump_set_window_cloaked_request,
     (dump_func)dump_set_parent_request,
     (dump_func)dump_get_window_parents_request,
     (dump_func)dump_get_window_children_request,
@@ -4610,6 +4761,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_surface_region_request,
     (dump_func)dump_get_window_region_request,
     (dump_func)dump_set_window_region_request,
+    (dump_func)dump_set_layer_region_request,
     (dump_func)dump_get_update_region_request,
     (dump_func)dump_update_window_zorder_request,
     (dump_func)dump_redraw_window_request,
@@ -4713,6 +4865,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_fd_completion_mode_request,
     (dump_func)dump_set_fd_disp_info_request,
     (dump_func)dump_set_fd_name_info_request,
+    (dump_func)dump_set_fd_eof_info_request,
     (dump_func)dump_get_window_layered_info_request,
     (dump_func)dump_set_window_layered_info_request,
     (dump_func)dump_alloc_user_handle_request,
@@ -4732,6 +4885,16 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_terminate_job_request,
     (dump_func)dump_suspend_process_request,
     (dump_func)dump_resume_process_request,
+    (dump_func)dump_create_esync_request,
+    (dump_func)dump_open_esync_request,
+    (dump_func)dump_get_esync_fd_request,
+    (dump_func)dump_esync_msgwait_request,
+    (dump_func)dump_get_esync_apc_fd_request,
+    (dump_func)dump_create_fsync_request,
+    (dump_func)dump_open_fsync_request,
+    (dump_func)dump_get_fsync_idx_request,
+    (dump_func)dump_fsync_msgwait_request,
+    (dump_func)dump_get_fsync_apc_idx_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -4873,6 +5036,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_window_owner_reply,
     (dump_func)dump_get_window_info_reply,
     (dump_func)dump_set_window_info_reply,
+    (dump_func)dump_get_window_cloaked_reply,
+    (dump_func)dump_set_window_cloaked_reply,
     (dump_func)dump_set_parent_reply,
     (dump_func)dump_get_window_parents_reply,
     (dump_func)dump_get_window_children_reply,
@@ -4886,6 +5051,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_visible_region_reply,
     (dump_func)dump_get_surface_region_reply,
     (dump_func)dump_get_window_region_reply,
+    NULL,
     NULL,
     (dump_func)dump_get_update_region_reply,
     NULL,
@@ -4990,6 +5156,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     NULL,
+    NULL,
     (dump_func)dump_get_window_layered_info_reply,
     NULL,
     (dump_func)dump_alloc_user_handle_reply,
@@ -5009,6 +5176,16 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     NULL,
+    (dump_func)dump_create_esync_reply,
+    (dump_func)dump_open_esync_reply,
+    (dump_func)dump_get_esync_fd_reply,
+    NULL,
+    NULL,
+    (dump_func)dump_create_fsync_reply,
+    (dump_func)dump_open_fsync_reply,
+    (dump_func)dump_get_fsync_idx_reply,
+    NULL,
+    (dump_func)dump_get_fsync_apc_idx_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] = {
@@ -5150,6 +5327,8 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_window_owner",
     "get_window_info",
     "set_window_info",
+    "get_window_cloaked",
+    "set_window_cloaked",
     "set_parent",
     "get_window_parents",
     "get_window_children",
@@ -5164,6 +5343,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_surface_region",
     "get_window_region",
     "set_window_region",
+    "set_layer_region",
     "get_update_region",
     "update_window_zorder",
     "redraw_window",
@@ -5267,6 +5447,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_fd_completion_mode",
     "set_fd_disp_info",
     "set_fd_name_info",
+    "set_fd_eof_info",
     "get_window_layered_info",
     "set_window_layered_info",
     "alloc_user_handle",
@@ -5286,6 +5467,16 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "terminate_job",
     "suspend_process",
     "resume_process",
+    "create_esync",
+    "open_esync",
+    "get_esync_fd",
+    "esync_msgwait",
+    "get_esync_apc_fd",
+    "create_fsync",
+    "open_fsync",
+    "get_fsync_idx",
+    "fsync_msgwait",
+    "get_fsync_apc_idx",
 };
 
 static const struct

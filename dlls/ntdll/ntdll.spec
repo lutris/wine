@@ -137,7 +137,6 @@
 @ stdcall -syscall NtAdjustPrivilegesToken(long long ptr long ptr ptr)
 @ stdcall -syscall NtAlertResumeThread(long ptr)
 @ stdcall -syscall NtAlertThread(long)
-@ stdcall -syscall NtAlertThreadByThreadId(ptr)
 @ stdcall -syscall NtAllocateLocallyUniqueId(ptr)
 # @ stub NtAllocateUserPhysicalPages
 @ stdcall -syscall NtAllocateUuids(ptr ptr ptr ptr)
@@ -424,7 +423,6 @@
 @ stub NtVdmControl
 @ stub NtW32Call
 @ stdcall -syscall NtWaitForDebugEvent(long long ptr ptr)
-@ stdcall -syscall NtWaitForAlertByThreadId(ptr ptr)
 @ stdcall -syscall NtWaitForKeyedEvent(long ptr long ptr)
 @ stdcall -syscall NtWaitForMultipleObjects(long ptr long long ptr)
 @ stub NtWaitForProcessMutant
@@ -1624,6 +1622,7 @@
 
 # Virtual memory
 @ cdecl -syscall __wine_locked_recvmsg(long ptr long)
+@ cdecl -syscall __wine_needs_override_large_address_aware()
 
 # Version
 @ cdecl -syscall wine_get_version()
@@ -1633,3 +1632,5 @@
 # Filesystem
 @ cdecl -syscall wine_nt_to_unix_file_name(ptr ptr ptr long)
 @ cdecl -syscall wine_unix_to_nt_file_name(str ptr ptr)
+
+@ cdecl IsTransgaming()
