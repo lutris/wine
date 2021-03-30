@@ -178,6 +178,7 @@ static void CALLBACK collect_uptime( struct counter *counter )
 static const struct source counter_sources[] =
 {
     { 6,   L"\\Processor(_Total)\\% Processor Time", collect_processor_time, TYPE_PROCESSOR_TIME, -5, 10000000 },
+    { 238, L"\\Processor",                           NULL,                   0,                    0, 0 },
     { 674, L"\\System\\System Up Time",              collect_uptime,         TYPE_UPTIME,         -3, 1000 }
 };
 

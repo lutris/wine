@@ -1,0 +1,6 @@
+MODULE    = d3dpmesh.dll
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+
+RC_SRCS = version.rc

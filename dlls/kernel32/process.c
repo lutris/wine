@@ -609,7 +609,9 @@ HRESULT WINAPI RegisterApplicationRecoveryCallback(APPLICATION_RECOVERY_CALLBACK
  */
 WORD WINAPI GetActiveProcessorGroupCount(void)
 {
-    FIXME("semi-stub, always returning 1\n");
+    TRACE("()\n");
+
+    /* systems with less than 64 logical processors only have group 0 */
     return 1;
 }
 
@@ -618,10 +620,14 @@ WORD WINAPI GetActiveProcessorGroupCount(void)
  */
 DWORD WINAPI GetActiveProcessorCount(WORD group)
 {
-    DWORD cpus = system_info.NumberOfProcessors;
+    TRACE("(%u)\n", group);
 
-    FIXME("semi-stub, returning %u\n", cpus);
-    return cpus;
+    if (group && group != ALL_PROCESSOR_GROUPS)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    return system_info.NumberOfProcessors;
 }
 
 /***********************************************************************
@@ -634,6 +640,18 @@ DWORD WINAPI GetMaximumProcessorCount(WORD group)
     FIXME("semi-stub, returning %u\n", cpus);
     return cpus;
 }
+
+/***********************************************************************
+ *           GetMaximumProcessorGroupCount (KERNEL32.@)
+ */
+WORD WINAPI GetMaximumProcessorGroupCount(void)
+{
+    TRACE("()\n");
+
+    /* systems with less than 64 logical processors only have group 0 */
+    return 1;
+}
+
 
 /***********************************************************************
  *           GetFirmwareEnvironmentVariableA     (KERNEL32.@)

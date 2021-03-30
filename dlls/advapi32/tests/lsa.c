@@ -43,12 +43,22 @@ static NTSTATUS (WINAPI *pLsaGetUserName)(PUNICODE_STRING *user, PUNICODE_STRING
 
 static void test_lsa(void)
 {
+    static WCHAR machineW[] = {'W','i','n','e','N','o','M','a','c','h','i','n','e',0};
+    LSA_UNICODE_STRING machine;
     NTSTATUS status;
     LSA_HANDLE handle;
     LSA_OBJECT_ATTRIBUTES object_attributes;
 
     ZeroMemory(&object_attributes, sizeof(object_attributes));
     object_attributes.Length = sizeof(object_attributes);
+
+    machine.Buffer = machineW;
+    machine.Length = sizeof(machineW) - 2;
+    machine.MaximumLength = sizeof(machineW);
+
+    status = LsaOpenPolicy( &machine, &object_attributes, POLICY_LOOKUP_NAMES, &handle);
+    ok(status == RPC_NT_SERVER_UNAVAILABLE,
+       "LsaOpenPolicy(POLICY_LOOKUP_NAMES) for invalid machine returned 0x%08x\n", status);
 
     status = LsaOpenPolicy( NULL, &object_attributes, POLICY_ALL_ACCESS, &handle);
     ok(status == STATUS_SUCCESS || status == STATUS_ACCESS_DENIED,

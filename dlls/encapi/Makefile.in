@@ -1,0 +1,6 @@
+MODULE    = encapi.dll
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+
+RC_SRCS = version.rc

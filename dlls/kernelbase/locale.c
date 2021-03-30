@@ -2163,127 +2163,6 @@ static int wcstombs_codepage( UINT codepage, DWORD flags, const WCHAR *src, int 
         return wcstombs_sbcs( info, src, srclen, dst, dstlen );
 }
 
-
-static int get_sortkey( DWORD flags, const WCHAR *src, int srclen, char *dst, int dstlen )
-{
-    WCHAR dummy[4]; /* no decomposition is larger than 4 chars */
-    int key_len[4];
-    char *key_ptr[4];
-    const WCHAR *src_save = src;
-    int srclen_save = srclen;
-
-    key_len[0] = key_len[1] = key_len[2] = key_len[3] = 0;
-    for (; srclen; srclen--, src++)
-    {
-        unsigned int i, decomposed_len = 1;/*wine_decompose(*src, dummy, 4);*/
-        dummy[0] = *src;
-        if (decomposed_len)
-        {
-            for (i = 0; i < decomposed_len; i++)
-            {
-                WCHAR wch = dummy[i];
-                unsigned int ce;
-
-                if ((flags & NORM_IGNORESYMBOLS) &&
-                    (get_char_type( CT_CTYPE1, wch ) & (C1_PUNCT | C1_SPACE)))
-                    continue;
-
-                if (flags & NORM_IGNORECASE) wch = casemap( nls_info.LowerCaseTable, wch );
-
-                ce = collation_table[collation_table[collation_table[wch >> 8] + ((wch >> 4) & 0x0f)] + (wch & 0xf)];
-                if (ce != (unsigned int)-1)
-                {
-                    if (ce >> 16) key_len[0] += 2;
-                    if ((ce >> 8) & 0xff) key_len[1]++;
-                    if ((ce >> 4) & 0x0f) key_len[2]++;
-                    if (ce & 1)
-                    {
-                        if (wch >> 8) key_len[3]++;
-                        key_len[3]++;
-                    }
-                }
-                else
-                {
-                    key_len[0] += 2;
-                    if (wch >> 8) key_len[0]++;
-                    if (wch & 0xff) key_len[0]++;
-		}
-            }
-        }
-    }
-
-    if (!dstlen) /* compute length */
-        /* 4 * '\1' + key length */
-        return key_len[0] + key_len[1] + key_len[2] + key_len[3] + 4;
-
-    if (dstlen < key_len[0] + key_len[1] + key_len[2] + key_len[3] + 4 + 1)
-        return 0; /* overflow */
-
-    src = src_save;
-    srclen = srclen_save;
-
-    key_ptr[0] = dst;
-    key_ptr[1] = key_ptr[0] + key_len[0] + 1;
-    key_ptr[2] = key_ptr[1] + key_len[1] + 1;
-    key_ptr[3] = key_ptr[2] + key_len[2] + 1;
-
-    for (; srclen; srclen--, src++)
-    {
-        unsigned int i, decomposed_len = 1;/*wine_decompose(*src, dummy, 4);*/
-        dummy[0] = *src;
-        if (decomposed_len)
-        {
-            for (i = 0; i < decomposed_len; i++)
-            {
-                WCHAR wch = dummy[i];
-                unsigned int ce;
-
-                if ((flags & NORM_IGNORESYMBOLS) &&
-                    (get_char_type( CT_CTYPE1, wch ) & (C1_PUNCT | C1_SPACE)))
-                    continue;
-
-                if (flags & NORM_IGNORECASE) wch = casemap( nls_info.LowerCaseTable, wch );
-
-                ce = collation_table[collation_table[collation_table[wch >> 8] + ((wch >> 4) & 0x0f)] + (wch & 0xf)];
-                if (ce != (unsigned int)-1)
-                {
-                    WCHAR key;
-                    if ((key = ce >> 16))
-                    {
-                        *key_ptr[0]++ = key >> 8;
-                        *key_ptr[0]++ = key & 0xff;
-                    }
-                    /* make key 1 start from 2 */
-                    if ((key = (ce >> 8) & 0xff)) *key_ptr[1]++ = key + 1;
-                    /* make key 2 start from 2 */
-                    if ((key = (ce >> 4) & 0x0f)) *key_ptr[2]++ = key + 1;
-                    /* key 3 is always a character code */
-                    if (ce & 1)
-                    {
-                        if (wch >> 8) *key_ptr[3]++ = wch >> 8;
-                        if (wch & 0xff) *key_ptr[3]++ = wch & 0xff;
-                    }
-                }
-                else
-                {
-                    *key_ptr[0]++ = 0xff;
-                    *key_ptr[0]++ = 0xfe;
-                    if (wch >> 8) *key_ptr[0]++ = wch >> 8;
-                    if (wch & 0xff) *key_ptr[0]++ = wch & 0xff;
-                }
-            }
-        }
-    }
-
-    *key_ptr[0] = 1;
-    *key_ptr[1] = 1;
-    *key_ptr[2] = 1;
-    *key_ptr[3]++ = 1;
-    *key_ptr[3] = 0;
-    return key_ptr[3] - dst;
-}
-
-
 /* compose a full-width katakana. return consumed source characters. */
 static int compose_katakana( const WCHAR *src, int srclen, WCHAR *dst )
 {
@@ -2491,124 +2370,663 @@ static int map_to_halfwidth( WCHAR c, WCHAR *dst, int dstlen )
     return 1;
 }
 
-
-/* 32-bit collation element table format:
- * unicode weight - high 16 bit, diacritic weight - high 8 bit of low 16 bit,
- * case weight - high 4 bit of low 8 bit.
- */
-
-enum weight { UNICODE_WEIGHT, DIACRITIC_WEIGHT, CASE_WEIGHT };
-
-static unsigned int get_weight( WCHAR ch, enum weight type )
+enum sortkey_special_script
 {
-    unsigned int ret;
+    SORTKEY_UNSORTABLE  = 0,
+    SORTKEY_DIACRITIC   = 1,
+    SORTKEY_EXPANSION   = 2,
+    SORTKEY_JAPANESE    = 3,
+    SORTKEY_JAMO        = 4,
+    SORTKEY_CJK         = 5,
+    SORTKEY_PUNCTUATION = 6,
+    SORTKEY_SYMBOL_1    = 7,
+    SORTKEY_SYMBOL_2    = 8,
+    SORTKEY_SYMBOL_3    = 9,
+    SORTKEY_SYMBOL_4    = 10,
+    SORTKEY_SYMBOL_5    = 11,
+    SORTKEY_SYMBOL_6    = 12,
+};
 
-    ret = collation_table[collation_table[collation_table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
-    if (ret == ~0u) return ch;
+#define SORTKEY_MIN_WEIGHT 2
 
-    switch (type)
+const BYTE SORTKEY_FLAGS_EXTRA    = 0xc4; /* Extra data added to the flags values */
+const BYTE SORTKEY_FLAG_HIRAGANA  = 0x20; /* if bit is set then hiragana, else katakana */
+const BYTE SORTKEY_FLAG_LARGE     = 0x02; /* if bit is set then normal kana, else small kana */
+const BYTE SORTKEY_FLAG_FULLWIDTH = 0x01; /* if bit is set then full width, else half width */
+
+struct character_info
+{
+    BYTE weight_primary;
+    BYTE script_member;
+    BYTE weight_diacritic;
+    BYTE weight_case;
+};
+
+struct sortkey_data
+{
+    BYTE *buffer;
+    int buffer_pos;
+    int buffer_len;
+    BOOL is_compare_string;
+};
+
+static DWORD sortkey_get_exception(WCHAR ch, const struct sortguid *locale)
+{
+    if (locale && locale->except)
     {
-    case UNICODE_WEIGHT:   return ret >> 16;
-    case DIACRITIC_WEIGHT: return (ret >> 8) & 0xff;
-    case CASE_WEIGHT:      return (ret >> 4) & 0x0f;
-    default:               return 0;
+        DWORD *table = sort.keys + locale->except;
+        DWORD hi = ch >> 8;
+        DWORD lo = ch & 0xff;
+        if (table[hi] == hi * 0x100)
+            return 0;
+        if (sort.keys[table[hi] + lo] == sort.keys[hi * 0x100 + lo])
+            return 0;
+        return sort.keys[table[hi] + lo];
     }
+    return 0;
+}
+
+static void sortkey_get_char(struct character_info *info, WCHAR ch, const struct sortguid *locale)
+{
+    DWORD value = sortkey_get_exception(ch, locale);
+    if (!value)
+        value = sort.keys[ch];
+    info->weight_case = value >> 24;
+    info->weight_diacritic = (value >> 16) & 0xff;
+    info->script_member = (value >> 8) & 0xff;
+    info->weight_primary = value & 0xff;
+}
+
+static const WCHAR* sortkey_get_expansion(WCHAR ch)
+{
+    DWORD pos_info = sort.keys[ch];
+    unsigned int pos = pos_info >> 16;
+    const DWORD *ptr;
+    unsigned int count_expansion;
+    if ((WORD)pos_info != 0x200) /* Check for expansion magic number */
+        return NULL;
+    ptr = (const DWORD *)(sort.guids + sort.guid_count);
+    count_expansion = *ptr++;
+    if (pos >= count_expansion)
+        return NULL;
+    return (const WCHAR *)(ptr + pos);
 }
 
 
-static void inc_str_pos( const WCHAR **str, int *len, unsigned int *dpos, unsigned int *dlen )
+static BOOL sortkey_is_PUA(BYTE script_member)
 {
-    (*dpos)++;
-    if (*dpos == *dlen)
+    return script_member >= 0xa9 && script_member <= 0xaf;
+}
+
+static void sortkey_add_weight(struct sortkey_data *data, BYTE value)
+{
+    if (data->buffer_pos < data->buffer_len)
+        data->buffer[data->buffer_pos] = value;
+    data->buffer_pos++;
+}
+
+static void sortkey_add_case_weight(struct sortkey_data *data, int flags, BYTE value)
+{
+    if (flags & NORM_IGNORECASE)
+        value &= ~0x18;
+    if (flags & NORM_IGNOREWIDTH)
+        value &= ~0x01;
+
+    sortkey_add_weight(data, value);
+}
+
+static void sortkey_add_diacritic_weight(struct sortkey_data *data, BYTE value, int *last_weighted_pos)
+{
+    sortkey_add_weight(data, value);
+    if (value > SORTKEY_MIN_WEIGHT)
+        *last_weighted_pos = data->buffer_pos;
+}
+
+static void sortkey_handle_expansion_main(struct sortkey_data *data, int flags, WCHAR c, const struct sortguid *locale)
+{
+    struct character_info info;
+    const WCHAR *expansion = sortkey_get_expansion(c);
+    if (expansion)
     {
-        *dpos = *dlen = 0;
-        (*str)++;
-        (*len)--;
+        /* Expansion characters always follow default character logic, ignoring the script_member value */
+        sortkey_handle_expansion_main(data, flags, expansion[0], locale);
+        sortkey_handle_expansion_main(data, flags, expansion[1], locale);
+        return;
+    }
+    sortkey_get_char(&info, c, locale);
+    if (info.script_member != SORTKEY_UNSORTABLE)
+    {
+        sortkey_add_weight(data, info.script_member);
+        sortkey_add_weight(data, info.weight_primary);
+        if (sortkey_is_PUA(info.script_member))
+            sortkey_add_weight(data, info.weight_diacritic);
     }
 }
 
-
-static int compare_weights(int flags, const WCHAR *str1, int len1,
-                           const WCHAR *str2, int len2, enum weight type )
+static void sortkey_add_main_weights(struct sortkey_data *data, int flags, WCHAR c, const struct sortguid *locale)
 {
-    unsigned int ce1, ce2, dpos1 = 0, dpos2 = 0, dlen1 = 0, dlen2 = 0;
-    const WCHAR *dstr1 = NULL, *dstr2 = NULL;
+    struct character_info info;
 
-    while (len1 > 0 && len2 > 0)
+    sortkey_get_char(&info, c, locale);
+
+    switch (info.script_member)
     {
-        if (!dlen1 && !(dstr1 = get_decomposition( *str1, &dlen1 ))) dstr1 = str1;
-        if (!dlen2 && !(dstr2 = get_decomposition( *str2, &dlen2 ))) dstr2 = str2;
+    case SORTKEY_UNSORTABLE:
+        break;
 
+    case SORTKEY_EXPANSION:
+        sortkey_handle_expansion_main(data, flags, c, locale);
+        break;
+
+    case SORTKEY_DIACRITIC:
+        break;
+
+    case SORTKEY_JAPANESE:
+        if (info.weight_primary <= 1)
+        {
+            /* TODO Kana iteration/repeat characters not implemented yet */
+        }
+        else
+        {
+            sortkey_add_weight(data, 34);
+            sortkey_add_weight(data, info.weight_primary);
+        }
+        break;
+
+    case SORTKEY_JAMO:
+        sortkey_add_weight(data, info.weight_primary);
+        sortkey_add_weight(data, info.weight_diacritic);
+        break;
+
+    case SORTKEY_CJK:
+        sortkey_add_weight(data, 253);
+        sortkey_add_weight(data, info.weight_primary);
+        sortkey_add_weight(data, info.weight_diacritic);
+        break;
+
+    case SORTKEY_PUNCTUATION:
+        if ((flags & NORM_IGNORESYMBOLS) || !(flags & SORT_STRINGSORT))
+            break;
+
+        sortkey_add_weight(data, info.script_member);
+        sortkey_add_weight(data, info.weight_primary);
+        break;
+
+    case SORTKEY_SYMBOL_1:
+    case SORTKEY_SYMBOL_2:
+    case SORTKEY_SYMBOL_3:
+    case SORTKEY_SYMBOL_4:
+    case SORTKEY_SYMBOL_5:
+    case SORTKEY_SYMBOL_6:
         if (flags & NORM_IGNORESYMBOLS)
-        {
-            int skip = 0;
-            /* FIXME: not tested */
-            if (get_char_type( CT_CTYPE1, dstr1[dpos1] ) & (C1_PUNCT | C1_SPACE))
-            {
-                inc_str_pos( &str1, &len1, &dpos1, &dlen1 );
-                skip = 1;
-            }
-            if (get_char_type( CT_CTYPE1, dstr2[dpos2] ) & (C1_PUNCT | C1_SPACE))
-            {
-                inc_str_pos( &str2, &len2, &dpos2, &dlen2 );
-                skip = 1;
-            }
-            if (skip) continue;
-        }
+            break;
 
-       /* hyphen and apostrophe are treated differently depending on
-        * whether SORT_STRINGSORT specified or not
-        */
-        if (type == UNICODE_WEIGHT && !(flags & SORT_STRINGSORT))
-        {
-            if (dstr1[dpos1] == '-' || dstr1[dpos1] == '\'')
-            {
-                if (dstr2[dpos2] != '-' && dstr2[dpos2] != '\'')
-                {
-                    inc_str_pos( &str1, &len1, &dpos1, &dlen1 );
-                    continue;
-                }
-            }
-            else if (dstr2[dpos2] == '-' || dstr2[dpos2] == '\'')
-            {
-                inc_str_pos( &str2, &len2, &dpos2, &dlen2 );
-                continue;
-            }
-        }
+        sortkey_add_weight(data, info.script_member);
+        sortkey_add_weight(data, info.weight_primary);
+        break;
 
-        ce1 = get_weight( dstr1[dpos1], type );
-        if (!ce1)
-        {
-            inc_str_pos( &str1, &len1, &dpos1, &dlen1 );
-            continue;
-        }
-        ce2 = get_weight( dstr2[dpos2], type );
-        if (!ce2)
-        {
-            inc_str_pos( &str2, &len2, &dpos2, &dlen2 );
-            continue;
-        }
-
-        if (ce1 - ce2) return ce1 - ce2;
-
-        inc_str_pos( &str1, &len1, &dpos1, &dlen1 );
-        inc_str_pos( &str2, &len2, &dpos2, &dlen2 );
+    default:
+        sortkey_add_weight(data, info.script_member);
+        sortkey_add_weight(data, info.weight_primary);
+        if (sortkey_is_PUA(info.script_member)) /* PUA characters are handled differently */
+            sortkey_add_weight(data, info.weight_diacritic);
+        break;
     }
-    while (len1)
+}
+
+static void sortkey_handle_expansion_diacritic(struct sortkey_data *data, int flags, WCHAR c, int *last_weighted_pos, const struct sortguid *locale)
+{
+    struct character_info info;
+    const WCHAR *expansion = sortkey_get_expansion(c);
+    if (expansion)
     {
-        if (!dlen1 && !(dstr1 = get_decomposition( *str1, &dlen1 ))) dstr1 = str1;
-        ce1 = get_weight( dstr1[dpos1], type );
-        if (ce1) break;
-        inc_str_pos( &str1, &len1, &dpos1, &dlen1 );
+        /* Expansion characters always follow default character logic, ignoring the script_member value */
+        sortkey_handle_expansion_diacritic(data, flags, expansion[0], last_weighted_pos, locale);
+        sortkey_handle_expansion_diacritic(data, flags, expansion[1], last_weighted_pos, locale);
+        return;
     }
-    while (len2)
+    sortkey_get_char(&info, c, locale);
+    if (info.script_member != SORTKEY_UNSORTABLE)
     {
-        if (!dlen2 && !(dstr2 = get_decomposition( *str2, &dlen2 ))) dstr2 = str2;
-        ce2 = get_weight( dstr2[dpos2], type );
-        if (ce2) break;
-        inc_str_pos( &str2, &len2, &dpos2, &dlen2 );
+        if (!sortkey_is_PUA(info.script_member))
+            sortkey_add_diacritic_weight(data, info.weight_diacritic, last_weighted_pos);
     }
-    return len1 - len2;
+}
+
+static void sortkey_add_diacritic_weights(struct sortkey_data *data, int flags, WCHAR c, int *last_weighted_pos, int diacritic_start_pos, const struct sortguid *locale)
+{
+    struct character_info info;
+    int old_pos;
+
+    sortkey_get_char(&info, c, locale);
+
+    switch (info.script_member)
+    {
+    case SORTKEY_UNSORTABLE:
+        break;
+
+    case SORTKEY_EXPANSION:
+        sortkey_handle_expansion_diacritic(data, flags, c, last_weighted_pos, locale);
+        break;
+
+    case SORTKEY_DIACRITIC:
+        old_pos = data->buffer_pos - 1;
+        /*
+         * Diacritic weights are added to the previous weight, if there is one,
+         * rather than being concatenated after it. This may result in overflow,
+         * which is not protected against. */
+
+        if (old_pos >= diacritic_start_pos)
+        {
+            if (old_pos < data->buffer_len)
+            {
+                data->buffer[old_pos] += info.weight_diacritic; /* Overflow can happen, that's okay */
+                *last_weighted_pos = data->buffer_pos;
+            }
+        }
+        else
+            sortkey_add_diacritic_weight(data, info.weight_diacritic, last_weighted_pos);
+        break;
+
+    case SORTKEY_JAPANESE:
+        if (info.weight_primary <= 1)
+        {
+            /* TODO Kana iteration/repeat characters not implemented yet */
+        }
+        else
+            sortkey_add_diacritic_weight(data, info.weight_diacritic, last_weighted_pos);
+        break;
+
+    case SORTKEY_JAMO:
+    case SORTKEY_CJK:
+        sortkey_add_diacritic_weight(data, SORTKEY_MIN_WEIGHT, last_weighted_pos);
+        break;
+
+    case SORTKEY_PUNCTUATION:
+        if ((flags & NORM_IGNORESYMBOLS) || !(flags & SORT_STRINGSORT))
+            break;
+        sortkey_add_diacritic_weight(data, info.weight_diacritic, last_weighted_pos);
+        break;
+
+    case SORTKEY_SYMBOL_1:
+    case SORTKEY_SYMBOL_2:
+    case SORTKEY_SYMBOL_3:
+    case SORTKEY_SYMBOL_4:
+    case SORTKEY_SYMBOL_5:
+    case SORTKEY_SYMBOL_6:
+        if (!(flags & NORM_IGNORESYMBOLS))
+            sortkey_add_diacritic_weight(data, info.weight_diacritic, last_weighted_pos);
+        break;
+
+    default:
+        if (!sortkey_is_PUA(info.script_member)) /* PUA characters are handled differently */
+            sortkey_add_diacritic_weight(data, info.weight_diacritic, last_weighted_pos);
+        break;
+    }
+}
+
+static void sortkey_handle_expansion_case(struct sortkey_data *data, int flags, WCHAR c, const struct sortguid *locale)
+{
+    struct character_info info;
+    const WCHAR *expansion = sortkey_get_expansion(c);
+    if (expansion)
+    {
+        /* Expansion characters always follow default character logic, ignoring the script_member value */
+        sortkey_handle_expansion_case(data, flags, expansion[0], locale);
+        sortkey_handle_expansion_case(data, flags, expansion[1], locale);
+        return;
+    }
+    sortkey_get_char(&info, c, locale);
+    if (info.script_member != SORTKEY_UNSORTABLE)
+    {
+        sortkey_add_case_weight(data, flags, info.weight_case);
+    }
+}
+
+static void sortkey_add_case_weights(struct sortkey_data *data, int flags, WCHAR c, const struct sortguid *locale)
+{
+    struct character_info info;
+
+    sortkey_get_char(&info, c, locale);
+
+    switch (info.script_member)
+    {
+    case SORTKEY_UNSORTABLE:
+        break;
+
+    case SORTKEY_EXPANSION:
+        sortkey_handle_expansion_case(data, flags, c, locale);
+        break;
+
+    case SORTKEY_DIACRITIC:
+        break;
+
+    case SORTKEY_JAPANESE:
+        if (info.weight_primary <= 1)
+        {
+            /* TODO Kana iteration/repeat characters not implemented yet */
+        }
+        else
+            sortkey_add_case_weight(data, flags, SORTKEY_MIN_WEIGHT);
+        break;
+
+    case SORTKEY_CJK:
+        sortkey_add_case_weight(data, flags, SORTKEY_MIN_WEIGHT);
+        break;
+
+    case SORTKEY_PUNCTUATION:
+        if ((flags & NORM_IGNORESYMBOLS) || !(flags & SORT_STRINGSORT))
+            break;
+        sortkey_add_case_weight(data, flags, info.weight_case);
+        break;
+
+    case SORTKEY_SYMBOL_1:
+    case SORTKEY_SYMBOL_2:
+    case SORTKEY_SYMBOL_3:
+    case SORTKEY_SYMBOL_4:
+    case SORTKEY_SYMBOL_5:
+    case SORTKEY_SYMBOL_6:
+        if (!(flags & NORM_IGNORESYMBOLS))
+            sortkey_add_case_weight(data, flags, info.weight_case);
+        break;
+
+    case SORTKEY_JAMO:
+    default:
+        sortkey_add_case_weight(data, flags, info.weight_case);
+        break;
+    }
+}
+
+static void sortkey_add_special_weights(struct sortkey_data *data, int flags, WCHAR c, const struct sortguid *locale)
+{
+    struct character_info info;
+    BYTE weight_second;
+
+    sortkey_get_char(&info, c, locale);
+
+    if (info.script_member == SORTKEY_PUNCTUATION)
+    {
+        if ((flags & NORM_IGNORESYMBOLS) || (flags & SORT_STRINGSORT))
+            return;
+
+        weight_second = (BYTE)(info.weight_diacritic * 8 + info.weight_case);
+        sortkey_add_weight(data, info.weight_primary);
+        sortkey_add_weight(data, weight_second);
+    }
+}
+
+static void sortkey_add_extra_weights_small(struct sortkey_data *data, int flags, WCHAR c, const struct sortguid *locale)
+{
+    struct character_info info;
+
+    sortkey_get_char(&info, c, locale);
+
+    if (info.script_member == SORTKEY_JAPANESE)
+    {
+        if (info.weight_primary <= 1)
+        {
+            /* TODO Kana iteration/repeat characters not implemented yet */
+        }
+        else
+        {
+            if (!(flags & NORM_IGNORENONSPACE))
+            {
+                sortkey_add_weight(data, (info.weight_case & SORTKEY_FLAG_LARGE) | SORTKEY_FLAGS_EXTRA);
+            }
+        }
+    }
+}
+
+static void sortkey_add_extra_weights_kana(struct sortkey_data *data, int flags, WCHAR c, const struct sortguid *locale)
+{
+    struct character_info info;
+
+    sortkey_get_char(&info, c, locale);
+
+    if (info.script_member == SORTKEY_JAPANESE)
+    {
+        if (info.weight_primary <= 1)
+        {
+            /* TODO Kana iteration/repeat characters not implemented yet */
+        }
+        else
+        {
+            if (flags & NORM_IGNOREKANATYPE)
+                info.weight_case = 0;
+            sortkey_add_weight(data, (info.weight_case & SORTKEY_FLAG_HIRAGANA) | SORTKEY_FLAGS_EXTRA);
+        }
+    }
+}
+
+static void sortkey_add_extra_weights_width(struct sortkey_data *data, int flags, WCHAR c, const struct sortguid *locale)
+{
+    struct character_info info;
+
+    sortkey_get_char(&info, c, locale);
+
+    if (info.script_member == SORTKEY_JAPANESE)
+    {
+        if (info.weight_primary <= 1)
+        {
+            /* TODO Kana iteration/repeat characters not implemented yet */
+        }
+        else
+        {
+            if (flags & NORM_IGNOREWIDTH)
+                info.weight_case = 0;
+            sortkey_add_weight(data, (info.weight_case & SORTKEY_FLAG_FULLWIDTH) | SORTKEY_FLAGS_EXTRA);
+        }
+    }
+}
+
+static int sortkey_generate(int flags, const WCHAR *locale_name, const WCHAR *str, int str_len, BYTE *buffer, int buffer_len)
+{
+    static const BYTE SORTKEY_SEPARATOR = 1;
+    static const BYTE SORTKEY_TERMINATOR = 0;
+    static const BYTE SORTKEY_EXTRA_SEPARATOR = 0xff;
+    int i;
+    struct sortkey_data data;
+    const struct sortguid *locale = get_language_sort(locale_name);
+
+    data.buffer = buffer;
+    data.buffer_pos = 0;
+    data.buffer_len = buffer ? buffer_len : 0;
+    data.is_compare_string = FALSE;
+
+    if (str_len == -1)
+        str_len = wcslen(str);
+
+    /* Main weights */
+    for (i = 0; i < str_len; i++)
+        sortkey_add_main_weights(&data, flags, str[i], locale);
+    sortkey_add_weight(&data, SORTKEY_SEPARATOR);
+
+    /* Diacritic weights */
+    if (!(flags & NORM_IGNORENONSPACE))
+    {
+        int diacritic_start_pos = data.buffer_pos;
+        int last_weighted_pos = data.buffer_pos;
+        for (i = 0; i < str_len; i++)
+            sortkey_add_diacritic_weights(&data, flags, str[i], &last_weighted_pos, diacritic_start_pos, locale);
+        /* Remove all weights <= SORTKEY_MIN_WEIGHT from the end */
+        data.buffer_pos = last_weighted_pos;
+    }
+    sortkey_add_weight(&data, SORTKEY_SEPARATOR);
+
+    /* Case weights */
+    for (i = 0; i < str_len; i++)
+        sortkey_add_case_weights(&data, flags, str[i], locale);
+    sortkey_add_weight(&data, SORTKEY_SEPARATOR);
+
+    /* Extra weights */
+    for (i = 0; i < str_len; i++)
+        sortkey_add_extra_weights_small(&data, flags, str[i], locale);
+    sortkey_add_weight(&data, SORTKEY_EXTRA_SEPARATOR);
+    for (i = 0; i < str_len; i++)
+        sortkey_add_extra_weights_kana(&data, flags, str[i], locale);
+    sortkey_add_weight(&data, SORTKEY_EXTRA_SEPARATOR);
+    for (i = 0; i < str_len; i++)
+        sortkey_add_extra_weights_width(&data, flags, str[i], locale);
+    sortkey_add_weight(&data, SORTKEY_EXTRA_SEPARATOR);
+    sortkey_add_weight(&data, SORTKEY_SEPARATOR);
+
+    /* Special weights */
+    for (i = 0; i < str_len; i++)
+        sortkey_add_special_weights(&data, flags, str[i], locale);
+    sortkey_add_weight(&data, SORTKEY_TERMINATOR);
+
+    if (data.buffer_pos <= buffer_len || !buffer)
+        return data.buffer_pos;
+
+    return 0;
+}
+
+static int early_exit_sortkey_comparison(const struct sortkey_data* data1, const struct sortkey_data* data2, int start_index)
+{
+    int i;
+    int end_index = min(data1->buffer_pos, data2->buffer_pos);
+
+    for (i = start_index; i < end_index; i++)
+    {
+        BYTE weight1 = data1->buffer[i];
+        BYTE weight2 = data2->buffer[i];
+
+        if (weight1 > weight2) return CSTR_GREATER_THAN;
+        if (weight1 < weight2) return CSTR_LESS_THAN;
+    }
+
+    return CSTR_EQUAL;
+}
+
+static int sortkey_compare(int flags, const WCHAR *locale_name, const WCHAR *str1, int str1_len, const WCHAR *str2, int str2_len)
+{
+    int i1, i2;
+    int ret;
+    struct sortkey_data data1, data2;
+    const struct sortguid *locale = get_language_sort(locale_name);
+    int diacritic_start_pos1;
+    int last_weighted_pos1;
+    int diacritic_start_pos2;
+    int last_weighted_pos2;
+    int pos_weight_compare;
+
+    BYTE buffer1[10000];
+    BYTE buffer2[10000];
+
+    data1.buffer = buffer1;
+    data1.buffer_pos = 0;
+    data1.buffer_len = sizeof(buffer1);
+    data1.is_compare_string = TRUE;
+
+    data2.buffer = buffer2;
+    data2.buffer_pos = 0;
+    data2.buffer_len = sizeof(buffer2);
+    data2.is_compare_string = TRUE;
+
+    /* Main weights */
+    for (i1 = 0, i2 = 0; i1 < str1_len || i2 < str2_len; i1++, i2++)
+    {
+        int pos_weight_compare = min(data1.buffer_pos, data2.buffer_pos);
+        if (i1 < str1_len)
+        {
+            sortkey_add_main_weights(&data1, flags, str1[i1], locale);
+        }
+        if (i2 < str2_len)
+        {
+            sortkey_add_main_weights(&data2, flags, str2[i2], locale);
+        }
+
+        /* For clear differences we must return early without reading all characters. See tests. */
+        ret = early_exit_sortkey_comparison(&data1, &data2, pos_weight_compare);
+        if (ret != CSTR_EQUAL)
+            return ret;
+    }
+
+    if (data1.buffer_pos > data2.buffer_pos)
+        return CSTR_GREATER_THAN;
+    if (data1.buffer_pos < data2.buffer_pos)
+        return CSTR_LESS_THAN;
+
+    diacritic_start_pos1 = data1.buffer_pos;
+    last_weighted_pos1 = data1.buffer_pos;
+    diacritic_start_pos2 = data2.buffer_pos;
+    last_weighted_pos2 = data2.buffer_pos;
+    pos_weight_compare = min(data1.buffer_pos, data2.buffer_pos);
+
+    /* Diacritic weights */
+    if (!(flags & NORM_IGNORENONSPACE))
+    {
+        for (i1 = 0, i2 = 0; i1 < str1_len || i2 < str2_len; i1++, i2++)
+        {
+            if (i1 < str1_len)
+            {
+                sortkey_add_diacritic_weights(&data1, flags, str1[i1], &last_weighted_pos1, diacritic_start_pos1, locale);
+            }
+            if (i2 < str2_len)
+            {
+                sortkey_add_diacritic_weights(&data2, flags, str2[i2], &last_weighted_pos2, diacritic_start_pos2, locale);
+            }
+        }
+        data1.buffer_pos = last_weighted_pos1;
+        data2.buffer_pos = last_weighted_pos2;
+
+        ret = early_exit_sortkey_comparison(&data1, &data2, pos_weight_compare);
+        if (ret != CSTR_EQUAL)
+            return ret;
+
+        if (data1.buffer_pos > data2.buffer_pos)
+            return CSTR_GREATER_THAN;
+        if (data1.buffer_pos < data2.buffer_pos)
+            return CSTR_LESS_THAN;
+    }
+
+    /* Case weights */
+    for (i1 = 0, i2 = 0; i1 < str1_len || i2 < str2_len; i1++, i2++)
+    {
+        int pos_weight_compare = min(data1.buffer_pos, data2.buffer_pos);
+        if (i1 < str1_len)
+        {
+            sortkey_add_case_weights(&data1, flags, str1[i1], locale);
+        }
+        if (i2 < str2_len)
+        {
+            sortkey_add_case_weights(&data2, flags, str2[i2], locale);
+        }
+
+        ret = early_exit_sortkey_comparison(&data1, &data2, pos_weight_compare);
+        if (ret != CSTR_EQUAL)
+            return ret;
+    }
+
+    if (data1.buffer_pos > data2.buffer_pos)
+       return CSTR_GREATER_THAN;
+    if (data1.buffer_pos < data2.buffer_pos)
+       return CSTR_LESS_THAN;
+
+    /* Special weights */
+    for (i1 = 0, i2 = 0; i1 < str1_len || i2 < str2_len; i1++, i2++)
+    {
+        int pos_weight_compare = min(data1.buffer_pos, data2.buffer_pos);
+        if (i1 < str1_len)
+        {
+            sortkey_add_special_weights(&data1, flags, str1[i1], locale);
+        }
+        if (i2 < str2_len)
+        {
+            sortkey_add_special_weights(&data2, flags, str2[i2], locale);
+        }
+
+        ret = early_exit_sortkey_comparison(&data1, &data2, pos_weight_compare);
+        if (ret != CSTR_EQUAL)
+            return ret;
+    }
+
+    if (data1.buffer_pos > data2.buffer_pos)
+       return CSTR_GREATER_THAN;
+    if (data1.buffer_pos < data2.buffer_pos)
+       return CSTR_LESS_THAN;
+
+    return CSTR_EQUAL;
 }
 
 
@@ -3085,16 +3503,8 @@ INT WINAPI CompareStringEx( const WCHAR *locale, DWORD flags, const WCHAR *str1,
     if (len1 < 0) len1 = lstrlenW(str1);
     if (len2 < 0) len2 = lstrlenW(str2);
 
-    ret = compare_weights( flags, str1, len1, str2, len2, UNICODE_WEIGHT );
-    if (!ret)
-    {
-        if (!(flags & NORM_IGNORENONSPACE))
-            ret = compare_weights( flags, str1, len1, str2, len2, DIACRITIC_WEIGHT );
-        if (!ret && !(flags & NORM_IGNORECASE))
-            ret = compare_weights( flags, str1, len1, str2, len2, CASE_WEIGHT );
-    }
-    if (!ret) return CSTR_EQUAL;
-    return (ret < 0) ? CSTR_LESS_THAN : CSTR_GREATER_THAN;
+    ret = sortkey_compare(flags, locale, str1, len1, str2, len2);
+    return ret;
 }
 
 
@@ -5294,8 +5704,8 @@ INT WINAPI DECLSPEC_HOTPATCH LCMapStringEx( const WCHAR *locale, DWORD flags, co
         TRACE( "(%s,0x%08x,%s,%d,%p,%d)\n",
                debugstr_w(locale), flags, debugstr_wn(src, srclen), srclen, dst, dstlen );
 
-        if ((ret = get_sortkey( flags, src, srclen, (char *)dst, dstlen ))) ret++;
-        else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        if (!(ret = sortkey_generate(flags, locale, src, srclen, (BYTE *)dst, dstlen )))
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
         return ret;
     }
 
