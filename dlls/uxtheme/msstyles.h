@@ -49,6 +49,7 @@ typedef struct _THEME_PARTSTATE {
 struct _THEME_FILE;
 
 typedef struct _THEME_CLASS {
+    DWORD signature;
     HMODULE hTheme;
     struct _THEME_FILE* tf;
     WCHAR szAppName[MAX_THEME_APP_NAME];
@@ -63,7 +64,7 @@ typedef struct _THEME_IMAGE {
     WCHAR name[MAX_PATH];
     HBITMAP image;
     BOOL hasAlpha;
-    
+
     struct _THEME_IMAGE *next;
 } THEME_IMAGE, *PTHEME_IMAGE;
 

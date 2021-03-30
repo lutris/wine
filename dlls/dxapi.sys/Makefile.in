@@ -1,0 +1,6 @@
+MODULE    = dxapi.sys
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+
+RC_SRCS = version.rc

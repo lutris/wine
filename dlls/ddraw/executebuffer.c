@@ -296,7 +296,10 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer, struct d3d
                             ci->wStart, ci->wDest, ci->dwCount, ci->dwFlags);
 
                     if (ci->dwFlags & D3DPROCESSVERTICES_UPDATEEXTENTS)
-                        FIXME("D3DPROCESSVERTICES_UPDATEEXTENTS not implemented.\n");
+                    {
+                        static int once;
+                        if (!once++) FIXME("D3DPROCESSVERTICES_UPDATEEXTENTS not implemented.\n");
+                    }
                     if (ci->dwFlags & D3DPROCESSVERTICES_NOCOLOR)
                         FIXME("D3DPROCESSVERTICES_NOCOLOR not implemented.\n");
 

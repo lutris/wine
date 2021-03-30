@@ -761,4 +761,7 @@ extern void CDECL free_heap_bits( struct gdi_image_bits *bits ) DECLSPEC_HIDDEN;
 
 extern HMODULE gdi32_module DECLSPEC_HIDDEN;
 
+BOOL xform_has_rotate_and_uniform_scale_and_shear( const XFORM *xform ) DECLSPEC_HIDDEN;
+BOOL xform_decompose_rotation_and_translation( XFORM *xform, XFORM *rotation_and_translation ) DECLSPEC_HIDDEN;
+
 #endif /* __WINE_GDI_PRIVATE_H */
