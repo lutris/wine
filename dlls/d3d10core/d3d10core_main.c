@@ -29,11 +29,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d10core);
 HRESULT WINAPI DXGID3D10CreateDevice(HMODULE d3d11, IDXGIFactory *factory, IDXGIAdapter *adapter,
         unsigned int flags, const D3D_FEATURE_LEVEL *feature_levels, unsigned int level_count, void **device);
 
+HRESULT WINAPI D3D11CoreRegisterLayers(void);
+
 HRESULT WINAPI D3D10CoreRegisterLayers(void)
 {
     TRACE("\n");
 
-    return E_NOTIMPL;
+    return D3D11CoreRegisterLayers();
 }
 
 HRESULT WINAPI D3D10CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapter,

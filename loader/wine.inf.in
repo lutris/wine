@@ -550,7 +550,6 @@ HKCU,%CurrentVersion%\Run,,16
 HKCU,%CurrentVersionNT%\Winlogon,,16
 HKLM,%CurrentVersion%,"CommonFilesDir",,"%16427%"
 HKLM,%CurrentVersion%,"FirstInstallDateTime",1,21,81,7c,23
-HKLM,%CurrentVersion%,"ProductId",,"12345-oem-0000001-54321"
 HKLM,%CurrentVersion%,"ProgramFilesDir",,"%16422%"
 HKLM,%CurrentVersion%,"ProgramFilesPath",0x20000,"%%ProgramFiles%%"
 HKLM,%CurrentVersion%,"RegisteredOrganization",2,""
@@ -574,7 +573,6 @@ HKLM,%CurrentVersion%\Setup\WindowsFeatures\WindowsMediaVersion,,,"12.0.7601.188
 HKLM,%CurrentVersion%\Shell Extensions\Approved,,16
 HKLM,%CurrentVersion%\Uninstall,,16
 HKLM,%CurrentVersionNT%,"InstallDate",0x10003,1273299354
-HKLM,%CurrentVersionNT%,"ProductId",,"12345-oem-0000001-54321"
 HKLM,%CurrentVersionNT%,"RegisteredOrganization",2,""
 HKLM,%CurrentVersionNT%,"RegisteredOwner",2,""
 HKLM,%CurrentVersionNT%,"SystemRoot",,"%10%"
@@ -4201,12 +4199,10 @@ HKLM,"System\CurrentControlSet\Services\Winsock\Parameters",,16
 HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters\Protocol_Catalog9\Catalog_Entries",,16
 
 [VersionInfo]
-HKLM,%CurrentVersionNT%,"CurrentVersion",2,"6.1"
-HKLM,%CurrentVersionNT%,"CurrentMajorVersionNumber",0x10001,6
-HKLM,%CurrentVersionNT%,"CurrentMinorVersionNumber",0x10001,1
-HKLM,%CurrentVersionNT%,"CSDVersion",2,"Service Pack 1"
-HKLM,%CurrentVersionNT%,"CurrentBuild",2,"7601"
-HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"7601"
+HKLM,%CurrentVersionNT%,"CurrentVersion",2,"10.0"
+HKLM,%CurrentVersionNT%,"CSDVersion",2,""
+HKLM,%CurrentVersionNT%,"CurrentBuild",2,"17763"
+HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"17763"
 HKLM,%CurrentVersionNT%,"CurrentType",2,"Uniprocessor Free"
 HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
@@ -4215,16 +4211,16 @@ HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%,"ProductName",2,"Microsoft Windows 7"
+HKLM,%CurrentVersionNT%,"ProductName",2,"Microsoft Windows 10"
 HKLM,%Control%\ProductOptions,"ProductType",2,"WinNT"
-HKLM,%Control%\Windows,"CSDVersion",0x10003,0x100
+HKLM,%Control%\Windows,"CSDVersion",0x10003,0x0
 HKLM,%Control%\Session Manager\Environment,"OS",2,"Windows_NT"
 
 [VersionInfo.ntamd64]
-HKLM,%CurrentVersionNT%,"CurrentVersion",2,"6.1"
-HKLM,%CurrentVersionNT%,"CSDVersion",2,"Service Pack 1"
-HKLM,%CurrentVersionNT%,"CurrentBuild",2,"7601"
-HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"7601"
+HKLM,%CurrentVersionNT%,"CurrentVersion",2,"10.0"
+HKLM,%CurrentVersionNT%,"CSDVersion",2,""
+HKLM,%CurrentVersionNT%,"CurrentBuild",2,"17763"
+HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"17763"
 HKLM,%CurrentVersionNT%,"CurrentType",2,"Uniprocessor Free"
 HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
@@ -4233,9 +4229,9 @@ HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%,"ProductName",2,"Microsoft Windows 7"
+HKLM,%CurrentVersionNT%,"ProductName",2,"Microsoft Windows 10"
 HKLM,%Control%\ProductOptions,"ProductType",2,"WinNT"
-HKLM,%Control%\Windows,"CSDVersion",0x10003,0x100
+HKLM,%Control%\Windows,"CSDVersion",0x10003,0x0
 HKLM,%Control%\Session Manager\Environment,"OS",2,"Windows_NT"
 
 [Wow64]
@@ -4313,6 +4309,33 @@ HKLM,Software\Wine\LicenseInformation,"Shell-InBoxGames-Shanghai-EnableGame",0x1
 HKLM,Software\Wine\LicenseInformation,"Shell-InBoxGames-Solitaire-EnableGame",0x10001,0x00000001
 HKLM,Software\Wine\LicenseInformation,"Shell-InBoxGames-SpiderSolitaire-EnableGame",0x10001,0x00000001
 HKLM,Software\Wine\LicenseInformation,"Shell-PremiumInBoxGames-Chess-EnableGame",0x10001,0x00000001
+;;Likely want *80 and *90 too, but those require removing Wine's manifest files.
+HKCU,Software\Wine\DllOverrides,"atl100",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"msvcp100",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"msvcr100",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"vcomp100",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"atl110",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"msvcp110",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"msvcr110",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"vcomp110",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"atl120",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"msvcp120",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"msvcr120",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"vcomp120",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-conio-l1-1-0",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-heap-l1-1-0",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-locale-l1-1-0",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-math-l1-1-0",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-runtime-l1-1-0",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-stdio-l1-1-0",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-time-l1-1-0",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"atl140",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"concrt140",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"msvcp140",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"msvcr140",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"ucrtbase",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"vcomp140",0x2,"native,builtin"
+HKCU,Software\Wine\DllOverrides,"vcruntime140",0x2,"native,builtin"
 
 [ColorFiles]
 srgb color space profile.icm,"@%11%\mscms.dll,-1"

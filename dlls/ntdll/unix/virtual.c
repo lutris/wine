@@ -176,9 +176,7 @@ struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
 static void *teb_block;
 static void **next_free_teb;
 static int teb_block_pos;
-
-struct list teb_list = LIST_INIT( teb_list );
-pthread_rwlock_t teb_list_lock = PTHREAD_RWLOCK_INITIALIZER;
+static struct list teb_list = LIST_INIT( teb_list );
 
 #define ROUND_ADDR(addr,mask) ((void *)((UINT_PTR)(addr) & ~(UINT_PTR)(mask)))
 #define ROUND_SIZE(addr,size) (((SIZE_T)(size) + ((UINT_PTR)(addr) & page_mask) + page_mask) & ~page_mask)
@@ -2953,13 +2951,12 @@ static void init_teb( TEB *teb, PEB *peb )
     teb->StaticUnicodeString.Buffer = teb->StaticUnicodeBuffer;
     teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
     thread_data->esync_apc_fd = -1;
+    thread_data->fsync_apc_futex = NULL;
     thread_data->request_fd = -1;
     thread_data->reply_fd   = -1;
     thread_data->wait_fd[0] = -1;
     thread_data->wait_fd[1] = -1;
-    pthread_rwlock_wrlock( &teb_list_lock );
     list_add_head( &teb_list, &thread_data->entry );
-    pthread_rwlock_unlock( &teb_list_lock );
 }
 
 
@@ -3075,9 +3072,7 @@ void virtual_free_teb( TEB *teb )
     }
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
-    pthread_rwlock_wrlock( &teb_list_lock );
     list_remove( &thread_data->entry );
-    pthread_rwlock_unlock( &teb_list_lock );
     ptr = (char *)teb - teb_offset;
     *(void **)ptr = next_free_teb;
     next_free_teb = ptr;
@@ -3091,16 +3086,17 @@ void virtual_free_teb( TEB *teb )
 NTSTATUS virtual_clear_tls_index( ULONG index )
 {
     struct ntdll_thread_data *thread_data;
+    sigset_t sigset;
 
     if (index < TLS_MINIMUM_AVAILABLE)
     {
-        pthread_rwlock_rdlock( &teb_list_lock );
+        server_enter_uninterrupted_section( &virtual_mutex, &sigset );
         LIST_FOR_EACH_ENTRY( thread_data, &teb_list, struct ntdll_thread_data, entry )
         {
             TEB *teb = CONTAINING_RECORD( thread_data, TEB, GdiTebBatch );
             teb->TlsSlots[index] = 0;
         }
-        pthread_rwlock_unlock( &teb_list_lock );
+        server_leave_uninterrupted_section( &virtual_mutex, &sigset );
     }
     else
     {
@@ -3108,13 +3104,13 @@ NTSTATUS virtual_clear_tls_index( ULONG index )
         if (index >= 8 * sizeof(NtCurrentTeb()->Peb->TlsExpansionBitmapBits))
             return STATUS_INVALID_PARAMETER;
 
-        pthread_rwlock_rdlock( &teb_list_lock );
+        server_enter_uninterrupted_section( &virtual_mutex, &sigset );
         LIST_FOR_EACH_ENTRY( thread_data, &teb_list, struct ntdll_thread_data, entry )
         {
             TEB *teb = CONTAINING_RECORD( thread_data, TEB, GdiTebBatch );
             if (teb->TlsExpansionSlots) teb->TlsExpansionSlots[index] = 0;
         }
-        pthread_rwlock_unlock( &teb_list_lock );
+        server_leave_uninterrupted_section( &virtual_mutex, &sigset );
     }
     return STATUS_SUCCESS;
 }
@@ -3746,6 +3742,19 @@ void CDECL virtual_release_address_space(void)
     }
 
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+}
+
+BOOL CDECL __wine_needs_override_large_address_aware(void)
+{
+    static int needs_override = -1;
+
+    if (needs_override == -1)
+    {
+        const char *str = getenv( "WINE_LARGE_ADDRESS_AWARE" );
+
+        needs_override = !str || atoi(str) == 1;
+    }
+    return needs_override;
 }
 
 

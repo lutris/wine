@@ -90,6 +90,7 @@
 #include "winternl.h"
 #include "unix_private.h"
 #include "esync.h"
+#include "fsync.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
@@ -1758,6 +1759,20 @@ static struct unix_funcs unix_funcs =
 #endif
     DbgUiIssueRemoteBreakin,
     RtlGetSystemTimePrecise,
+    RtlWaitOnAddress,
+    RtlWakeAddressAll,
+    RtlWakeAddressSingle,
+    fast_RtlpWaitForCriticalSection,
+    fast_RtlpUnWaitCriticalSection,
+    fast_RtlDeleteCriticalSection,
+    fast_RtlTryAcquireSRWLockExclusive,
+    fast_RtlAcquireSRWLockExclusive,
+    fast_RtlTryAcquireSRWLockShared,
+    fast_RtlAcquireSRWLockShared,
+    fast_RtlReleaseSRWLockExclusive,
+    fast_RtlReleaseSRWLockShared,
+    fast_RtlWakeConditionVariable,
+    fast_wait_cv,
     ntdll_atan,
     ntdll_ceil,
     ntdll_cos,
@@ -1795,6 +1810,7 @@ static void start_main_thread(void)
     signal_init_thread( teb );
     dbg_init();
     startup_info_size = server_init_process();
+    fsync_init();
     esync_init();
     virtual_map_user_shared_data();
     init_cpu_info();
@@ -2131,6 +2147,9 @@ void __wine_main( int argc, char *argv[], char *envp[] )
 #endif
 #ifdef RLIMIT_AS
     set_max_limit( RLIMIT_AS );
+#endif
+#ifdef RLIMIT_NICE
+    set_max_limit( RLIMIT_NICE );
 #endif
 
     virtual_init();
