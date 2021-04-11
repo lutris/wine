@@ -64,6 +64,9 @@
 #ifdef HAVE_SYS_PRCTL_H
 # include <sys/prctl.h>
 #endif
+#ifdef HAVE_SYS_RESOURCE_H
+# include <sys/resource.h>
+#endif
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
@@ -95,6 +98,7 @@
 #include "wine/debug.h"
 #include "unix_private.h"
 #include "esync.h"
+#include "fsync.h"
 #include "ddk/wdm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(server);
@@ -1525,6 +1529,8 @@ size_t server_init_process(void)
     int ret, reply_pipe;
     struct sigaction sig_act;
     size_t info_size;
+    struct rlimit rlimit;
+    int nice_limit = 0;
 
     server_pid = -1;
     if (env_socket)
@@ -1586,10 +1592,19 @@ size_t server_init_process(void)
 
     reply_pipe = init_thread_pipe();
 
+#ifdef RLIMIT_NICE
+    if (!getrlimit( RLIMIT_NICE, &rlimit ))
+    {
+        if (rlimit.rlim_cur <= 40) nice_limit = 20 - rlimit.rlim_cur;
+        else if (rlimit.rlim_cur == -1 /* RLIMIT_INFINITY */) nice_limit = -20;
+    }
+#endif
+
     SERVER_START_REQ( init_first_thread )
     {
         req->unix_pid    = getpid();
         req->unix_tid    = get_unix_tid();
+        req->nice_limit  = nice_limit;
         req->teb         = wine_server_client_ptr( NtCurrentTeb() );
         req->peb         = wine_server_client_ptr( NtCurrentTeb()->Peb );
 #ifdef __i386__
@@ -1660,7 +1675,8 @@ void server_init_process_done(void)
 #ifdef __APPLE__
     send_server_task_port();
 #endif
-    if (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) virtual_set_large_address_space();
+    if (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE
+            || __wine_needs_override_large_address_aware()) virtual_set_large_address_space();
 
     /* Install signal handlers; this cannot be done earlier, since we cannot
      * send exceptions to the debugger before the create process event that
@@ -1764,6 +1780,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
     HANDLE port;
     NTSTATUS ret;
     int fd = remove_fd_from_cache( handle );
+
+    if (do_fsync())
+        fsync_close( handle );
 
     if (do_esync())
         esync_close( handle );

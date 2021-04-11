@@ -27,10 +27,6 @@
 #include "wine/server.h"
 #include "wine/list.h"
 
-#ifdef __APPLE__
-# include <mach/semaphore.h>
-#endif
-
 #ifdef __i386__
 static const enum cpu_type client_cpu = CPU_x86;
 #elif defined(__x86_64__)
@@ -56,6 +52,7 @@ struct ntdll_thread_data
     struct debug_info *debug_info;    /* info for debugstr functions */
     void              *start_stack;   /* stack for thread startup */
     int                esync_apc_fd;  /* fd to wait on for user APCs */
+    int               *fsync_apc_futex;
     int                request_fd;    /* fd for sending server requests */
     int                reply_fd;      /* fd for receiving server replies */
     int                wait_fd[2];    /* fd for sleeping server requests */
@@ -64,14 +61,6 @@ struct ntdll_thread_data
     struct list        entry;         /* entry in TEB list */
     PRTL_THREAD_START_ROUTINE start;  /* thread entry point */
     void              *param;         /* thread entry point parameter */
-#ifdef __APPLE__
-    semaphore_t        tid_alert_sem; /* Mach semaphore for thread-id alerts */
-#else
-#ifdef __linux__
-    int                tid_alert_futex; /* futex for thread-id alerts */
-#endif
-    HANDLE             tid_alert_event; /* event for thread-id alerts */
-#endif
 };
 
 C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
@@ -100,7 +89,19 @@ extern void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULON
 extern NTSTATUS (WINAPI *pKiUserExceptionDispatcher)(EXCEPTION_RECORD*,CONTEXT*) DECLSPEC_HIDDEN;
 extern void     (WINAPI *pLdrInitializeThunk)(CONTEXT*,void**,ULONG_PTR,ULONG_PTR) DECLSPEC_HIDDEN;
 extern void     (WINAPI *pRtlUserThreadStart)( PRTL_THREAD_START_ROUTINE entry, void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit, int timeout ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlTryAcquireSRWLockExclusive( RTL_SRWLOCK *lock ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlTryAcquireSRWLockShared( RTL_SRWLOCK *lock ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlAcquireSRWLockShared( RTL_SRWLOCK *lock ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlReleaseSRWLockExclusive( RTL_SRWLOCK *lock ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlReleaseSRWLockShared( RTL_SRWLOCK *lock ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_RtlWakeConditionVariable( RTL_CONDITION_VARIABLE *variable, int count ) DECLSPEC_HIDDEN;
 extern LONGLONG CDECL fast_RtlGetSystemTimePrecise(void) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL fast_wait_cv( RTL_CONDITION_VARIABLE *variable, const void *value,
+                                    const LARGE_INTEGER *timeout ) DECLSPEC_HIDDEN;
 
 extern USHORT * CDECL get_unix_codepage_data(void) DECLSPEC_HIDDEN;
 extern void CDECL get_locales( WCHAR *sys, WCHAR *user ) DECLSPEC_HIDDEN;
@@ -111,8 +112,6 @@ extern NTSTATUS CDECL unwind_builtin_dll( ULONG type, struct _DISPATCHER_CONTEXT
 
 extern void CDECL set_show_dot_files( BOOL enable ) DECLSPEC_HIDDEN;
 
-extern struct list teb_list DECLSPEC_HIDDEN;
-extern pthread_rwlock_t teb_list_lock DECLSPEC_HIDDEN;
 extern const char *home_dir DECLSPEC_HIDDEN;
 extern const char *data_dir DECLSPEC_HIDDEN;
 extern const char *build_dir DECLSPEC_HIDDEN;
@@ -488,5 +487,7 @@ static inline int ntdll_wcsnicmp( const WCHAR *str1, const WCHAR *str2, int n )
 #define wcsupr(str)        ntdll_wcsupr(str)
 #define towupper(c)        ntdll_towupper(c)
 #define towlower(c)        ntdll_towlower(c)
+
+BOOL CDECL __wine_needs_override_large_address_aware(void);
 
 #endif /* __NTDLL_UNIX_PRIVATE_H */

@@ -70,7 +70,7 @@ BOOL usexvidmode = TRUE;
 BOOL usexrandr = TRUE;
 BOOL usexcomposite = TRUE;
 BOOL use_xkb = TRUE;
-BOOL use_take_focus = TRUE;
+BOOL use_take_focus = FALSE;
 BOOL use_primary_selection = FALSE;
 BOOL use_system_cursors = TRUE;
 BOOL show_systray = TRUE;
@@ -168,6 +168,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_WM_STATE_ABOVE",
     "_NET_WM_STATE_DEMANDS_ATTENTION",
     "_NET_WM_STATE_FULLSCREEN",
+    "_NET_WM_STATE_HIDDEN",
     "_NET_WM_STATE_MAXIMIZED_HORZ",
     "_NET_WM_STATE_MAXIMIZED_VERT",
     "_NET_WM_STATE_SKIP_PAGER",
