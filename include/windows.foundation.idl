@@ -21,11 +21,16 @@
 #endif
 
 import "inspectable.idl";
-/* import "asyncinfo.idl"; */
+import "asyncinfo.idl";
 import "windowscontracts.idl";
 /* import "eventtoken.idl"; */
 /* import "ivectorchangedeventargs.idl"; */
 import "windows.foundation.collections.idl";
+
+typedef struct EventRegistrationToken
+{
+    __int64 value;
+} EventRegistrationToken;
 
 namespace Windows {
     namespace Foundation {
@@ -111,6 +116,16 @@ namespace Windows {
         interface IStringable : IInspectable
         {
             HRESULT ToString([out, retval] HSTRING *value);
+        }
+    }
+}
+
+namespace Windows {
+    namespace Foundation {
+        declare {
+            interface Windows.Foundation.AsyncOperationCompletedHandler<boolean>;
+            interface Windows.Foundation.IAsyncOperation<boolean>;
+            interface Windows.Foundation.Collections.IVectorView<HSTRING>;
         }
     }
 }

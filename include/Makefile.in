@@ -15,11 +15,13 @@ SOURCES = \
 	amsi.idl \
 	amstream.idl \
 	amvideo.idl \
+	apiset.h \
 	appcompatapi.h \
 	appmgmt.h \
 	appmodel.h \
 	asferr.h \
 	asptlb.idl \
+	asyncinfo.idl \
 	asynot.idl \
 	asysta.idl \
 	atlbase.h \
@@ -90,7 +92,9 @@ SOURCES = \
 	cryptuiapi.h \
 	ctfutb.idl \
 	ctxtcall.idl \
+	cuda.h \
 	custcntl.h \
+	cuviddec.h \
 	cvconst.h \
 	cvttyp.idl \
 	d2d1.idl \
@@ -533,11 +537,15 @@ SOURCES = \
 	ntddvdeo.h \
 	ntdef.h \
 	ntdsapi.h \
+	ntifs.h \
 	ntlsa.h \
 	ntquery.h \
 	ntsecapi.h \
 	ntsecpkg.h \
 	ntstatus.h \
+	nvapi.h \
+	nvcuvid.h \
+	nvencodeapi.h \
 	oaidl.idl \
 	objbase.h \
 	objectarray.idl \
@@ -666,6 +674,7 @@ SOURCES = \
 	srrestoreptapi.h \
 	sspi.h \
 	stdole2.idl \
+	stdole32.idl \
 	stgprop.h \
 	sti.h \
 	storage.h \
@@ -748,8 +757,13 @@ SOURCES = \
 	windns.h \
 	windows.foundation.collections.idl \
 	windows.foundation.idl \
+	windows.gaming.input.idl \
+	windows.gaming.input.forcefeedback.idl \
+	windows.globalization.idl \
 	windows.h \
 	windows.media.speechsynthesis.idl \
+	windows.system.idl \
+	windows.system.userprofile.idl \
 	windowscontracts.idl \
 	windowsx.h \
 	wine/debug.h \
@@ -827,7 +841,9 @@ SOURCES = \
 	wtypes.idl \
 	wuapi.idl \
 	x3daudio.h \
+	xact.h \
 	xact3.h \
+	xact2wb.h \
 	xact3wb.h \
 	xapo.idl \
 	xapofx.h \

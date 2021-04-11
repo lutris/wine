@@ -981,6 +981,12 @@ void *signal_init_syscalls(void)
     return __wine_syscall_dispatcher;
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
 
 /***********************************************************************
  *           init_thread_context
