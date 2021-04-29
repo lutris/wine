@@ -56,6 +56,7 @@ enum wine_internal_message
     WM_WINE_MOUSE_LL_HOOK,
     WM_WINE_CLIPCURSOR,
     WM_WINE_UPDATEWINDOWSTATE,
+    WM_WINE_SETWINDOWCLOAKED,
     WM_WINE_FIRST_DRIVER_MSG = 0x80001000,  /* range of messages reserved for the USER driver */
     WM_WINE_LAST_DRIVER_MSG = 0x80001fff
 };
@@ -102,6 +103,7 @@ typedef struct tagUSER_DRIVER {
     void   (CDECL *pSetFocus)(HWND);
     void   (CDECL *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
     void   (CDECL *pSetParent)(HWND,HWND,HWND);
+    DWORD  (CDECL *pSetWindowCompositionAttribute)(HWND,DWORD,void*);
     void   (CDECL *pSetWindowRgn)(HWND,HRGN,BOOL);
     void   (CDECL *pSetWindowIcon)(HWND,UINT,HICON);
     void   (CDECL *pSetWindowStyle)(HWND,INT,STYLESTRUCT*);
@@ -369,6 +371,45 @@ typedef struct
 } CURSORICONFILEDIR;
 
 #include "poppack.h"
+
+/* Undocumented structure for (Get|Set)WindowCompositionAttribute */
+struct WINCOMPATTRDATA
+{
+    DWORD attribute;
+    void *pData;
+    ULONG dataSize;
+};
+enum
+{
+    WCA_UNDEFINED = 0,
+    WCA_NCRENDERING_ENABLED = 1,
+    WCA_NCRENDERING_POLICY = 2,
+    WCA_TRANSITIONS_FORCEDISABLED = 3,
+    WCA_ALLOW_NCPAINT = 4,
+    WCA_CAPTION_BUTTON_BOUNDS = 5,
+    WCA_NONCLIENT_RTL_LAYOUT = 6,
+    WCA_FORCE_ICONIC_REPRESENTATION = 7,
+    WCA_EXTENDED_FRAME_BOUNDS = 8,
+    WCA_HAS_ICONIC_BITMAP = 9,
+    WCA_THEME_ATTRIBUTES = 10,
+    WCA_NCRENDERING_EXILED = 11,
+    WCA_NCADORNMENTINFO = 12,
+    WCA_EXCLUDED_FROM_LIVEPREVIEW = 13,
+    WCA_VIDEO_OVERLAY_ACTIVE = 14,
+    WCA_FORCE_ACTIVEWINDOW_APPEARANCE = 15,
+    WCA_DISALLOW_PEEK = 16,
+    WCA_CLOAK = 17,
+    WCA_CLOAKED = 18,
+    WCA_ACCENT_POLICY = 19,
+    WCA_FREEZE_REPRESENTATION = 20,
+    WCA_EVER_UNCLOAKED = 21,
+    WCA_VISUAL_OWNER = 22,
+    WCA_HOLOGRAPHIC = 23,
+    WCA_EXCLUDED_FROM_DDA = 24,
+    WCA_PASSIVEUPDATEMODE = 25,
+    WCA_USEDARKMODECOLORS = 26,
+    WCA_LAST
+};
 
 extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse ) DECLSPEC_HIDDEN;
 extern BOOL get_icon_size( HICON handle, SIZE *size ) DECLSPEC_HIDDEN;

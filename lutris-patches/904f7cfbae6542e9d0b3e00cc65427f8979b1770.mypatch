@@ -1,0 +1,65 @@
+From 904f7cfbae6542e9d0b3e00cc65427f8979b1770 Mon Sep 17 00:00:00 2001
+From: Paul Gofman <pgofman@codeweavers.com>
+Date: Wed, 24 Mar 2021 18:51:13 +0100
+Subject: [PATCH] ws2_32: Copy send buffer data for async send in
+ WS2_ConnectEx().
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=50738
+Signed-off-by: Paul Gofman <pgofman@codeweavers.com>
+Signed-off-by: Jacek Caban <jacek@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/ws2_32/socket.c     | 11 +++++++++--
+ dlls/ws2_32/tests/sock.c |  1 +
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/ws2_32/socket.c b/dlls/ws2_32/socket.c
+index 28b14e71c9c3..715c96097fcc 100644
+--- a/dlls/ws2_32/socket.c
++++ b/dlls/ws2_32/socket.c
+@@ -3447,14 +3447,18 @@ static BOOL WINAPI WS2_ConnectEx(SOCKET s, const struct WS_sockaddr* name, int n
+     else if (ret == WSAEINPROGRESS)
+     {
+         struct ws2_async *wsa;
++        DWORD size;
++
+         ULONG_PTR cvalue = (((ULONG_PTR)ov->hEvent & 1) == 0) ? (ULONG_PTR)ov : 0;
+ 
+         _enable_event(SOCKET2HANDLE(s), FD_CONNECT|FD_READ|FD_WRITE,
+                       FD_CONNECT,
+                       FD_WINE_CONNECTED|FD_WINE_LISTENING);
+ 
++        size = offsetof( struct ws2_async, iovec[1] ) + sendBufLen;
++
+         /* Indirectly call WSASend */
+-        if (!(wsa = (struct ws2_async *)alloc_async_io( offsetof( struct ws2_async, iovec[1] ), WS2_async_send )))
++        if (!(wsa = (struct ws2_async *)alloc_async_io( size, WS2_async_send )))
+         {
+             SetLastError(WSAEFAULT);
+         }
+@@ -3473,9 +3477,12 @@ static BOOL WINAPI WS2_ConnectEx(SOCKET s, const struct WS_sockaddr* name, int n
+             wsa->n_iovecs    = sendBuf ? 1 : 0;
+             wsa->first_iovec = 0;
+             wsa->completion_func = NULL;
+-            wsa->iovec[0].iov_base = sendBuf;
++            wsa->iovec[0].iov_base = &wsa->iovec[1];
+             wsa->iovec[0].iov_len  = sendBufLen;
+ 
++            if (sendBufLen)
++                memcpy( wsa->iovec[0].iov_base, sendBuf, sendBufLen );
++
+             status = register_async( ASYNC_TYPE_WRITE, wsa->hSocket, &wsa->io, ov->hEvent,
+                                       NULL, (void *)cvalue, iosb );
+             if (status != STATUS_PENDING) HeapFree(GetProcessHeap(), 0, wsa);
+diff --git a/dlls/ws2_32/tests/sock.c b/dlls/ws2_32/tests/sock.c
+index cab25baf1d1e..cedbf423d970 100644
+--- a/dlls/ws2_32/tests/sock.c
++++ b/dlls/ws2_32/tests/sock.c
+@@ -7296,6 +7296,7 @@ static void test_ConnectEx(void)
+     buffer[1] = '2';
+     buffer[2] = '3';
+     bret = pConnectEx(connector, (struct sockaddr*)&address, addrlen, buffer, 3, &bytesReturned, &overlapped);
++    memset(buffer, 0, 3);
+     ok(bret == FALSE && WSAGetLastError() == ERROR_IO_PENDING, "ConnectEx failed: "
+         "returned %d + errno %d\n", bret, WSAGetLastError());
+     dwret = WaitForSingleObject(overlapped.hEvent, 15000);

@@ -234,6 +234,10 @@ static inline VkSurfaceKHR wine_surface_to_handle(struct wine_surface *surface)
 void *wine_vk_get_device_proc_addr(const char *name) DECLSPEC_HIDDEN;
 void *wine_vk_get_instance_proc_addr(const char *name) DECLSPEC_HIDDEN;
 
+BOOL wine_vk_device_extension_faked(const char *name) DECLSPEC_HIDDEN;
+unsigned int wine_vk_device_extension_faked_count(void) DECLSPEC_HIDDEN;
+const VkExtensionProperties* wine_vk_device_extension_faked_idx(unsigned int idx) DECLSPEC_HIDDEN;
+
 BOOL wine_vk_device_extension_supported(const char *name) DECLSPEC_HIDDEN;
 BOOL wine_vk_instance_extension_supported(const char *name) DECLSPEC_HIDDEN;
 

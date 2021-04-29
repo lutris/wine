@@ -1,0 +1,40 @@
+From 30435fb4029914fa9f003283f34eea5328c638d5 Mon Sep 17 00:00:00 2001
+From: Andrew Eikum <aeikum@codeweavers.com>
+Date: Thu, 25 Mar 2021 14:49:57 -0500
+Subject: [PATCH] mscoree: Update Wine Mono to 6.1.1.
+
+---
+ dlls/appwiz.cpl/addons.c       | 4 ++--
+ dlls/mscoree/mscoree_private.h | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/appwiz.cpl/addons.c b/dlls/appwiz.cpl/addons.c
+index b2e726422da..e3004c972f1 100644
+--- a/dlls/appwiz.cpl/addons.c
++++ b/dlls/appwiz.cpl/addons.c
+@@ -57,10 +57,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
+ #define GECKO_SHA "???"
+ #endif
+ 
+-#define MONO_VERSION "5.1.1"
++#define MONO_VERSION "6.1.1"
+ #if defined(__i386__) || defined(__x86_64__)
+ #define MONO_ARCH "x86"
+-#define MONO_SHA "74541265b9385842bc22bba2bb4b90bf1d3fd8b4788b6676140700bebacb9227"
++#define MONO_SHA "ac3b14beafde34b8482287e597000113dc06a915f32c9fd06c77eb819079e38b"
+ #else
+ #define MONO_ARCH ""
+ #define MONO_SHA "???"
+diff --git a/dlls/mscoree/mscoree_private.h b/dlls/mscoree/mscoree_private.h
+index da587285cfe..b5dff1e3935 100644
+--- a/dlls/mscoree/mscoree_private.h
++++ b/dlls/mscoree/mscoree_private.h
+@@ -45,7 +45,7 @@ extern HRESULT assembly_get_runtime_version(ASSEMBLY *assembly, LPSTR *version)
+ extern HRESULT assembly_get_vtable_fixups(ASSEMBLY *assembly, VTableFixup **fixups, DWORD *count) DECLSPEC_HIDDEN;
+ extern HRESULT assembly_get_native_entrypoint(ASSEMBLY *assembly, NativeEntryPointFunc *func) DECLSPEC_HIDDEN;
+ 
+-#define WINE_MONO_VERSION "5.1.1"
++#define WINE_MONO_VERSION "6.1.1"
+ 
+ /* Mono embedding */
+ typedef struct _MonoDomain MonoDomain;
