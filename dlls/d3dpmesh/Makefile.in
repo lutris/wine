@@ -1,0 +1,8 @@
+MODULE    = d3dpmesh.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	d3dpmesh_main.c
+
+RC_SRCS = version.rc

@@ -45,6 +45,7 @@
 #define IDS_SHELL_FOLDER                16
 #define IDS_LINKS_TO                    17
 #define IDS_WINECFG_TITLE_APP           18   /* App specific title */
+#define IDS_TAB_STAGING                 19
 #define IDI_WINECFG                     100
 #define IDI_LOGO                        102
 #define IDD_ABOUTCFG                    107
@@ -54,6 +55,7 @@
 #define IDD_DLLCFG                      111
 #define IDD_DRIVECFG                    112
 #define IDD_DESKTOP_INTEGRATION         115
+#define IDD_STAGING                     116
 #define IDC_WINVER                      1012
 #define IDC_DESKTOP_WIDTH               1023
 #define IDC_DESKTOP_HEIGHT              1024
@@ -209,6 +211,13 @@
 #define IDC_SYSPARAMS_INACTIVE_TITLE_GRADIENT 8429
 #define IDC_SYSPARAMS_MENU_HIGHLIGHT    8430
 #define IDC_SYSPARAMS_MENUBAR           8431
+
+/* Staging tab */
+#define IDC_ENABLE_CSMT                 9001
+#define IDC_ENABLE_VAAPI                9002
+#define IDC_ENABLE_EAX                  9003
+#define IDC_ENABLE_HIDEWINE             9004
+#define IDC_ENABLE_GTK3                 9005
 
 /* About tab */
 #define IDC_ABT_OWNER                8432

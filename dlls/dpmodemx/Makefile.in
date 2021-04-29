@@ -1,0 +1,8 @@
+MODULE    = dpmodemx.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	dpmodemx_main.c
+
+RC_SRCS = version.rc

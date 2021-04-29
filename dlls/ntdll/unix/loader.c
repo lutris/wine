@@ -89,6 +89,7 @@
 #include "winioctl.h"
 #include "winternl.h"
 #include "unix_private.h"
+#include "esync.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
@@ -1568,20 +1569,6 @@ static struct unix_funcs unix_funcs =
 #endif
     DbgUiIssueRemoteBreakin,
     RtlGetSystemTimePrecise,
-    RtlWaitOnAddress,
-    RtlWakeAddressAll,
-    RtlWakeAddressSingle,
-    fast_RtlpWaitForCriticalSection,
-    fast_RtlpUnWaitCriticalSection,
-    fast_RtlDeleteCriticalSection,
-    fast_RtlTryAcquireSRWLockExclusive,
-    fast_RtlAcquireSRWLockExclusive,
-    fast_RtlTryAcquireSRWLockShared,
-    fast_RtlAcquireSRWLockShared,
-    fast_RtlReleaseSRWLockExclusive,
-    fast_RtlReleaseSRWLockShared,
-    fast_RtlWakeConditionVariable,
-    fast_wait_cv,
     ntdll_atan,
     ntdll_ceil,
     ntdll_cos,
@@ -1628,6 +1615,7 @@ static void start_main_thread(void)
     dbg_init();
     server_init_process();
     startup_info_size = server_init_thread( teb->Peb, &suspend );
+    esync_init();
     virtual_map_user_shared_data();
     init_cpu_info();
     init_files();
@@ -1960,6 +1948,8 @@ void __wine_main( int argc, char *argv[], char *envp[] )
 #endif
 
     virtual_init();
+    signal_init_early();
+
     init_environment( argc, argv, envp );
 
 #ifdef __APPLE__
