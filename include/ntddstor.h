@@ -214,7 +214,8 @@ typedef enum _STORAGE_QUERY_TYPE {
 
 typedef enum _STORAGE_PROPERTY_ID {
     StorageDeviceProperty = 0,
-    StorageAdapterProperty
+    StorageAdapterProperty = 1,
+    StorageDeviceSeekPenaltyProperty = 7,
 } STORAGE_PROPERTY_ID, *PSTORAGE_PROPERTY_ID;
 
 typedef struct _STORAGE_PROPERTY_QUERY {
@@ -271,6 +272,12 @@ typedef struct _STORAGE_ADAPTER_DESCRIPTOR {
     USHORT                      BusMajorVersion;
     USHORT                      BusMinorVersion;
 } STORAGE_ADAPTER_DESCRIPTOR, *PSTORAGE_ADAPTER_DESCRIPTOR;
+
+typedef struct _DEVICE_SEEK_PENALTY_DESCRIPTOR {
+    ULONG                       Version;
+    ULONG                       Size;
+    BOOLEAN                     IncursSeekPenalty;
+} DEVICE_SEEK_PENALTY_DESCRIPTOR, *PDEVICE_SEEK_PENALTY_DESCRIPTOR;
 
 #ifdef __cplusplus
 }
