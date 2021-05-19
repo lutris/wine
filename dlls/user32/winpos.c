@@ -740,7 +740,7 @@ MINMAXINFO WINPOS_GetMinMaxInfo( HWND hwnd )
 
     if ((monitor = MonitorFromWindow( hwnd, MONITOR_DEFAULTTOPRIMARY )))
     {
-        RECT rc_work;
+        RECT rc_work, rc_primary;
         MONITORINFO mon_info;
 
         mon_info.cbSize = sizeof(mon_info);
@@ -754,8 +754,9 @@ MINMAXINFO WINPOS_GetMinMaxInfo( HWND hwnd )
                 rc_work = mon_info.rcWork;
         }
 
-        if (MinMax.ptMaxSize.x == GetSystemMetrics(SM_CXSCREEN) + 2 * xinc &&
-            MinMax.ptMaxSize.y == GetSystemMetrics(SM_CYSCREEN) + 2 * yinc)
+        rc_primary = get_primary_monitor_rect();
+        if (MinMax.ptMaxSize.x == (rc_primary.right - rc_primary.left) + 2 * xinc &&
+            MinMax.ptMaxSize.y == (rc_primary.bottom - rc_primary.top) + 2 * yinc)
         {
             MinMax.ptMaxSize.x = (rc_work.right - rc_work.left) + 2 * xinc;
             MinMax.ptMaxSize.y = (rc_work.bottom - rc_work.top) + 2 * yinc;
@@ -1110,6 +1111,9 @@ static BOOL show_window( HWND hwnd, INT cmd )
         default:
             goto done;
     }
+
+    if (showFlag && !wasVisible && ((style & (WS_CAPTION | WS_MAXIMIZE | WS_MAXIMIZE)) == WS_CAPTION))
+        swp |= SWP_FRAMECHANGED;
 
     if ((showFlag != wasVisible || cmd == SW_SHOWNA) && cmd != SW_SHOWMAXIMIZED && !(swp & SWP_STATECHANGED))
     {
@@ -1528,13 +1532,21 @@ void WINAPI SetInternalWindowPos( HWND hwnd, UINT showCmd,
  */
 static BOOL can_activate_window( HWND hwnd )
 {
+    DWORD cloaked = 0;
     LONG style;
 
     if (!hwnd) return FALSE;
     style = GetWindowLongW( hwnd, GWL_STYLE );
     if (!(style & WS_VISIBLE)) return FALSE;
     if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return FALSE;
-    return !(style & WS_DISABLED);
+    if (style & WS_DISABLED) return FALSE;
+    SERVER_START_REQ( get_window_cloaked )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        if (!wine_server_call( req )) cloaked = reply->cloaked;
+    }
+    SERVER_END_REQ;
+    return !cloaked;
 }
 
 
