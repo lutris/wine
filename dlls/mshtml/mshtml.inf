@@ -111,6 +111,7 @@ HKCR,"giffile\shell\open\ddeexec",,,"""file:%%1"",,-1,,,,,"
 HKCR,"giffile\shell\open\ddeexec\Application",,,"IExplore"
 HKCR,"giffile\shell\open\ddeexec\Topic",,,"WWW_OpenURL"
 ;; HKCR,"giffile\DefaultIcon",,,"%16422%\Internet Explorer\iexplore.exe,9"
+HKCU,Software\Wine\FileOpenBlacklist\.gif,"iexplore",,"""%16422%\Internet Explorer\iexplore.exe"" -nohome"
 
 ;; GZIP
 HKCR,"MIME\Database\Content Type\application/x-gzip","Extension",,".gz"
@@ -158,6 +159,7 @@ HKCR,"jpegfile\shell\open\ddeexec",,,"""file:%%1"",,-1,,,,,"
 HKCR,"jpegfile\shell\open\ddeexec\Application",,,"IExplore"
 HKCR,"jpegfile\shell\open\ddeexec\Topic",,,"WWW_OpenURL"
 ;; HKCR,"jpegfile\DefaultIcon",,,"%16422%\Internet Explorer\iexplore.exe,8"
+HKCU,Software\Wine\FileOpenBlacklist\.jpe,"iexplore",,"""%16422%\Internet Explorer\iexplore.exe"" -nohome"
 
 ;; JPEG
 HKCR,"MIME\Database\Content Type\image/jpeg","CLSID",,"%CLSID_HTMLDocument%"
@@ -173,6 +175,7 @@ HKCR,"jpegfile\shell\open\ddeexec",,,"""file:%%1"",,-1,,,,,"
 HKCR,"jpegfile\shell\open\ddeexec\Application",,,"IExplore"
 HKCR,"jpegfile\shell\open\ddeexec\Topic",,,"WWW_OpenURL"
 ;; HKCR,"jpegfile\DefaultIcon",,,"%16422%\Internet Explorer\iexplore.exe,8"
+HKCU,Software\Wine\FileOpenBlacklist\.jpeg,"iexplore",,"""%16422%\Internet Explorer\iexplore.exe"" -nohome"
 
 ;; JPG
 HKCR,".jpg",,2,"jpegfile"
@@ -184,6 +187,7 @@ HKCR,"jpegfile\shell\open\ddeexec",,,"""file:%%1"",,-1,,,,,"
 HKCR,"jpegfile\shell\open\ddeexec\Application",,,"IExplore"
 HKCR,"jpegfile\shell\open\ddeexec\Topic",,,"WWW_OpenURL"
 ;; HKCR,"jpegfile\DefaultIcon",,,"%16422%\Internet Explorer\iexplore.exe,8"
+HKCU,Software\Wine\FileOpenBlacklist\.jpg,"iexplore",,"""%16422%\Internet Explorer\iexplore.exe"" -nohome"
 
 ;; MHTML
 HKCR,"MIME\Database\Content Type\message/rfc822","CLSID",,"%CLSID_MHTMLDocument%"
@@ -221,6 +225,7 @@ HKCR,"pjpegfile\shell\open\ddeexec",,,"""file:%%1"",,-1,,,,,"
 HKCR,"pjpegfile\shell\open\ddeexec\Application",,,"IExplore"
 HKCR,"pjpegfile\shell\open\ddeexec\Topic",,,"WWW_OpenURL"
 ;; HKCR,"pjpegfile\DefaultIcon",,,"%16422%\Internet Explorer\iexplore.exe,8"
+HKCU,Software\Wine\FileOpenBlacklist\.jfif,"iexplore",,"""%16422%\Internet Explorer\iexplore.exe"" -nohome"
 
 ;; PNG
 HKCR,"MIME\Database\Content Type\image/png","Extension",,".png"
@@ -234,6 +239,7 @@ HKCR,"pngfile\shell\open\ddeexec",,,"""file:%%1"",,-1,,,,,"
 HKCR,"pngfile\shell\open\ddeexec\Application",,,"IExplore"
 HKCR,"pngfile\shell\open\ddeexec\Topic",,,"WWW_OpenURL"
 ;; HKCR,"pngfile\DefaultIcon",,,"%16422%\Internet Explorer\iexplore.exe,9"
+HKCU,Software\Wine\FileOpenBlacklist\.png,"iexplore",,"""%16422%\Internet Explorer\iexplore.exe"" -nohome"
 
 ;; PS
 HKCR,"MIME\Database\Content Type\application/postscript","Extension",,".ps"

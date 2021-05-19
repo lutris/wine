@@ -1850,6 +1850,34 @@ static void test_topology_loader(void)
                 }
             },
 
+            MF_CONNECT_ALLOW_DECODER &~ MF_CONNECT_ALLOW_CONVERTER,
+            MF_E_INVALIDMEDIATYPE,
+            LOADER_TODO,
+        },
+
+        {
+            /* MP3 -> PCM */
+            &MFMediaType_Audio,
+            {
+                {
+                  { &MF_MT_SUBTYPE, WAVE_FORMAT_MPEGLAYER3 },
+                  { &MF_MT_AUDIO_NUM_CHANNELS, 2 },
+                  { &MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100 },
+                  { &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 16000 },
+                  { &MF_MT_AUDIO_BLOCK_ALIGNMENT, 1 },
+                }
+            },
+            {
+                {
+                  { &MF_MT_SUBTYPE, WAVE_FORMAT_PCM },
+                  { &MF_MT_AUDIO_NUM_CHANNELS, 1 },
+                  { &MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100 },
+                  { &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 44100 },
+                  { &MF_MT_AUDIO_BLOCK_ALIGNMENT, 1 },
+                  { &MF_MT_AUDIO_BITS_PER_SAMPLE, 8 },
+                }
+            },
+
             MF_CONNECT_ALLOW_DECODER,
             S_OK,
             LOADER_EXPECTED_DECODER | LOADER_TODO,

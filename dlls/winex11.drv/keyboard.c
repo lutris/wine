@@ -37,6 +37,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <string.h>
+#include <limits.h>
 
 #define NONAMELESSUNION
 
@@ -76,7 +77,7 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION kbd_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-static char KEYBOARD_MapDeadKeysym(KeySym keysym);
+static WCHAR KEYBOARD_MapDeadKeysym(KeySym keysym);
 
 /* Keyboard translation tables */
 #define MAIN_LEN 49
@@ -452,13 +453,13 @@ static const char main_key_BY[MAIN_LEN][4] =
 };
 
 
-/*** Russian keyboard layout (contributed by Pavel Roskin) */
+/*** Russian keyboard layout */
 static const char main_key_RU[MAIN_LEN][4] =
 {
- "`~","1!","2@","3#","4$","5%","6^","7&","8*","9(","0)","-_","=+",
- "qQ\xca\xea","wW\xc3\xe3","eE\xd5\xf5","rR\xcb\xeb","tT\xc5\xe5","yY\xce\xee","uU\xc7\xe7","iI\xdb\xfb","oO\xdd\xfd","pP\xda\xfa","[{\xc8\xe8","]}\xdf\xff",
- "aA\xc6\xe6","sS\xd9\xf9","dD\xd7\xf7","fF\xc1\xe1","gG\xd0\xf0","hH\xd2\xf2","jJ\xcf\xef","kK\xcc\xec","lL\xc4\xe4",";:\xd6\xf6","'\"\xdc\xfc","\\|",
- "zZ\xd1\xf1","xX\xde\xfe","cC\xd3\xf3","vV\xcd\xed","bB\xc9\xe9","nN\xd4\xf4","mM\xd8\xf8",",<\xc2\xe2",".>\xc0\xe0","/?"
+ "\xb8\xa8","1!","2\"","3\xb9","4;","5%","6:","7?","8*","9(","0)","-_","=+",
+ "\xe9\xc9","\xf6\xd6","\xf3\xd3","\xea\xca","\xe5\xc5","\xed\xcd","\xe3\xc3","\xf8\xd8","\xf9\xf9","\xe7\xc7","\xf5\xd5","\xfa\xda",
+ "\xf4\xd4","\xec\xcc","\xfb\xdb","\xe2\xc2","\xe0\xc0","\xef\xcf","\xee\xce","\xeb\xcb","\xe4\xc4","\xe6\xc6","\xfd\xdd","\\/",
+ "\xff\xdf","\xf7\xd7","\xf1\xd1","\xec\xcc","\xe8\xc8","\xf2\xd2","\xfc\xdc","\xe1\xc1","\xfe\xde",".,"
 };
 
 /*** Russian keyboard layout (phantom key version) */
@@ -743,11 +744,11 @@ static const char main_key_LA[MAIN_LEN][4] =
 /*** Lithuanian keyboard layout (setxkbmap lt) */
 static const char main_key_LT_B[MAIN_LEN][4] =
 {
- "`~","\xe0\xc0","\xe8\xc8","\xe6\xc6","\xeb\xcb","\xe1\xc1","\xf0\xd0","\xf8\xd8","\xfb\xdb","\xa5(","\xb4)","-_","\xfe\xde",
+ "`~","\xe0\xc0","\xe8\xc8","\xe6\xc6","\xeb\xcb","\xe1\xc1","\xf0\xd0","\xf8\xd8","\xfb\xdb","\x84(","\x93)","-_","\xfe\xde",
  "qQ","wW","eE","rR","tT","yY","uU","iI","oO","pP","[{","]}",
  "aA","sS","dD","fF","gG","hH","jJ","kK","lL",";:","'\"","\\|",
  "zZ","xX","cC","vV","bB","nN","mM",",<",".>","/?",
- "\xaa\xac"
+ "\x96\x80"
 };
 
 /*** Turkish keyboard Layout */
@@ -1148,7 +1149,7 @@ static void X11DRV_send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, DWORD f
     input.u.ki.time        = time;
     input.u.ki.dwExtraInfo = 0;
 
-    __wine_send_input( hwnd, &input );
+    __wine_send_input( hwnd, &input, SEND_HWMSG_RAWINPUT|SEND_HWMSG_WINDOW );
 }
 
 
@@ -1417,6 +1418,55 @@ BOOL X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     return TRUE;
 }
 
+static WCHAR translate_keysym( Display *display, KeySym keysym )
+{
+#ifdef HAVE_XKB
+    char buf[16];
+    int count = 0;
+#endif
+    WCHAR ret;
+
+	/* Don't translate some function keysyms */
+	/* Those who have 0s at byte 1 and 2, 253 or 255 at byte 3 */
+	/* Let pass only dead characters in 254 */
+	if ((keysym >> 8) == 0xFD || (keysym >> 8) == 0xFF) {
+		return 0;
+	}
+	if ((keysym >> 8) == 0xFE && (keysym < 0xFE50 || keysym >= 0xFE90)) {
+	    return 0;
+	}
+	/* Don't translate vendor keysyms */
+	if (keysym & 0x10000000) {
+		return 0;
+	}
+	// Don't match space bar
+	if (keysym == ' ') {
+		return 0;
+	}
+
+#ifdef HAVE_XKB
+    if (use_xkb && (count = XkbTranslateKeySym(display, &keysym, 0, buf, sizeof(buf), NULL)))
+        count = MultiByteToWideChar(CP_UNIXCP, 0, buf, count, &ret, 1);
+
+    if (count != 1)
+#endif
+    {
+        TRACE("XKB could not translate keysym %04lx\n", keysym);
+        /* FIXME: query what keysym is used as Mode_switch, fill XKeyEvent
+         * with appropriate ShiftMask and Mode_switch, use XLookupString
+         * to get character in the local encoding.
+         */
+        if (keysym <= 0xFF)
+            ret = keysym;
+        else if (0x01000000 <= keysym && keysym <= 0x0100FFFF)
+            ret = keysym & 0xFFFF;
+        else
+            ret = KEYBOARD_MapDeadKeysym(keysym);
+    }
+
+    return ret;
+}
+
 /**********************************************************************
  *		X11DRV_KEYBOARD_DetectLayout
  *
@@ -1433,8 +1483,8 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
   KeySym keysym = 0;
   const char (*lkey)[MAIN_LEN][4];
   unsigned max_seq = 0;
-  int max_score = 0, ismatch = 0;
-  char ckey[256][4];
+  int max_score = INT_MIN, ismatch = 0;
+  WCHAR ckey[256][4];
 
   syms = keysyms_per_keycode;
   if (syms > 4) {
@@ -1447,35 +1497,25 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
       /* get data for keycode from X server */
       for (i = 0; i < syms; i++) {
         if (!(keysym = keycode_to_keysym (display, keyc, i))) continue;
-	/* Allow both one-byte and two-byte national keysyms */
-	if ((keysym < 0x8000) && (keysym != ' '))
-        {
-#ifdef HAVE_XKB
-            if (!use_xkb || !XkbTranslateKeySym(display, &keysym, 0, &ckey[keyc][i], 1, NULL))
-#endif
-            {
-                TRACE("XKB could not translate keysym %04lx\n", keysym);
-                /* FIXME: query what keysym is used as Mode_switch, fill XKeyEvent
-                 * with appropriate ShiftMask and Mode_switch, use XLookupString
-                 * to get character in the local encoding.
-                 */
-                ckey[keyc][i] = keysym & 0xFF;
-            }
-        }
-	else {
-	  ckey[keyc][i] = KEYBOARD_MapDeadKeysym(keysym);
-	}
+        ckey[keyc][i] = translate_keysym( display, keysym );
       }
   }
 
   for (current = 0; main_key_tab[current].comment; current++) {
+    DWORD codepage;
+    WCHAR lkeyW[MAIN_LEN][4];
+
     TRACE("Attempting to match against \"%s\"\n", main_key_tab[current].comment);
     match = 0;
     mismatch = 0;
     score = 0;
     seq = 0;
     lkey = main_key_tab[current].key;
+    memset(lkeyW, 0, sizeof(lkeyW));
     pkey = -1;
+    if (!GetLocaleInfoW(main_key_tab[current].lcid, LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
+                        (LPWSTR)&codepage, sizeof(codepage)/sizeof(WCHAR)))
+      codepage = CP_ACP;
     for (keyc = min_keycode; keyc <= max_keycode; keyc++) {
       if (ckey[keyc][0]) {
 	/* search for a match in layout table */
@@ -1484,10 +1524,13 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
 	/* the table, it's okay that the X server has "3#£", for example) */
 	/* however, the score will be higher for longer matches */
 	for (key = 0; key < MAIN_LEN; key++) {
-	  for (ok = 0, i = 0; (ok >= 0) && (i < syms); i++) {
-	    if ((*lkey)[key][i] && ((*lkey)[key][i] == ckey[keyc][i]))
+          if ((*lkey)[key][0] && !lkeyW[key][0])
+            MultiByteToWideChar(codepage, 0, (*lkey)[key], 4, lkeyW[key], 4);
+
+	  for (ok = 0, i = 0; (ok >= 0) && (i < syms) && lkeyW[key][i]; i++) {
+	    if (lkeyW[key][i] == ckey[keyc][i])
 	      ok++;
-	    if ((*lkey)[key][i] && ((*lkey)[key][i] != ckey[keyc][i]))
+	    else
 	      ok = -1;
 	  }
 	  if (ok > 0) {
@@ -1502,11 +1545,7 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
 	  if (key > pkey) seq++;
 	  pkey = key;
 	} else {
-          /* print spaces instead of \0's */
-          char str[5];
-          for (i = 0; i < 4; i++) str[i] = ckey[keyc][i] ? ckey[keyc][i] : ' ';
-          str[4] = 0;
-          TRACE_(key)("mismatch for keycode %u, got %s\n", keyc, str);
+          TRACE_(key)("mismatch for keycode %u, got %s\n", keyc, debugstr_wn(ckey[keyc], 4));
           mismatch++;
           score -= syms;
 	}
@@ -1613,9 +1652,11 @@ void X11DRV_InitKeyboard( Display *display )
     XKeyEvent e2;
     WORD scan, vkey;
     int keyc, i, keyn, syms;
-    char ckey[4]={0,0,0,0};
+    WCHAR ckey[4] = { 0 };
     const char (*lkey)[MAIN_LEN][4];
+    WCHAR lkeyW[MAIN_LEN][4];
     char vkey_used[256] = { 0 };
+    DWORD codepage;
 
     /* Ranges of OEM, function key, and character virtual key codes.
      * Don't include those handled specially in X11DRV_ToUnicodeEx and
@@ -1672,7 +1713,11 @@ void X11DRV_InitKeyboard( Display *display )
     /* Detect the keyboard layout */
     X11DRV_KEYBOARD_DetectLayout( display );
     lkey = main_key_tab[kbd_layout].key;
+    memset(lkeyW, 0, sizeof(lkeyW));
     syms = (keysyms_per_keycode > 4) ? 4 : keysyms_per_keycode;
+    if (!GetLocaleInfoW(main_key_tab[kbd_layout].lcid, LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
+                        (LPWSTR)&codepage, sizeof(codepage)/sizeof(WCHAR)))
+      codepage = CP_ACP;
 
     /* Now build two conversion arrays :
      * keycode -> vkey + scancode + extended
@@ -1713,26 +1758,14 @@ void X11DRV_InitKeyboard( Display *display )
 	      int maxlen=0,maxval=-1,ok;
 	      for (i=0; i<syms; i++) {
 		keysym = keycode_to_keysym(display, keyc, i);
-		if ((keysym<0x8000) && (keysym!=' '))
-                {
-#ifdef HAVE_XKB
-                    if (!use_xkb || !XkbTranslateKeySym(display, &keysym, 0, &ckey[i], 1, NULL))
-#endif
-                    {
-                        /* FIXME: query what keysym is used as Mode_switch, fill XKeyEvent
-                         * with appropriate ShiftMask and Mode_switch, use XLookupString
-                         * to get character in the local encoding.
-                         */
-                        ckey[i] = (keysym <= 0x7F) ? keysym : 0;
-                    }
-		} else {
-		  ckey[i] = KEYBOARD_MapDeadKeysym(keysym);
-		}
+		ckey[i] = translate_keysym(display, keysym);
 	      }
 	      /* find key with longest match streak */
 	      for (keyn=0; keyn<MAIN_LEN; keyn++) {
-		for (ok=(*lkey)[keyn][i=0]; ok&&(i<4); i++)
-		  if ((*lkey)[keyn][i] && (*lkey)[keyn][i]!=ckey[i]) ok=0;
+	        if ((*lkey)[keyn][0] && !lkeyW[keyn][0])
+	          MultiByteToWideChar(codepage, 0, (*lkey)[keyn], 4, lkeyW[keyn], 4);
+		for (ok=lkeyW[keyn][i=0]; ok&&(i<4); i++)
+		  if (lkeyW[keyn][i] && lkeyW[keyn][i]!=ckey[i]) ok=0;
 		if (!ok) i--; /* we overshot */
 		if (ok||(i>maxlen)) {
 		  maxlen=i; maxval=keyn;
@@ -1751,7 +1784,7 @@ void X11DRV_InitKeyboard( Display *display )
         TRACE("keycode %u => vkey %04X\n", e2.keycode, vkey);
         keyc2vkey[e2.keycode] = vkey;
         keyc2scan[e2.keycode] = scan;
-        if ((vkey & 0xff) && vkey_used[(vkey & 0xff)])
+        if ((vkey & 0xff) && !(vkey & 0x100) && vkey_used[(vkey & 0xff)])
             WARN("vkey %04X is being used by more than one keycode\n", vkey);
         vkey_used[(vkey & 0xff)] = 1;
     } /* for */
@@ -1977,13 +2010,24 @@ BOOL X11DRV_MappingNotify( HWND dummy, XEvent *event )
 {
     HWND hwnd;
 
-    XRefreshKeyboardMapping(&event->xmapping);
-    X11DRV_InitKeyboard( event->xmapping.display );
+    switch (event->xmapping.request)
+    {
+    case MappingModifier:
+    case MappingKeyboard:
+        XRefreshKeyboardMapping( &event->xmapping );
+        X11DRV_InitKeyboard( event->xmapping.display );
 
-    hwnd = GetFocus();
-    if (!hwnd) hwnd = GetActiveWindow();
-    PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST,
-                 0 /*FIXME*/, (LPARAM)X11DRV_GetKeyboardLayout(0));
+        hwnd = GetFocus();
+        if (!hwnd) hwnd = GetActiveWindow();
+        PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST,
+                     0 /*FIXME*/, (LPARAM)X11DRV_GetKeyboardLayout(0));
+        break;
+
+    case MappingPointer:
+        X11DRV_InitMouse( event->xmapping.display );
+        break;
+    }
+
     return TRUE;
 }
 
@@ -2339,76 +2383,264 @@ INT CDECL X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
 /***********************************************************************
  *		X11DRV_KEYBOARD_MapDeadKeysym
  */
-static char KEYBOARD_MapDeadKeysym(KeySym keysym)
+static WCHAR KEYBOARD_MapDeadKeysym(KeySym keysym)
 {
 	switch (keysym)
 	    {
 	/* symbolic ASCII is the same as defined in rfc1345 */
-#ifdef XK_dead_tilde
-	    case XK_dead_tilde :
-#endif
-	    case 0x1000FE7E : /* Xfree's XK_Dtilde */
-		return '~';	/* '? */
-#ifdef XK_dead_acute
-	    case XK_dead_acute :
-#endif
-	    case 0x1000FE27 : /* Xfree's XK_Dacute_accent */
-		return 0xb4;	/* '' */
-#ifdef XK_dead_circumflex
-	    case XK_dead_circumflex:
-#endif
-	    case 0x1000FE5E : /* Xfree's XK_Dcircumflex_accent */
-		return '^';	/* '> */
+	/* cases are sorted by macro values */
 #ifdef XK_dead_grave
 	    case XK_dead_grave :
 #endif
 	    case 0x1000FE60 : /* Xfree's XK_Dgrave_accent */
-		return '`';	/* '! */
+		return 0x0060;	/* '! */
+
+#ifdef XK_dead_acute
+	    case XK_dead_acute :
+#endif
+	    case 0x1000FE27 : /* Xfree's XK_Dacute_accent */
+		return 0x00b4;	/* '' */
+
+#ifdef XK_dead_circumflex
+	    case XK_dead_circumflex:
+#endif
+	    case 0x1000FE5E : /* Xfree's XK_Dcircumflex_accent */
+		return 0x005e;	/* '> */
+
+#ifdef XK_dead_tilde
+	    case XK_dead_tilde :
+#endif
+	    case 0x1000FE7E : /* Xfree's XK_Dtilde */
+		return 0x007e;	/* '? */
+
+#ifdef XK_dead_macron
+	    case XK_dead_macron :
+	        return 0x00af;	/* 'm */
+#endif
+
+#ifdef XK_dead_breve
+	    case XK_dead_breve :
+	        return 0x02d8;	/* '( */
+#endif
+
+#ifdef XK_dead_abovedot
+	    case XK_dead_abovedot :
+	        return 0x02d9;	/* '. */
+#endif
+
 #ifdef XK_dead_diaeresis
 	    case XK_dead_diaeresis :
 #endif
 	    case 0x1000FE22 : /* Xfree's XK_Ddiaeresis */
-		return 0xa8;	/* ': */
-#ifdef XK_dead_cedilla
-	    case XK_dead_cedilla :
-	        return 0xb8;	/* ', */
-#endif
-#ifdef XK_dead_macron
-	    case XK_dead_macron :
-	        return '-';	/* 'm isn't defined on iso-8859-x */
-#endif
-#ifdef XK_dead_breve
-	    case XK_dead_breve :
-	        return 0xa2;	/* '( */
-#endif
-#ifdef XK_dead_abovedot
-	    case XK_dead_abovedot :
-	        return 0xff;	/* '. */
-#endif
+		return 0x00a8;	/* ': */
+
 #ifdef XK_dead_abovering
 	    case XK_dead_abovering :
-	        return '0';	/* '0 isn't defined on iso-8859-x */
+	        return 0x02da;	/* '0 */
 #endif
+
 #ifdef XK_dead_doubleacute
 	    case XK_dead_doubleacute :
-	        return 0xbd;	/* '" */
+	        return 0x02dd;	/* '" */
 #endif
+
 #ifdef XK_dead_caron
 	    case XK_dead_caron :
-	        return 0xb7;	/* '< */
+	        return 0x02c7;	/* '< */
 #endif
+
+#ifdef XK_dead_cedilla
+	    case XK_dead_cedilla :
+	        return 0x00b8;	/* ', */
+#endif
+
 #ifdef XK_dead_ogonek
 	    case XK_dead_ogonek :
-	        return 0xb2;	/* '; */
+	        return 0x02db;	/* '; */
 #endif
-/* FIXME: I don't know this three.
+
+#ifdef XK_dead_iota
 	    case XK_dead_iota :
-	        return 'i';
+	        return 0x037a; /* unknown */
+#endif
+
+#ifdef XK_dead_voiced_sound
 	    case XK_dead_voiced_sound :
-	        return 'v';
+	        return 0x309b;	/* unknown */
+#endif
+
+#ifdef XK_dead_semivoiced_sound
 	    case XK_dead_semivoiced_sound :
-	        return 's';
-*/
+	        return 0x309c;	/* unknown */
+#endif
+
+/* Modifiers below don't have an independent form in X11 compose files.
+ * Maybe we should not return them as Windows doesn't seem to have them. */
+#ifdef XK_dead_belowdot
+	    case XK_dead_belowdot :
+	        return 0x0323;
+#endif
+
+#ifdef XK_dead_hook
+	    case XK_dead_hook :
+	        return 0x0309;
+#endif
+
+#ifdef XK_dead_horn
+	    case XK_dead_horn :
+	        return 0x031b;
+#endif
+
+#ifdef XK_dead_stroke
+	    case XK_dead_stroke :
+	        return '/';	/* From Compose file */
+#endif
+
+#ifdef XK_dead_abovecomma
+        case XK_dead_abovecomma :
+            return 0x0313;
+#endif
+
+#ifdef XK_dead_abovereversedcomma
+        case XK_dead_abovereversedcomma :
+            return 0x0314;
+#endif
+
+#ifdef XK_dead_doublegrave
+        case XK_dead_doublegrave :
+            return 0x02f5; /* This one is not combined */
+#endif
+
+#ifdef XK_dead_belowring
+        case XK_dead_belowring :
+            return 0x0325;
+#endif
+
+#ifdef XK_dead_belowmacron
+        case XK_dead_belowmacron :
+            return 0x0331;
+#endif
+
+#ifdef XK_dead_belowcircumflex
+        case XK_dead_belowcircumflex :
+            return 0x032d;
+#endif
+
+#ifdef XK_dead_belowtilde
+        case XK_dead_belowtilde :
+            return 0x0330;
+#endif
+
+#ifdef XK_dead_belowbreve
+        case XK_dead_belowbreve :
+            return 0x032e;
+#endif
+
+#ifdef XK_dead_belowdiaeresis
+        case XK_dead_belowdiaeresis :
+            return 0x0324;
+#endif
+
+#ifdef XK_dead_invertedbreve
+        case XK_dead_invertedbreve :
+            return 0x0311;
+#endif
+
+#ifdef XK_dead_belowcomma
+        case XK_dead_belowcomma :
+            return ','; /* From Compose file */
+#endif
+
+#ifdef XK_dead_currency
+        case XK_dead_currency :
+            return 0x00a4; /* From Compose file */
+#endif
+
+#ifdef XK_dead_a
+        case XK_dead_a :
+            return 'a';
+#endif
+
+#ifdef XK_dead_A
+        case XK_dead_A :
+            return 'A';
+#endif
+
+#ifdef XK_dead_e
+        case XK_dead_e :
+            return 'e';
+#endif
+
+#ifdef XK_dead_E
+        case XK_dead_E :
+            return 'E';
+#endif
+
+#ifdef XK_dead_i
+        case XK_dead_i :
+            return 'i';
+#endif
+
+#ifdef XK_dead_I
+        case XK_dead_I :
+            return 'I';
+#endif
+
+#ifdef XK_dead_o
+        case XK_dead_o :
+            return 'o';
+#endif
+
+#ifdef XK_dead_O
+        case XK_dead_O :
+            return 'O';
+#endif
+
+#ifdef XK_dead_u
+        case XK_dead_u :
+            return 'u';
+#endif
+
+#ifdef XK_dead_U
+        case XK_dead_U :
+            return 'U';
+#endif
+
+#ifdef XK_dead_small_schwa
+        case XK_dead_small_schwa :
+            return 0x0259;
+#endif
+
+#ifdef XK_dead_capital_schwa
+        case XK_dead_capital_schwa :
+            return 0x018f;
+#endif
+
+#ifdef XK_dead_greek
+        case XK_dead_greek :
+            return 0x00b5;
+#endif
+
+#ifdef XK_dead_lowline
+        case XK_dead_lowline :
+            return '_';
+#endif
+
+#ifdef XK_dead_aboveverticalline
+        case XK_dead_aboveverticalline :
+            return 0x030d;
+#endif
+
+#ifdef XK_dead_belowverticalline
+        case XK_dead_belowverticalline :
+            return 0x0329;
+#endif
+
+#ifdef XK_dead_longsolidusoverlay
+        case XK_dead_longsolidusoverlay :
+            return 0x0338;
+#endif
+
 	    }
 	TRACE("no character for dead keysym 0x%08lx\n",keysym);
 	return 0;
@@ -2592,7 +2824,7 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
 
     if (ret == 0)
     {
-	char dead_char;
+	WCHAR dead_char;
 
 #ifdef XK_EuroSign
         /* An ugly hack for EuroSign: X can't translate it to a character
@@ -2616,7 +2848,7 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
 	dead_char = KEYBOARD_MapDeadKeysym(keysym);
 	if (dead_char)
         {
-	    MultiByteToWideChar(CP_UNIXCP, 0, &dead_char, 1, bufW, bufW_size);
+	    bufW[0] = dead_char;
 	    ret = -1;
             goto found;
         }

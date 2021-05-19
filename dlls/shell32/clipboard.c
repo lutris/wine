@@ -38,6 +38,8 @@
 #include <stdarg.h>
 #include <string.h>
 
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -213,4 +215,42 @@ HGLOBAL RenderFILENAMEW (LPITEMIDLIST pidlRoot, LPITEMIDLIST * apidl, UINT cidl)
 	GlobalUnlock(hGlobal);
 
 	return hGlobal;
+}
+
+HGLOBAL RenderPREFERREDDROPEFFECT (DWORD value)
+{
+    DWORD *pEffect;
+    HGLOBAL hGlobal;
+
+    TRACE("(%d)\n", value);
+
+    hGlobal = GlobalAlloc(GHND|GMEM_SHARE, sizeof(DWORD));
+    if(!hGlobal) return hGlobal;
+
+    pEffect = GlobalLock(hGlobal);
+    if (pEffect)
+    {
+        *pEffect = value;
+        GlobalUnlock(hGlobal);
+    }
+
+    return hGlobal;
+}
+
+HRESULT GetPREFERREDDROPEFFECT (STGMEDIUM *pmedium, DWORD *value)
+{
+    DWORD *pEffect;
+    BOOL result = E_OUTOFMEMORY;
+
+    TRACE("(%p, %p)\n", pmedium, value);
+
+    pEffect = GlobalLock(pmedium->u.hGlobal);
+    if (pEffect)
+    {
+        *value = *pEffect;
+        result = S_OK;
+        GlobalUnlock(pmedium->u.hGlobal);
+    }
+
+    return result;
 }
