@@ -42,6 +42,12 @@ enum CB_TYPE {
     MF_SRC_STREAM_REMOVED,
     MF_SRC_NO_MORE_PADS,
     MEDIA_SOURCE_MAX,
+    ACTIVATE_PUSH_MODE,
+    QUERY_INPUT_SRC,
+    DECODER_NEW_SAMPLE,
+    WATCH_DECODER_BUS,
+    DECODER_PAD_ADDED,
+    MF_DECODE_MAX,
 };
 
 struct cb_data {
@@ -100,6 +106,17 @@ struct cb_data {
             GstQuery *query;
             gboolean ret;
         } query_sink_data;
+        struct chain_data {
+            GstPad *pad;
+            GstObject *parent;
+            GstBuffer *buffer;
+            GstFlowReturn ret;
+        } chain_data;
+        struct new_sample_data {
+            GstElement *appsink;
+            gpointer user;
+            GstFlowReturn ret;
+        } new_sample_data;
     } u;
 
     int finished;
@@ -111,6 +128,7 @@ struct cb_data {
 void mark_wine_thread(void) DECLSPEC_HIDDEN;
 void perform_cb_gstdemux(struct cb_data *data) DECLSPEC_HIDDEN;
 void perform_cb_media_source(struct cb_data *data) DECLSPEC_HIDDEN;
+void perform_cb_mf_decode(struct cb_data *data) DECLSPEC_HIDDEN;
 
 void existing_new_pad_wrapper(GstElement *bin, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
 GstFlowReturn got_data_wrapper(GstPad *pad, GstObject *parent, GstBuffer *buf) DECLSPEC_HIDDEN;
@@ -124,5 +142,9 @@ GstBusSyncReply mf_src_bus_watch_wrapper(GstBus *bus, GstMessage *message, gpoin
 void mf_src_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
 void mf_src_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
 void mf_src_no_more_pads_wrapper(GstElement *element, gpointer user) DECLSPEC_HIDDEN;
+gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate) DECLSPEC_HIDDEN;
+gboolean query_input_src_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
+GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user) DECLSPEC_HIDDEN;
+GstFlowReturn decoder_new_sample_wrapper(GstElement *appsink, gpointer user) DECLSPEC_HIDDEN;
 
 #endif

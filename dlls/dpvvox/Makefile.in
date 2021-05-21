@@ -1,0 +1,8 @@
+MODULE    = dpvvox.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	dpvvox_main.c
+
+RC_SRCS = version.rc

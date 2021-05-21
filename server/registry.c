@@ -161,6 +161,7 @@ static const struct object_ops key_ops =
     no_add_queue,            /* add_queue */
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
+    NULL,                    /* get_esync_fd */
     NULL,                    /* satisfied */
     no_signal,               /* signal */
     no_get_fd,               /* get_fd */
@@ -307,8 +308,7 @@ static void key_dump( struct object *obj, int verbose )
 
 static struct object_type *key_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'K','e','y'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Key, sizeof(type_Key) };
     return get_object_type( &str );
 }
 

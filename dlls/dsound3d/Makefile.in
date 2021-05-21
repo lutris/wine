@@ -1,0 +1,8 @@
+MODULE    = dsound3d.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	dsound3d_main.c
+
+RC_SRCS = version.rc

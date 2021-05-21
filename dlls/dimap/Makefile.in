@@ -1,0 +1,8 @@
+MODULE    = dimap.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	dimap_main.c
+
+RC_SRCS = version.rc

@@ -1,0 +1,2 @@
+@ stub DllCanUnloadNow
+@ stub DllGetClassObject
