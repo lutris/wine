@@ -27,6 +27,7 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winver.h"
+#include "dwmapi.h"
 #include "wine/server.h"
 #include "wine/asm.h"
 #include "win.h"
@@ -53,6 +54,8 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": surfaces_section") }
 };
 static CRITICAL_SECTION surfaces_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+
+BOOL WINAPI SetWindowCompositionAttribute(HWND, const struct WINCOMPATTRDATA*);
 
 /**********************************************************************/
 
@@ -191,7 +194,7 @@ void *free_user_handle( HANDLE handle, enum user_obj_type type )
  * Create a window handle with the server.
  */
 static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
-                                  HINSTANCE instance, BOOL unicode )
+                                  HINSTANCE instance, BOOL unicode, BOOL *needs_cloak )
 {
     WORD index;
     WND *win;
@@ -219,6 +222,7 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
             dpi         = reply->dpi;
             awareness   = reply->awareness;
             class       = wine_server_get_ptr( reply->class_ptr );
+            *needs_cloak = reply->needs_cloak;
         }
     }
     SERVER_END_REQ;
@@ -749,6 +753,7 @@ HWND WIN_GetFullHandle( HWND hwnd )
 static HWND WIN_SetOwner( HWND hwnd, HWND owner )
 {
     WND *win = WIN_GetPtr( hwnd );
+    BOOL needs_cloak = FALSE;
     HWND ret = 0;
 
     if (!win || win == WND_DESKTOP) return 0;
@@ -765,10 +770,19 @@ static HWND WIN_SetOwner( HWND hwnd, HWND owner )
         {
             win->owner = wine_server_ptr_handle( reply->full_owner );
             ret = wine_server_ptr_handle( reply->prev_owner );
+            needs_cloak = reply->needs_cloak;
         }
     }
     SERVER_END_REQ;
     WIN_ReleasePtr( win );
+    if (needs_cloak)
+    {
+        struct WINCOMPATTRDATA data;
+        data.attribute = WCA_CLOAK;
+        data.pData = &needs_cloak;
+        data.dataSize = sizeof(needs_cloak);
+        SetWindowCompositionAttribute( hwnd, &data );
+    }
     return ret;
 }
 
@@ -855,8 +869,7 @@ BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWind
         }
         else
         {
-            rect.right  = GetSystemMetrics(SM_CXSCREEN);
-            rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+            rect = get_primary_monitor_rect();
         }
         if (rectWindow) *rectWindow = rect;
         if (rectClient) *rectClient = rect;
@@ -1349,6 +1362,7 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     MDICREATESTRUCTW mdi_cs;
     CBT_CREATEWNDW cbtc;
     CREATESTRUCTW cbcs;
+    BOOL needs_cloak;
 
     className = CLASS_GetVersionedName(className, NULL, NULL, TRUE);
 
@@ -1476,13 +1490,13 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
 
     /* Create the window structure */
 
-    if (!(wndPtr = create_window_handle( parent, owner, className, module, unicode )))
+    if (!(wndPtr = create_window_handle( parent, owner, className, module, unicode, &needs_cloak )))
     {
         WNDCLASSW wc;
         /* if it's a comctl32 class, GetClassInfo will load it, then we can retry */
         if (GetLastError() != ERROR_INVALID_HANDLE ||
             !GetClassInfoW( 0, className, &wc ) ||
-            !(wndPtr = create_window_handle( parent, owner, className, module, unicode )))
+            !(wndPtr = create_window_handle( parent, owner, className, module, unicode, &needs_cloak )))
             return 0;
     }
     hwnd = wndPtr->obj.handle;
@@ -1663,6 +1677,8 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     /* call the driver */
 
     if (!USER_Driver->pCreateWindow( hwnd )) goto failed;
+    if (needs_cloak)
+        USER_Driver->pSetWindowCompositionAttribute( hwnd, WCA_CLOAK, &needs_cloak );
 
     NotifyWinEvent(EVENT_OBJECT_CREATE, hwnd, OBJID_WINDOW, 0);
 
@@ -4237,11 +4253,144 @@ BOOL WINAPI SetWindowDisplayAffinity(HWND hwnd, DWORD affinity)
 }
 
 /**********************************************************************
+ *              GetWindowCompositionAttribute (USER32.@)
+ */
+BOOL WINAPI GetWindowCompositionAttribute(HWND hwnd, const struct WINCOMPATTRDATA *data)
+{
+    TRACE("(%p, %p)\n", hwnd, data);
+
+    if (!data || !data->pData)
+    {
+        SetLastError(ERROR_NOACCESS);
+        return FALSE;
+    }
+    if (!hwnd || is_broadcast(hwnd))
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    switch (data->attribute)
+    {
+    case WCA_CLOAKED:
+        if (data->dataSize < sizeof(DWORD))
+        {
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+        SERVER_START_REQ( get_window_cloaked )
+        {
+            req->handle = wine_server_user_handle( hwnd );
+            if (wine_server_call_err( req )) return FALSE;
+            *(DWORD*)(data->pData) = reply->cloaked;
+        }
+        SERVER_END_REQ;
+        break;
+
+    default:
+        FIXME("unimplemented attribute %d, size %u, for hwnd %p.\n", data->attribute, data->dataSize, hwnd);
+        SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/**********************************************************************
  *              SetWindowCompositionAttribute (USER32.@)
  */
-BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, void *data)
+BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, const struct WINCOMPATTRDATA *data)
 {
-    FIXME("(%p, %p): stub\n", hwnd, data);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    user_handle_t *list;
+    unsigned i, size;
+    NTSTATUS status;
+    HWND parent;
+    DWORD ret;
+    WND *win;
+
+    TRACE("(%p, %p)\n", hwnd, data);
+
+    if (!data || !data->pData)
+    {
+        SetLastError( ERROR_NOACCESS );
+        return FALSE;
+    }
+    if (!hwnd || is_broadcast(hwnd) || !(win = WIN_GetPtr(hwnd)))
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+    if (win == WND_DESKTOP || win == WND_OTHER_PROCESS)
+    {
+        SetLastError( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+    parent = win->parent;
+    WIN_ReleasePtr(win);
+    if (parent && parent != GetDesktopWindow())
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+
+    switch (data->attribute)
+    {
+    case WCA_CLOAK:
+        if (data->dataSize < sizeof(BOOL))
+        {
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+
+        ret = USER_Driver->pSetWindowCompositionAttribute( hwnd, WCA_CLOAK, data->pData );
+        if (ret == ~0) return FALSE;
+
+        size = 128;
+        for (;;)
+        {
+            unsigned count = 0;
+
+            if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(user_handle_t) )))
+            {
+                SetLastError( ERROR_OUTOFMEMORY );
+                return FALSE;
+            }
+            SERVER_START_REQ( set_window_cloaked )
+            {
+                req->handle  = wine_server_user_handle( hwnd );
+                req->cloaked = ret;
+                wine_server_set_reply( req, list, size * sizeof(user_handle_t) );
+                if (!(status = wine_server_call( req ))) count = reply->count;
+            }
+            SERVER_END_REQ;
+            if (count < size)
+            {
+                /* Go through the list to cloak the windows that inherit it */
+                for (i = 0; i < count; i++)
+                {
+                    HWND full_handle, handle = wine_server_ptr_handle( list[i] );
+
+                    if ((full_handle = WIN_IsCurrentProcess( handle )))
+                        USER_Driver->pSetWindowCompositionAttribute( full_handle, WCA_CLOAK, data->pData );
+                    else
+                        SendMessageW( handle, WM_WINE_SETWINDOWCLOAKED, *(BOOL*)(data->pData), 0 );
+                }
+                count = 0;
+            }
+            HeapFree( GetProcessHeap(), 0, list );
+            if (!count) break;
+            size = count;  /* restart with a large enough buffer */
+        }
+        if (status)
+        {
+            SetLastError( RtlNtStatusToDosError( status ));
+            return FALSE;
+        }
+        return TRUE;
+
+    default:
+        FIXME("unimplemented attribute %d, size %u, for hwnd %p.\n", data->attribute, data->dataSize, hwnd);
+        SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+        return FALSE;
+    }
+    return TRUE;
 }

@@ -71,6 +71,7 @@
 #include <wine/svcctl.h>
 #include <wine/asm.h>
 #include <wine/debug.h>
+#include <bcrypt.h>
 
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -875,6 +876,160 @@ static void add_dynamic_enum_keys(HKEY key, struct dyndata_enum_key *entry)
     RegCloseKey( subkey );
 }
 
+static unsigned char decodehex(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    else if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    else if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    return 0xFF;
+}
+
+static void get_machineid( BYTE *buf )
+{
+    static const char sd_machineid_path[] = "\\??\\unix\\/etc/machine-id";
+    static const char dbus_machineid_path[] = "\\??\\unix\\/var/lib/dbus/machine-id";
+    HANDLE file;
+    char buffer[34];
+    DWORD bytes_read;
+    int i;
+
+    file = CreateFileA( sd_machineid_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL );
+    if (file == INVALID_HANDLE_VALUE)
+        file = CreateFileA( dbus_machineid_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL );
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        ERR( "Could not open machine id file: error %d\n", GetLastError() );
+        goto error;
+    }
+
+    if (!ReadFile( file, buffer, 34, &bytes_read, NULL ))
+    {
+        ERR( "Could not read machine id file: error %d\n", GetLastError() );
+        CloseHandle(file);
+        goto error;
+    }
+
+    CloseHandle(file);
+
+    if (bytes_read != 33 || buffer[32] != '\n')
+    {
+        ERR( "Wrong machine id file size: %d != 33\n", bytes_read );
+        goto error;
+    }
+
+    for (i = 0; i < 16; i++)
+    {
+        unsigned char high_nibble, low_nibble;
+
+        high_nibble = decodehex(buffer[i * 2]);
+        low_nibble = decodehex(buffer[i * 2 + 1]);
+        if (high_nibble == 0xFF || low_nibble == 0xFF)
+        {
+            ERR( "Failed decoding machine id byte %d\n", i );
+            goto error;
+        }
+        buf[i] = (high_nibble << 4) | low_nibble;
+    }
+    return;
+
+error:
+    RtlZeroMemory( buf, 16 );
+}
+
+#define MACHINEID_HASH_SALT "WINESALT"
+#define MACHINEID_HASH_ALG  BCRYPT_SHA1_ALGORITHM
+#define MACHINEID_HASH_SIZE 20
+
+static void get_hashed_machineid( BYTE *buf )
+{
+    static const char salt[] = MACHINEID_HASH_SALT;
+    BYTE input[16 + sizeof(salt)];
+    BCRYPT_ALG_HANDLE alg;
+    NTSTATUS status;
+    BYTE hash[MACHINEID_HASH_SIZE];
+    int i;
+
+    get_machineid( input );
+    RtlCopyMemory( &input[sizeof(input) - sizeof(salt)], salt, sizeof(salt) );
+
+    if (!NT_SUCCESS(status = BCryptOpenAlgorithmProvider( &alg, MACHINEID_HASH_ALG, NULL, 0 )))
+        goto error;
+    if (!NT_SUCCESS(status = BCryptHash( alg, NULL, 0, input, sizeof(input), hash, sizeof(hash) )))
+    {
+        BCryptCloseAlgorithmProvider( alg, 0 );
+        goto error;
+    }
+    BCryptCloseAlgorithmProvider( alg, 0 );
+
+    RtlCopyMemory( buf, hash, 8 );
+    for (i = 8; i < ARRAY_SIZE(hash); i++)
+        buf[i % 8] ^= hash[i];
+    return;
+
+error:
+    ERR( "Couldn't hash machine id: error %u\n", status );
+    RtlZeroMemory( buf, 8 );
+}
+
+static void get_productid( WCHAR *buf )
+{
+    BYTE machineid[8];
+    DWORD mid_lodword, mid_hidword;
+    unsigned int c, e;
+    unsigned int tmp, check_digit;
+
+    /* get hashed machine id */
+    get_hashed_machineid( machineid );
+
+    /* compute C and E values from hashed machine id */
+    mid_lodword = (machineid[3] << 24U) | (machineid[2] << 16U) | (machineid[1] << 8U) | machineid[0];
+    mid_hidword = (machineid[7] << 24U) | (machineid[6] << 16U) | (machineid[5] << 8U) | machineid[4];
+    c = (unsigned int)(mid_lodword * 999999ULL / 0xFFFFFFFF);
+    e = (unsigned int)(mid_hidword *    999ULL / 0xFFFFFFFF);
+
+    /* compute check digit for C value */
+    tmp = c;
+    check_digit = tmp % 10;
+    tmp = tmp / 10;
+    check_digit += tmp % 10;
+    tmp = tmp / 10;
+    check_digit += tmp % 10;
+    tmp = tmp / 10;
+    check_digit += tmp % 10;
+    tmp = tmp / 10;
+    check_digit += tmp % 10;
+    tmp = tmp / 10;
+    check_digit += tmp;
+    check_digit = 7 - check_digit % 7;
+
+    /* create product id from parts.*/
+    swprintf( buf, 24, L"12345-OEM-%06u%u-00%03u", c, check_digit, e );
+}
+
+/* create the volatile software registry keys */
+static void create_software_registry_keys(void)
+{
+    HKEY cv_key;
+    WCHAR productid[24];
+
+    get_productid( productid );
+
+    if (!RegCreateKeyW( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion", &cv_key ))
+    {
+        set_reg_value( cv_key, L"ProductId", productid );
+        RegCloseKey( cv_key );
+    }
+
+    if (!RegCreateKeyW( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion", &cv_key ))
+    {
+        set_reg_value( cv_key, L"ProductId", productid );
+        RegCloseKey( cv_key );
+    }
+}
+
 /* create the DynData registry keys */
 static void create_dynamic_registry_keys(void)
 {
@@ -1627,6 +1782,43 @@ static void update_user_profile(void)
     LocalFree(sid);
 }
 
+static void update_win_version(void)
+{
+    static const WCHAR win10_buildW[] = L"17763";
+
+    HKEY cv_h;
+    DWORD type, sz;
+    WCHAR current_version[256];
+
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_ALL_ACCESS, &cv_h) == ERROR_SUCCESS){
+        /* get the current windows version */
+        sz = sizeof(current_version);
+        if(RegQueryValueExW(cv_h, L"CurrentVersion", NULL, &type, (BYTE *)current_version, &sz) == ERROR_SUCCESS &&
+                type == REG_SZ){
+            if(!wcscmp(current_version, L"10.0")){
+                RegSetValueExW(cv_h, L"CurrentBuild", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+                RegSetValueExW(cv_h, L"CurrentBuildNumber", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+            }
+        }
+        RegCloseKey(cv_h);
+    }
+
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_ALL_ACCESS, &cv_h) == ERROR_SUCCESS){
+        /* get the current windows version */
+        sz = sizeof(current_version);
+        if(RegQueryValueExW(cv_h, L"CurrentVersion", NULL, &type, (BYTE *)current_version, &sz) == ERROR_SUCCESS &&
+                type == REG_SZ){
+            if(!wcscmp(current_version, L"10.0")){
+                RegSetValueExW(cv_h, L"CurrentBuild", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+                RegSetValueExW(cv_h, L"CurrentBuildNumber", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+            }
+        }
+        RegCloseKey(cv_h);
+    }
+}
+
 /* execute rundll32 on the wine.inf file if necessary */
 static void update_wineprefix( BOOL force )
 {
@@ -1673,6 +1865,7 @@ static void update_wineprefix( BOOL force )
         install_root_pnp_devices();
         update_user_profile();
         create_etc_stub_files();
+        update_win_version();
 
         WINE_MESSAGE( "wine: configuration in %s has been updated.\n", debugstr_w(prettyprint_configdir()) );
     }
@@ -1869,6 +2062,7 @@ int __cdecl main( int argc, char *argv[] )
     create_user_shared_data();
     create_disk_serial_number();
     create_hardware_registry_keys();
+    create_software_registry_keys();
     create_dynamic_registry_keys();
     create_environment_registry_keys();
     create_computer_name_keys();

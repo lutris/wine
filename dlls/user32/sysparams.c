@@ -107,6 +107,32 @@ DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_ADAPTERNAME, 0x233a9ef3, 0xafc4, 0x4ab
 
 #define NULLDRV_DEFAULT_HMONITOR ((HMONITOR)(UINT_PTR)(0x10000 + 1))
 
+/* Cached display device information */
+struct display_device
+{
+    struct list entry;         /* Device list entry */
+    struct list childs;        /* Child device list entry. For adapters, this is monitor list. For monitors, this is unused. */
+    WCHAR device_name[32];     /* as DeviceName in DISPLAY_DEVICEW */
+    WCHAR device_string[128];  /* as DeviceString in DISPLAY_DEVICEW */
+    DWORD state_flags;         /* as StateFlags in DISPLAY_DEVICEW */
+    WCHAR device_id[128];      /* as DeviceID in DISPLAY_DEVICEW when EDD_GET_DEVICE_INTERFACE_NAME is not set */
+    WCHAR interface_name[128]; /* as DeviceID in DISPLAY_DEVICEW when EDD_GET_DEVICE_INTERFACE_NAME is set */
+    WCHAR device_key[128];     /* as DeviceKey in DISPLAY_DEVICEW */
+};
+
+static struct list adapters = LIST_INIT(adapters);
+static FILETIME last_query_display_time;
+static CRITICAL_SECTION display_section;
+static CRITICAL_SECTION_DEBUG display_critsect_debug =
+{
+    0, 0, &display_section,
+    { &display_critsect_debug.ProcessLocksList, &display_critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": display_section") }
+};
+static CRITICAL_SECTION display_section = { &display_critsect_debug, -1, 0, 0, 0, 0 };
+
+static BOOL enum_display_device( WCHAR *device, DWORD index, struct display_device *info );
+
 /* Cached monitor information */
 static MONITORINFOEXW *monitors;
 static UINT monitor_count;
@@ -337,38 +363,57 @@ static void SYSPARAMS_NonClientMetrics32ATo32W( const NONCLIENTMETRICSA* lpnm32A
 
 /* Helper functions to retrieve monitors info */
 
-struct monitor_info
+static BOOL CALLBACK get_virtual_screen_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
 {
-    int count;
-    RECT primary_rect;
-    RECT virtual_rect;
-};
+    RECT *virtual_rect = (RECT *)lp;
 
-static BOOL CALLBACK monitor_info_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
-{
-    MONITORINFO mi;
-    struct monitor_info *info = (struct monitor_info *)lp;
-    info->count++;
-    UnionRect( &info->virtual_rect, &info->virtual_rect, rect );
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW( monitor, &mi ) && (mi.dwFlags & MONITORINFOF_PRIMARY))
-        info->primary_rect = mi.rcMonitor;
+    UnionRect( virtual_rect, virtual_rect, rect );
     return TRUE;
-}
-
-static void get_monitors_info( struct monitor_info *info )
-{
-    info->count = 0;
-    SetRectEmpty( &info->primary_rect );
-    SetRectEmpty( &info->virtual_rect );
-    EnumDisplayMonitors( 0, NULL, monitor_info_proc, (LPARAM)info );
 }
 
 RECT get_virtual_screen_rect(void)
 {
-    struct monitor_info info;
-    get_monitors_info( &info );
-    return info.virtual_rect;
+    RECT rect = {0};
+
+    EnumDisplayMonitors( 0, NULL, get_virtual_screen_proc, (LPARAM)&rect );
+    return rect;
+}
+
+static BOOL CALLBACK get_primary_monitor_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
+{
+    RECT *primary_rect = (RECT *)lp;
+
+    if (!rect->top && !rect->left && rect->right && rect->bottom)
+    {
+        *primary_rect = *rect;
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+RECT get_primary_monitor_rect(void)
+{
+    RECT rect = {0};
+
+    EnumDisplayMonitors( 0, NULL, get_primary_monitor_proc, (LPARAM)&rect );
+    return rect;
+}
+
+static BOOL CALLBACK get_monitor_count_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
+{
+    INT *count = (INT *)lp;
+
+    ++(*count);
+    return TRUE;
+}
+
+static INT get_monitor_count(void)
+{
+    INT count = 0;
+
+    EnumDisplayMonitors( 0, NULL, get_monitor_count_proc, (LPARAM)&count );
+    return count;
 }
 
 static BOOL get_primary_adapter(WCHAR *name)
@@ -1276,37 +1321,37 @@ static USERPREF_ENTRY( SPEECHRECOGNITION,        4, 0x20 );
 static struct sysparam_rgb_entry system_colors[] =
 {
 #define RGB_ENTRY(name,val,reg) { { get_rgb_entry, set_rgb_entry, init_rgb_entry, COLORS_KEY, reg }, (val) }
-    RGB_ENTRY( COLOR_SCROLLBAR, RGB(212, 208, 200), L"Scrollbar" ),
-    RGB_ENTRY( COLOR_BACKGROUND, RGB(58, 110, 165), L"Background" ),
-    RGB_ENTRY( COLOR_ACTIVECAPTION, RGB(10, 36, 106), L"ActiveTitle" ),
-    RGB_ENTRY( COLOR_INACTIVECAPTION, RGB(128, 128, 128), L"InactiveTitle" ),
-    RGB_ENTRY( COLOR_MENU, RGB(212, 208, 200), L"Menu" ),
+    RGB_ENTRY( COLOR_SCROLLBAR, RGB(200, 200, 200), L"Scrollbar" ),
+    RGB_ENTRY( COLOR_BACKGROUND, RGB(0, 0, 0), L"Background" ),
+    RGB_ENTRY( COLOR_ACTIVECAPTION, RGB(153, 180, 209), L"ActiveTitle" ),
+    RGB_ENTRY( COLOR_INACTIVECAPTION, RGB(191, 205, 219), L"InactiveTitle" ),
+    RGB_ENTRY( COLOR_MENU, RGB(240, 240, 240), L"Menu" ),
     RGB_ENTRY( COLOR_WINDOW, RGB(255, 255, 255), L"Window" ),
-    RGB_ENTRY( COLOR_WINDOWFRAME, RGB(0, 0, 0), L"WindowFrame" ),
+    RGB_ENTRY( COLOR_WINDOWFRAME, RGB(100, 100, 100), L"WindowFrame" ),
     RGB_ENTRY( COLOR_MENUTEXT, RGB(0, 0, 0), L"MenuText" ),
     RGB_ENTRY( COLOR_WINDOWTEXT, RGB(0, 0, 0), L"WindowText" ),
-    RGB_ENTRY( COLOR_CAPTIONTEXT, RGB(255, 255, 255), L"TitleText" ),
-    RGB_ENTRY( COLOR_ACTIVEBORDER, RGB(212, 208, 200), L"ActiveBorder" ),
-    RGB_ENTRY( COLOR_INACTIVEBORDER, RGB(212, 208, 200), L"InactiveBorder" ),
-    RGB_ENTRY( COLOR_APPWORKSPACE, RGB(128, 128, 128), L"AppWorkSpace" ),
-    RGB_ENTRY( COLOR_HIGHLIGHT, RGB(10, 36, 106), L"Hilight" ),
+    RGB_ENTRY( COLOR_CAPTIONTEXT, RGB(0, 0, 0), L"TitleText" ),
+    RGB_ENTRY( COLOR_ACTIVEBORDER, RGB(180, 180, 180), L"ActiveBorder" ),
+    RGB_ENTRY( COLOR_INACTIVEBORDER, RGB(244, 247, 252), L"InactiveBorder" ),
+    RGB_ENTRY( COLOR_APPWORKSPACE, RGB(171, 171, 171), L"AppWorkSpace" ),
+    RGB_ENTRY( COLOR_HIGHLIGHT, RGB(0, 120, 215), L"Hilight" ),
     RGB_ENTRY( COLOR_HIGHLIGHTTEXT, RGB(255, 255, 255), L"HilightText" ),
-    RGB_ENTRY( COLOR_BTNFACE, RGB(212, 208, 200), L"ButtonFace" ),
-    RGB_ENTRY( COLOR_BTNSHADOW, RGB(128, 128, 128), L"ButtonShadow" ),
-    RGB_ENTRY( COLOR_GRAYTEXT, RGB(128, 128, 128), L"GrayText" ),
+    RGB_ENTRY( COLOR_BTNFACE, RGB(240, 240, 240), L"ButtonFace" ),
+    RGB_ENTRY( COLOR_BTNSHADOW, RGB(160, 160, 160), L"ButtonShadow" ),
+    RGB_ENTRY( COLOR_GRAYTEXT, RGB(109, 109, 109), L"GrayText" ),
     RGB_ENTRY( COLOR_BTNTEXT, RGB(0, 0, 0), L"ButtonText" ),
-    RGB_ENTRY( COLOR_INACTIVECAPTIONTEXT, RGB(212, 208, 200), L"InactiveTitleText" ),
+    RGB_ENTRY( COLOR_INACTIVECAPTIONTEXT, RGB(0, 0, 0), L"InactiveTitleText" ),
     RGB_ENTRY( COLOR_BTNHIGHLIGHT, RGB(255, 255, 255), L"ButtonHilight" ),
-    RGB_ENTRY( COLOR_3DDKSHADOW, RGB(64, 64, 64), L"ButtonDkShadow" ),
-    RGB_ENTRY( COLOR_3DLIGHT, RGB(212, 208, 200), L"ButtonLight" ),
+    RGB_ENTRY( COLOR_3DDKSHADOW, RGB(105, 105, 105), L"ButtonDkShadow" ),
+    RGB_ENTRY( COLOR_3DLIGHT, RGB(227, 227, 227), L"ButtonLight" ),
     RGB_ENTRY( COLOR_INFOTEXT, RGB(0, 0, 0), L"InfoText" ),
     RGB_ENTRY( COLOR_INFOBK, RGB(255, 255, 225), L"InfoWindow" ),
-    RGB_ENTRY( COLOR_ALTERNATEBTNFACE, RGB(181, 181, 181), L"ButtonAlternateFace" ),
-    RGB_ENTRY( COLOR_HOTLIGHT, RGB(0, 0, 200), L"HotTrackingColor" ),
-    RGB_ENTRY( COLOR_GRADIENTACTIVECAPTION, RGB(166, 202, 240), L"GradientActiveTitle" ),
-    RGB_ENTRY( COLOR_GRADIENTINACTIVECAPTION, RGB(192, 192, 192), L"GradientInactiveTitle" ),
-    RGB_ENTRY( COLOR_MENUHILIGHT, RGB(10, 36, 106), L"MenuHilight" ),
-    RGB_ENTRY( COLOR_MENUBAR, RGB(212, 208, 200), L"MenuBar" )
+    RGB_ENTRY( COLOR_ALTERNATEBTNFACE, RGB(240, 240, 240), L"ButtonAlternateFace" ),
+    RGB_ENTRY( COLOR_HOTLIGHT, RGB(0, 102, 204), L"HotTrackingColor" ),
+    RGB_ENTRY( COLOR_GRADIENTACTIVECAPTION, RGB(185, 209, 234), L"GradientActiveTitle" ),
+    RGB_ENTRY( COLOR_GRADIENTINACTIVECAPTION, RGB(215, 228, 242), L"GradientInactiveTitle" ),
+    RGB_ENTRY( COLOR_MENUHILIGHT, RGB(51, 153, 255), L"MenuHilight" ),
+    RGB_ENTRY( COLOR_MENUBAR, RGB(240, 240, 240), L"MenuBar" )
 #undef RGB_ENTRY
 };
 
@@ -1799,9 +1844,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         spi_idx = SPI_SETWORKAREA_IDX;
         if (!spi_loaded[spi_idx])
         {
-            SetRect( &work_area, 0, 0,
-                     GetSystemMetrics( SM_CXSCREEN ),
-                     GetSystemMetrics( SM_CYSCREEN ) );
+            work_area = get_primary_monitor_rect();
             EnumDisplayMonitors( 0, NULL, enum_monitors, (LPARAM)&work_area );
             spi_loaded[spi_idx] = TRUE;
         }
@@ -2533,10 +2576,10 @@ static DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char *name, DW
  */
 INT WINAPI GetSystemMetrics( INT index )
 {
-    struct monitor_info info;
     NONCLIENTMETRICSW ncm;
     MINIMIZEDMETRICS mm;
     ICONMETRICSW im;
+    RECT rect;
     UINT ret;
     HDC hdc;
 
@@ -2742,26 +2785,25 @@ INT WINAPI GetSystemMetrics( INT index )
     case SM_MOUSEWHEELPRESENT:
         return 1;
     case SM_CXSCREEN:
-        get_monitors_info( &info );
-        return info.primary_rect.right - info.primary_rect.left;
+        rect = get_primary_monitor_rect();
+        return rect.right - rect.left;
     case SM_CYSCREEN:
-        get_monitors_info( &info );
-        return info.primary_rect.bottom - info.primary_rect.top;
+        rect = get_primary_monitor_rect();
+        return rect.bottom - rect.top;
     case SM_XVIRTUALSCREEN:
-        get_monitors_info( &info );
-        return info.virtual_rect.left;
+        rect = get_virtual_screen_rect();
+        return rect.left;
     case SM_YVIRTUALSCREEN:
-        get_monitors_info( &info );
-        return info.virtual_rect.top;
+        rect = get_virtual_screen_rect();
+        return rect.top;
     case SM_CXVIRTUALSCREEN:
-        get_monitors_info( &info );
-        return info.virtual_rect.right - info.virtual_rect.left;
+        rect = get_virtual_screen_rect();
+        return rect.right - rect.left;
     case SM_CYVIRTUALSCREEN:
-        get_monitors_info( &info );
-        return info.virtual_rect.bottom - info.virtual_rect.top;
+        rect = get_virtual_screen_rect();
+        return rect.bottom - rect.top;
     case SM_CMONITORS:
-        get_monitors_info( &info );
-        return info.count;
+        return get_monitor_count();
     case SM_SAMEDISPLAYFORMAT:
         return 1;
     case SM_IMMENABLED:
@@ -3833,6 +3875,69 @@ HMONITOR WINAPI MonitorFromWindow(HWND hWnd, DWORD dwFlags)
 }
 
 /* Return FALSE on failure and TRUE on success */
+static BOOL update_display_cache(void)
+{
+    struct display_device device, *adapter, *adapter2, *monitor, *monitor2;
+    DWORD adapter_idx, monitor_idx;
+    struct list *monitor_list;
+    FILETIME filetime = {0};
+    HANDLE mutex = NULL;
+    BOOL ret = FALSE;
+
+    /* Update display cache from SetupAPI if it's outdated */
+    wait_graphics_driver_ready();
+
+    if (!video_key && RegOpenKeyW( HKEY_LOCAL_MACHINE, L"HARDWARE\\DEVICEMAP\\VIDEO", &video_key ))
+        return FALSE;
+    if (RegQueryInfoKeyW( video_key, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &filetime ))
+        return FALSE;
+    if (CompareFileTime( &filetime, &last_query_display_time ) < 1)
+        return TRUE;
+
+    mutex = get_display_device_init_mutex();
+    EnterCriticalSection( &display_section );
+
+    LIST_FOR_EACH_ENTRY_SAFE(adapter, adapter2, &adapters, struct display_device, entry)
+    {
+        LIST_FOR_EACH_ENTRY_SAFE(monitor, monitor2, &adapter->childs, struct display_device, entry)
+        {
+            list_remove( &monitor->entry );
+            heap_free( monitor );
+        }
+        list_remove( &adapter->entry );
+        heap_free( adapter );
+    }
+
+    for (adapter_idx = 0; enum_display_device( NULL, adapter_idx, &device ); ++adapter_idx)
+    {
+        adapter = heap_alloc( sizeof(*adapter) );
+        if (!adapter)
+            goto fail;
+
+        memcpy( adapter, &device, sizeof(device) );
+        monitor_list = &adapter->childs;
+        list_init( monitor_list );
+        list_add_tail( &adapters, &adapter->entry );
+        for (monitor_idx = 0; enum_display_device( adapter->device_name, monitor_idx, &device ); ++monitor_idx)
+        {
+            monitor = heap_alloc( sizeof(*monitor) );
+            if (!monitor)
+                goto fail;
+
+            memcpy( monitor, &device, sizeof(device) );
+            list_add_tail( monitor_list, &monitor->entry );
+        }
+    }
+
+    last_query_display_time = filetime;
+    ret = TRUE;
+fail:
+    LeaveCriticalSection( &display_section );
+    release_display_device_init_mutex( mutex );
+    return ret;
+}
+
+/* Return FALSE on failure and TRUE on success */
 static BOOL update_monitor_cache(void)
 {
     SP_DEVINFO_DATA device_data = {sizeof(device_data)};
@@ -4159,6 +4264,76 @@ BOOL WINAPI EnumDisplayDevicesA( LPCSTR device, DWORD index, DISPLAY_DEVICEA *in
  */
 BOOL WINAPI EnumDisplayDevicesW( LPCWSTR device, DWORD index, DISPLAY_DEVICEW *info, DWORD flags )
 {
+    struct display_device *adapter, *monitor, *found = NULL;
+    DWORD device_idx = 0;
+
+    TRACE("%s %u %p %#x\n", debugstr_w( device ), index, info, flags);
+
+    if (!update_display_cache())
+        return FALSE;
+
+    EnterCriticalSection( &display_section );
+    /* Enumerate adapters */
+    if (!device)
+    {
+        LIST_FOR_EACH_ENTRY(adapter, &adapters, struct display_device, entry)
+        {
+            if (index == device_idx++)
+            {
+                found = adapter;
+                break;
+            }
+        }
+    }
+    /* Enumerate monitors */
+    else
+    {
+        LIST_FOR_EACH_ENTRY(adapter, &adapters, struct display_device, entry)
+        {
+            if (!lstrcmpiW( device, adapter->device_name ))
+            {
+                found = adapter;
+                break;
+            }
+        }
+
+        if (found)
+        {
+            found = NULL;
+            LIST_FOR_EACH_ENTRY(monitor, &adapter->childs, struct display_device, entry)
+            {
+                if (index == device_idx++)
+                {
+                    found = monitor;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!found)
+    {
+        LeaveCriticalSection( &display_section );
+        return FALSE;
+    }
+
+    if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceName) + sizeof(info->DeviceName))
+        lstrcpyW( info->DeviceName, found->device_name );
+    if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceString) + sizeof(info->DeviceString))
+        lstrcpyW( info->DeviceString, found->device_string );
+    if (info->cb >= offsetof(DISPLAY_DEVICEW, StateFlags) + sizeof(info->StateFlags))
+        info->StateFlags = found->state_flags;
+    if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceID) + sizeof(info->DeviceID))
+        lstrcpyW( info->DeviceID, (flags & EDD_GET_DEVICE_INTERFACE_NAME) ? found->interface_name : found->device_id );
+    if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceKey) + sizeof(info->DeviceKey))
+        lstrcpyW( info->DeviceKey, found->device_key );
+    LeaveCriticalSection( &display_section );
+    return TRUE;
+}
+
+/* Call this function with the display_device_init mutex held */
+static BOOL enum_display_device( WCHAR *device, DWORD index, struct display_device *info )
+{
     SP_DEVINFO_DATA device_data = {sizeof(device_data)};
     HDEVINFO set = INVALID_HANDLE_VALUE;
     WCHAR key_nameW[MAX_PATH];
@@ -4166,16 +4341,10 @@ BOOL WINAPI EnumDisplayDevicesW( LPCWSTR device, DWORD index, DISPLAY_DEVICEW *i
     WCHAR bufferW[1024];
     LONG adapter_index;
     WCHAR *next_charW;
-    HANDLE mutex;
     DWORD size;
     DWORD type;
     HKEY hkey;
     BOOL ret = FALSE;
-
-    TRACE("%s %d %p %#x\n", debugstr_w( device ), index, info, flags);
-
-    wait_graphics_driver_ready();
-    mutex = get_display_device_init_mutex();
 
     /* Find adapter */
     if (!device)
@@ -4186,46 +4355,40 @@ BOOL WINAPI EnumDisplayDevicesW( LPCWSTR device, DWORD index, DISPLAY_DEVICEW *i
             goto done;
 
         /* DeviceKey */
-        if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceKey) + sizeof(info->DeviceKey))
-            lstrcpyW( info->DeviceKey, bufferW );
+        lstrcpyW( info->device_key, bufferW );
 
         /* DeviceName */
-        swprintf( info->DeviceName, ARRAY_SIZE(info->DeviceName), L"\\\\.\\DISPLAY%d", index + 1 );
+        swprintf( info->device_name, ARRAY_SIZE(info->device_name), L"\\\\.\\DISPLAY%d", index + 1 );
 
         /* Strip \Registry\Machine\ */
         lstrcpyW( key_nameW, bufferW + 18 );
 
         /* DeviceString */
-        size = sizeof(info->DeviceString);
+        size = sizeof(info->device_string);
         if (RegGetValueW( HKEY_LOCAL_MACHINE, key_nameW, L"DriverDesc", RRF_RT_REG_SZ, NULL,
-                          info->DeviceString, &size ))
+                          info->device_string, &size ))
             goto done;
 
         /* StateFlags */
-        size = sizeof(info->StateFlags);
+        size = sizeof(info->state_flags);
         if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"StateFlags", RRF_RT_REG_DWORD, NULL,
-                          &info->StateFlags, &size ))
+                          &info->state_flags, &size ))
             goto done;
 
+        /* Interface name */
+        info->interface_name[0] = 0;
+
         /* DeviceID */
-        if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceID) + sizeof(info->DeviceID))
-        {
-            if (flags & EDD_GET_DEVICE_INTERFACE_NAME)
-                info->DeviceID[0] = 0;
-            else
-            {
-                size = sizeof(bufferW);
-                if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"GPUID", RRF_RT_REG_SZ | RRF_ZEROONFAILURE, NULL,
-                                  bufferW, &size ))
-                    goto done;
-                set = SetupDiCreateDeviceInfoList( &GUID_DEVCLASS_DISPLAY, NULL );
-                if (!SetupDiOpenDeviceInfoW( set, bufferW, NULL, 0, &device_data )
-                    || !SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_HARDWAREID, NULL, (BYTE *)bufferW,
-                                                           sizeof(bufferW), NULL ))
-                    goto done;
-                lstrcpyW( info->DeviceID, bufferW );
-            }
-        }
+        size = sizeof(bufferW);
+        if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"GPUID", RRF_RT_REG_SZ | RRF_ZEROONFAILURE, NULL,
+                          bufferW, &size ))
+            goto done;
+        set = SetupDiCreateDeviceInfoList( &GUID_DEVCLASS_DISPLAY, NULL );
+        if (!SetupDiOpenDeviceInfoW( set, bufferW, NULL, 0, &device_data )
+            || !SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_HARDWAREID, NULL, (BYTE *)bufferW,
+                                                   sizeof(bufferW), NULL ))
+            goto done;
+        lstrcpyW( info->device_id, bufferW );
     }
     /* Find monitor */
     else
@@ -4242,7 +4405,7 @@ BOOL WINAPI EnumDisplayDevicesW( LPCWSTR device, DWORD index, DISPLAY_DEVICEW *i
             goto done;
 
         /* DeviceName */
-        swprintf( info->DeviceName, ARRAY_SIZE(info->DeviceName), L"\\\\.\\DISPLAY%d\\Monitor%d", adapter_index, index );
+        swprintf( info->device_name, ARRAY_SIZE(info->device_name), L"\\\\.\\DISPLAY%d\\Monitor%d", adapter_index, index );
 
         /* Get monitor instance */
         /* Strip \Registry\Machine\ first */
@@ -4259,63 +4422,51 @@ BOOL WINAPI EnumDisplayDevicesW( LPCWSTR device, DWORD index, DISPLAY_DEVICEW *i
 
         /* StateFlags */
         if (!SetupDiGetDevicePropertyW( set, &device_data, &WINE_DEVPROPKEY_MONITOR_STATEFLAGS, &type,
-                                        (BYTE *)&info->StateFlags, sizeof(info->StateFlags), NULL, 0 ))
+                                        (BYTE *)&info->state_flags, sizeof(info->state_flags), NULL, 0 ))
             goto done;
 
         /* DeviceString */
         if (!SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_DEVICEDESC, NULL,
-                                                (BYTE *)info->DeviceString,
-                                                sizeof(info->DeviceString), NULL ))
+                                                (BYTE *)info->device_string,
+                                                sizeof(info->device_string), NULL ))
             goto done;
 
         /* DeviceKey */
-        if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceKey) + sizeof(info->DeviceKey))
-        {
-            if (!SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_DRIVER, NULL, (BYTE *)bufferW,
-                                                    sizeof(bufferW), NULL ))
-                goto done;
+        if (!SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_DRIVER, NULL, (BYTE *)bufferW,
+                                                sizeof(bufferW), NULL ))
+            goto done;
 
-            lstrcpyW( info->DeviceKey, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Class\\" );
-            lstrcatW( info->DeviceKey, bufferW );
+        lstrcpyW( info->device_key, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Class\\" );
+        lstrcatW( info->device_key, bufferW );
+
+        /* Interface name */
+        lstrcpyW( info->interface_name, L"\\\\\?\\" );
+        lstrcatW( info->interface_name, instanceW );
+        lstrcatW( info->interface_name, L"#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}" );
+        /* Replace '\\' with '#' after prefix */
+        for (next_charW = info->interface_name + lstrlenW( L"\\\\\?\\" ); *next_charW; next_charW++)
+        {
+            if (*next_charW == '\\')
+                *next_charW = '#';
         }
 
         /* DeviceID */
-        if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceID) + sizeof(info->DeviceID))
-        {
-            if (flags & EDD_GET_DEVICE_INTERFACE_NAME)
-            {
-                lstrcpyW( info->DeviceID, L"\\\\\?\\" );
-                lstrcatW( info->DeviceID, instanceW );
-                lstrcatW( info->DeviceID, L"#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}" );
-                /* Replace '\\' with '#' after prefix */
-                for (next_charW = info->DeviceID + lstrlenW( L"\\\\\?\\" ); *next_charW;
-                     next_charW++)
-                {
-                    if (*next_charW == '\\')
-                        *next_charW = '#';
-                }
-            }
-            else
-            {
-                if (!SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_HARDWAREID, NULL, (BYTE *)bufferW,
-                                                        sizeof(bufferW), NULL ))
-                    goto done;
+        if (!SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_HARDWAREID, NULL, (BYTE *)bufferW,
+                                                sizeof(bufferW), NULL ))
+            goto done;
 
-                lstrcpyW( info->DeviceID, bufferW );
-                lstrcatW( info->DeviceID, L"\\" );
+        lstrcpyW( info->device_id, bufferW );
+        lstrcatW( info->device_id, L"\\" );
 
-                if (!SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_DRIVER, NULL, (BYTE *)bufferW,
-                                                        sizeof(bufferW), NULL ))
-                    goto done;
+        if (!SetupDiGetDeviceRegistryPropertyW( set, &device_data, SPDRP_DRIVER, NULL, (BYTE *)bufferW,
+                                                sizeof(bufferW), NULL ))
+            goto done;
 
-                lstrcatW( info->DeviceID, bufferW );
-            }
-        }
+        lstrcatW( info->device_id, bufferW );
     }
 
     ret = TRUE;
 done:
-    release_display_device_init_mutex( mutex );
     SetupDiDestroyDeviceInfoList( set );
     if (ret)
         return ret;
@@ -4335,17 +4486,12 @@ done:
     /* Adapter */
     if (!device)
     {
-        lstrcpyW( info->DeviceName, L"\\\\.\\DISPLAY1" );
-        lstrcpyW( info->DeviceString, L"Wine Adapter" );
-        info->StateFlags =
-            DISPLAY_DEVICE_ATTACHED_TO_DESKTOP | DISPLAY_DEVICE_PRIMARY_DEVICE | DISPLAY_DEVICE_VGA_COMPATIBLE;
-        if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceID) + sizeof(info->DeviceID))
-        {
-            if (flags & EDD_GET_DEVICE_INTERFACE_NAME)
-                info->DeviceID[0] = 0;
-            else
-                lstrcpyW( info->DeviceID, L"PCI\\VEN_0000&DEV_0000&SUBSYS_00000000&REV_00" );
-        }
+        lstrcpyW( info->device_name, L"\\\\.\\DISPLAY1" );
+        lstrcpyW( info->device_string, L"Wine Adapter" );
+        info->state_flags = DISPLAY_DEVICE_ATTACHED_TO_DESKTOP | DISPLAY_DEVICE_PRIMARY_DEVICE | DISPLAY_DEVICE_VGA_COMPATIBLE;
+        info->interface_name[0] = 0;
+        lstrcpyW( info->device_id, L"PCI\\VEN_0000&DEV_0000&SUBSYS_00000000&REV_00" );
+        info->device_key[0] = 0;
     }
     /* Monitor */
     else
@@ -4353,20 +4499,13 @@ done:
         if (lstrcmpiW( L"\\\\.\\DISPLAY1", device ))
             return FALSE;
 
-        lstrcpyW( info->DeviceName, L"\\\\.\\DISPLAY1\\Monitor0" );
-        lstrcpyW( info->DeviceString, L"Generic Non-PnP Monitor" );
-        info->StateFlags = DISPLAY_DEVICE_ACTIVE | DISPLAY_DEVICE_ATTACHED;
-        if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceID) + sizeof(info->DeviceID))
-        {
-            if (flags & EDD_GET_DEVICE_INTERFACE_NAME)
-                lstrcpyW( info->DeviceID, L"\\\\\?\\DISPLAY#Default_Monitor#4&17f0ff54&0&UID0#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}" );
-            else
-                lstrcpyW( info->DeviceID, L"MONITOR\\Default_Monitor\\{4d36e96e-e325-11ce-bfc1-08002be10318}\\0000" );
-        }
+        lstrcpyW( info->device_name, L"\\\\.\\DISPLAY1\\Monitor0" );
+        lstrcpyW( info->device_string, L"Generic Non-PnP Monitor" );
+        info->state_flags = DISPLAY_DEVICE_ACTIVE | DISPLAY_DEVICE_ATTACHED;
+        lstrcpyW( info->interface_name, L"\\\\\?\\DISPLAY#Default_Monitor#4&17f0ff54&0&UID0#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}" );
+        lstrcpyW( info->device_id, L"MONITOR\\Default_Monitor\\{4d36e96e-e325-11ce-bfc1-08002be10318}\\0000" );
+        info->device_key[0] = 0;
     }
-
-    if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceKey) + sizeof(info->DeviceKey))
-        info->DeviceKey[0] = 0;
 
     return TRUE;
 }

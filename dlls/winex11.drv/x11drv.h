@@ -446,6 +446,7 @@ enum x11drv_atoms
     XATOM__NET_SYSTEM_TRAY_OPCODE,
     XATOM__NET_SYSTEM_TRAY_S0,
     XATOM__NET_SYSTEM_TRAY_VISUAL,
+    XATOM__NET_WM_BYPASS_COMPOSITOR,
     XATOM__NET_WM_ICON,
     XATOM__NET_WM_MOVERESIZE,
     XATOM__NET_WM_NAME,
@@ -455,6 +456,7 @@ enum x11drv_atoms
     XATOM__NET_WM_STATE_ABOVE,
     XATOM__NET_WM_STATE_DEMANDS_ATTENTION,
     XATOM__NET_WM_STATE_FULLSCREEN,
+    XATOM__NET_WM_STATE_HIDDEN,
     XATOM__NET_WM_STATE_MAXIMIZED_HORZ,
     XATOM__NET_WM_STATE_MAXIMIZED_VERT,
     XATOM__NET_WM_STATE_SKIP_PAGER,
@@ -550,6 +552,7 @@ enum x11drv_net_wm_state
 {
     NET_WM_STATE_FULLSCREEN,
     NET_WM_STATE_ABOVE,
+    NET_WM_STATE_HIDDEN,
     NET_WM_STATE_MAXIMIZED,
     NET_WM_STATE_SKIP_PAGER,
     NET_WM_STATE_SKIP_TASKBAR,
@@ -573,10 +576,13 @@ struct x11drv_win_data
     BOOL        managed : 1;    /* is window managed? */
     BOOL        mapped : 1;     /* is window mapped? (in either normal or iconic state) */
     BOOL        iconic : 1;     /* is window in iconic state? */
+    BOOL        cloaked : 1;    /* is window cloaked manually? */
     BOOL        embedded : 1;   /* is window an XEMBED client? */
     BOOL        shaped : 1;     /* is window using a custom region shape? */
     BOOL        layered : 1;    /* is window layered and with valid attributes? */
     BOOL        use_alpha : 1;  /* does window use an alpha channel? */
+    BOOL        off_desktop : 1;/* is window on another WM desktop? */
+    BOOL        shell_cloak : 1;/* the shell is (un)cloaking the window */
     int         wm_state;       /* current value of the WM_STATE property */
     DWORD       net_wm_state;   /* bit mask of active x11drv_net_wm_state values */
     Window      embedder;       /* window id of embedder */
@@ -827,5 +833,45 @@ static inline BOOL is_window_rect_mapped( const RECT *rect )
             max( rect->right, rect->left + 1 ) > virtual_rect.left &&
             max( rect->bottom, rect->top + 1 ) > virtual_rect.top);
 }
+
+/* Undocumented structure for (Get|Set)WindowCompositionAttribute */
+struct WINCOMPATTRDATA
+{
+    DWORD attribute;
+    void *pData;
+    ULONG dataSize;
+};
+enum
+{
+    WCA_UNDEFINED = 0,
+    WCA_NCRENDERING_ENABLED = 1,
+    WCA_NCRENDERING_POLICY = 2,
+    WCA_TRANSITIONS_FORCEDISABLED = 3,
+    WCA_ALLOW_NCPAINT = 4,
+    WCA_CAPTION_BUTTON_BOUNDS = 5,
+    WCA_NONCLIENT_RTL_LAYOUT = 6,
+    WCA_FORCE_ICONIC_REPRESENTATION = 7,
+    WCA_EXTENDED_FRAME_BOUNDS = 8,
+    WCA_HAS_ICONIC_BITMAP = 9,
+    WCA_THEME_ATTRIBUTES = 10,
+    WCA_NCRENDERING_EXILED = 11,
+    WCA_NCADORNMENTINFO = 12,
+    WCA_EXCLUDED_FROM_LIVEPREVIEW = 13,
+    WCA_VIDEO_OVERLAY_ACTIVE = 14,
+    WCA_FORCE_ACTIVEWINDOW_APPEARANCE = 15,
+    WCA_DISALLOW_PEEK = 16,
+    WCA_CLOAK = 17,
+    WCA_CLOAKED = 18,
+    WCA_ACCENT_POLICY = 19,
+    WCA_FREEZE_REPRESENTATION = 20,
+    WCA_EVER_UNCLOAKED = 21,
+    WCA_VISUAL_OWNER = 22,
+    WCA_HOLOGRAPHIC = 23,
+    WCA_EXCLUDED_FROM_DDA = 24,
+    WCA_PASSIVEUPDATEMODE = 25,
+    WCA_USEDARKMODECOLORS = 26,
+    WCA_LAST
+};
+BOOL WINAPI SetWindowCompositionAttribute(HWND, const struct WINCOMPATTRDATA*);
 
 #endif  /* __WINE_X11DRV_H */
