@@ -2479,7 +2479,7 @@ static BOOL write_freedesktop_mime_type_entry(const char *packages_dir, const ch
     return ret;
 }
 
-static BOOL is_extension_banned(const WCHAR *extension)
+static BOOL is_extension_banned(LPCWSTR extension)
 {
     /* These are managed through external tools like wine.desktop, to evade malware created file type associations */
     static const WCHAR comW[] = {'.','c','o','m',0};
@@ -2490,42 +2490,6 @@ static BOOL is_extension_banned(const WCHAR *extension)
         !strcmpiW(extension, exeW) ||
         !strcmpiW(extension, msiW))
         return TRUE;
-    return FALSE;
-}
-
-static BOOL is_soft_blacklisted(const WCHAR *extension, const WCHAR *command)
-{
-    static const WCHAR FileOpenBlacklistW[] = {'S','o','f','t','w','a','r','e','\\',
-                                               'W','i','n','e','\\',
-                                               'F','i','l','e','O','p','e','n','B','l','a','c','k','l','i','s','t','\\',0};
-    WCHAR blacklist_key_path[MAX_PATH];
-    HKEY blacklist_key;
-    WCHAR program_name[MAX_PATH], *blacklisted_command;
-    DWORD len = ARRAY_SIZE(program_name);
-    DWORD i = 0;
-
-    if (ARRAY_SIZE(FileOpenBlacklistW) + lstrlenW(extension) > ARRAY_SIZE(blacklist_key_path))
-        return FALSE;
-
-    lstrcpyW(blacklist_key_path, FileOpenBlacklistW);
-    lstrcatW(blacklist_key_path, extension);
-
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, blacklist_key_path, 0, KEY_QUERY_VALUE, &blacklist_key) != ERROR_SUCCESS)
-        return FALSE;
-
-    while (RegEnumValueW(blacklist_key, i, program_name, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
-    {
-        blacklisted_command = reg_get_valW(HKEY_CURRENT_USER, blacklist_key_path, program_name);
-        if (strcmpW(command, blacklisted_command) == 0)
-        {
-            RegCloseKey(blacklist_key);
-            return TRUE;
-        }
-        len = ARRAY_SIZE(program_name);
-        i++;
-    }
-
-    RegCloseKey(blacklist_key);
     return FALSE;
 }
 
@@ -2627,15 +2591,6 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
             char *progIdA = NULL;
             char *mimeProgId = NULL;
 
-            commandW = assoc_query(ASSOCSTR_COMMAND, extensionW, openW);
-            if (commandW == NULL)
-                /* no command => no application is associated */
-                goto end;
-
-            if (is_soft_blacklisted(extensionW, commandW))
-                /* command is on the blacklist => desktop integration is not desirable */
-                goto end;
-
             extensionA = wchars_to_utf8_chars(strlwrW(extensionW));
             if (extensionA == NULL)
             {
@@ -2703,6 +2658,11 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
                     goto end;
                 }
             }
+
+            commandW = assoc_query(ASSOCSTR_COMMAND, extensionW, openW);
+            if (commandW == NULL)
+                /* no command => no application is associated */
+                goto end;
 
             executableW = assoc_query(ASSOCSTR_EXECUTABLE, extensionW, openW);
             if (executableW)

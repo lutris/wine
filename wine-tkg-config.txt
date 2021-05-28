@@ -1,0 +1,53 @@
+# Last wine-tkg-staging-esync-git configuration - Fri May 28 06:21:27 PM MSK 2021 :
+
+External configuration file ~/git_projects/build-preparation/wine-tkg-git/wine-tkg.cfg used
+
+Wine (plain) version: 6.9.r0.g9561af9a7d8
+Using wine-staging patchset (version 6.9.r0.gcfe44f6d)
+
+Disabled the local Esync patchset to use Staging impl instead.
+Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
+
+Done applying reverting hotfixes (if any) - list available in prepare.log
+
+Applied hotfix protonify_stg_syscall_emu.mystagingpatch
+childwindow.patch -- ( Applied child window for vk patch )
+steam.patch -- ( Applied steam crossover hack )
+CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
+
+Staging overrides, if any: -W winemenubuilder-integration -W ntdll-NtAlertThreadByThreadId -W Pipelight -W winex11-Vulkan_support -W bcrypt-ECDHSecretAgreement
+
+use_clock_monotonic-staging.patch -- ( Applied clock_monotonic patch )
+ffxiv-launcher-workaround.patch -- ( Applied Final Fantasy XIV Launcher fix )
+mk11.patch -- ( Applied Mortal Kombat 11 fix )
+
+LAA-unix-staging.patch -- ( Applied large address aware override support )
+
+msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
+proton-bcrypt-staging.patch -- ( Using Proton Bcrypt patches )
+josh-flat-theme.patch -- ( Add Josh's better-theme )
+proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
+
+Applied hotfix virtual_alloc_remi2.mypatch
+Applied your own patch 0001-powershell-add-wrapper-for-powershell-using-Powershe.mypatch
+Applied your own patch 38-proton-mouse-focus-fixes.mypatch
+Applied your own patch amdags.mypatch
+Applied your own patch blackops2_unhandled_exception_fix.mypatch
+Applied your own patch D3D10CoreRegisterLayers.mypatch
+Applied your own patch dotnetfx35_stuf.mypatch
+Applied your own patch dsound.mypatch
+Applied your own patch fix-sse-in-signal.mypatch
+Applied your own patch gabriel_winex11.mypatch
+Applied your own patch GetQueuedCompletionStatus.mypatch
+Applied your own patch ldlibrary_chromium_fix.mypatch
+Applied your own patch macromedia_director.mypatch
+Applied your own patch ps0232-winex11.drv-Add-a-taskbar-button-for-a-minimized-owned-window.mypatch
+Applied your own patch ps0286-user32-Send-WM_NCCALCSIZE-message-when-a-new-window-is-displayed.mypatch
+Applied your own patch ps9999-evdev-readdir.mypatch
+Applied your own patch ps9999-productid.mypatch
+Applied your own patch rockstar_installer_fix_heap.mypatch
+Applied your own patch unity-alt-tab-fix.mypatch
+Applied your own patch winegstreamer.mypatch
+Applied your own patch winex11-fs-no_above_state-nofshack.mypatch
+
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

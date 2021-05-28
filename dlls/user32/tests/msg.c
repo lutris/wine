@@ -10590,7 +10590,6 @@ static void test_timers(void)
     start = GetTickCount();
     while (GetTickCount()-start < 1001 && GetMessageA(&msg, info.hWnd, 0, 0))
         DispatchMessageA(&msg);
-todo_wine
     ok(abs(count-TIMER_COUNT_EXPECTED) < TIMER_COUNT_TOLERANCE /* xp */
        || broken(abs(count-64) <= TIMER_COUNT_TOLERANCE) /* most common */
        || broken(abs(count-43) <= TIMER_COUNT_TOLERANCE) /* w2k3, win8 */,
@@ -10661,7 +10660,6 @@ static void test_timers_no_wnd(void)
     start = GetTickCount();
     while (GetTickCount()-start < 1001 && GetMessageA(&msg, NULL, 0, 0))
         DispatchMessageA(&msg);
-todo_wine
     ok(abs(count-TIMER_COUNT_EXPECTED) < TIMER_COUNT_TOLERANCE /* xp */
        || broken(abs(count-64) <= TIMER_COUNT_TOLERANCE) /* most common */
        || broken(abs(count-43) <= TIMER_COUNT_TOLERANCE) /* w1064v1809 */,

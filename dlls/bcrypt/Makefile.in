@@ -1,18 +1,16 @@
 MODULE    = bcrypt.dll
 IMPORTS   = advapi32
 IMPORTLIB = bcrypt
-EXTRAINCL = $(GNUTLS_CFLAGS)
+EXTRAINCL = $(GNUTLS_CFLAGS) $(GMP_CFLAGS)
 
 EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	bcrypt_main.c \
-	gcrypt.c \
 	gnutls.c \
 	macos.c \
 	md2.c \
 	sha256.c \
-	sha512.c \
-	unixlib.c
+	sha512.c
 
 RC_SRCS = version.rc
