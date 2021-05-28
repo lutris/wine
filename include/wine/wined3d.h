@@ -1343,6 +1343,7 @@ enum wined3d_pipeline
 #define WINED3D_NO_PRIMITIVE_RESTART                            0x00000800
 #define WINED3D_LEGACY_CUBEMAP_FILTERING                        0x00001000
 #define WINED3D_NORMALIZED_DEPTH_BIAS                           0x00002000
+#define WINED3D_LEGACY_SHADER_CONSTANTS                         0x00004000
 
 #define WINED3D_RESZ_CODE                                       0x7fa05000
 
@@ -1609,6 +1610,7 @@ enum wined3d_pipeline
 #define WINED3D_MAX_CONSTS_B                                    16
 #define WINED3D_MAX_CONSTS_I                                    16
 #define WINED3D_MAX_VS_CONSTS_F                                 256
+#define WINED3D_MAX_VS_CONSTS_F_SWVP                            8192
 #define WINED3D_MAX_PS_CONSTS_F                                 224
 #define WINED3D_MAX_RENDER_TARGETS                              8
 
@@ -2187,7 +2189,7 @@ struct wined3d_stateblock_state
     int base_vertex_index;
 
     struct wined3d_shader *vs;
-    struct wined3d_vec4 vs_consts_f[WINED3D_MAX_VS_CONSTS_F];
+    struct wined3d_vec4 vs_consts_f[WINED3D_MAX_VS_CONSTS_F_SWVP];
     struct wined3d_ivec4 vs_consts_i[WINED3D_MAX_CONSTS_I];
     BOOL vs_consts_b[WINED3D_MAX_CONSTS_B];
 
@@ -2221,6 +2223,7 @@ struct wined3d;
 struct wined3d_adapter;
 struct wined3d_blend_state;
 struct wined3d_buffer;
+struct wined3d_command_list;
 struct wined3d_depth_stencil_state;
 struct wined3d_device;
 struct wined3d_device_context;
@@ -2340,6 +2343,14 @@ void * __cdecl wined3d_buffer_get_parent(const struct wined3d_buffer *buffer);
 struct wined3d_resource * __cdecl wined3d_buffer_get_resource(struct wined3d_buffer *buffer);
 ULONG __cdecl wined3d_buffer_incref(struct wined3d_buffer *buffer);
 
+ULONG __cdecl wined3d_command_list_decref(struct wined3d_command_list *list);
+ULONG __cdecl wined3d_command_list_incref(struct wined3d_command_list *list);
+
+HRESULT __cdecl wined3d_deferred_context_create(struct wined3d_device *device, struct wined3d_device_context **context);
+void __cdecl wined3d_deferred_context_destroy(struct wined3d_device_context *context);
+HRESULT __cdecl wined3d_deferred_context_record_command_list(struct wined3d_device_context *context,
+        BOOL restore, struct wined3d_command_list **list);
+
 HRESULT __cdecl wined3d_depth_stencil_state_create(struct wined3d_device *device,
         const struct wined3d_depth_stencil_state_desc *desc, void *parent,
         const struct wined3d_parent_ops *parent_ops, struct wined3d_depth_stencil_state **state);
@@ -2433,6 +2444,8 @@ void __cdecl wined3d_device_context_draw_indexed(struct wined3d_device_context *
         unsigned int start_index, unsigned int index_count, unsigned int start_instance, unsigned int instance_count);
 void __cdecl wined3d_device_context_draw_indirect(struct wined3d_device_context *context,
         struct wined3d_buffer *buffer, unsigned int offset, bool indexed);
+void __cdecl wined3d_device_context_execute_command_list(struct wined3d_device_context *context,
+        struct wined3d_command_list *list, BOOL restore_state);
 void __cdecl wined3d_device_context_flush(struct wined3d_device_context *context);
 void __cdecl wined3d_device_context_generate_mipmaps(struct wined3d_device_context *context,
         struct wined3d_shader_resource_view *view);
@@ -2477,6 +2490,7 @@ void __cdecl wined3d_device_context_issue_query(struct wined3d_device_context *c
 HRESULT __cdecl wined3d_device_context_map(struct wined3d_device_context *context,
         struct wined3d_resource *resource, unsigned int sub_resource_idx,
         struct wined3d_map_desc *map_desc, const struct wined3d_box *box, unsigned int flags);
+void __cdecl wined3d_device_context_reset_state(struct wined3d_device_context *context);
 void __cdecl wined3d_device_context_resolve_sub_resource(struct wined3d_device_context *context,
         struct wined3d_resource *dst_resource, unsigned int dst_sub_resource_idx,
         struct wined3d_resource *src_resource, unsigned int src_sub_resource_idx, enum wined3d_format_id format_id);
@@ -2484,6 +2498,8 @@ void __cdecl wined3d_device_context_set_blend_state(struct wined3d_device_contex
         struct wined3d_blend_state *state, const struct wined3d_color *blend_factor, unsigned int sample_mask);
 void __cdecl wined3d_device_context_set_constant_buffer(struct wined3d_device_context *context,
         enum wined3d_shader_type type, unsigned int idx, struct wined3d_buffer *buffer);
+void __cdecl wined3d_device_context_set_depth_bounds(struct wined3d_device_context *context,
+        BOOL enable, float min, float max);
 void __cdecl wined3d_device_context_set_depth_stencil_state(struct wined3d_device_context *context,
         struct wined3d_depth_stencil_state *depth_stencil_state, unsigned int stencil_ref);
 HRESULT __cdecl wined3d_device_context_set_depth_stencil_view(struct wined3d_device_context *context,

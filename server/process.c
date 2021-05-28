@@ -49,6 +49,7 @@
 #include "request.h"
 #include "user.h"
 #include "security.h"
+#include "esync.h"
 
 /* process object */
 
@@ -81,6 +82,7 @@ static struct security_descriptor *process_get_sd( struct object *obj );
 static void process_poll_event( struct fd *fd, int event );
 static struct list *process_get_kernel_obj_list( struct object *obj );
 static void process_destroy( struct object *obj );
+static int process_get_esync_fd( struct object *obj, enum esync_type *type );
 static void terminate_process( struct process *process, struct thread *skip, int exit_code );
 
 static const struct object_ops process_ops =
@@ -91,6 +93,7 @@ static const struct object_ops process_ops =
     add_queue,                   /* add_queue */
     remove_queue,                /* remove_queue */
     process_signaled,            /* signaled */
+    process_get_esync_fd,        /* get_esync_fd */
     no_satisfied,                /* satisfied */
     no_signal,                   /* signal */
     no_get_fd,                   /* get_fd */
@@ -142,6 +145,7 @@ static const struct object_ops startup_info_ops =
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     startup_info_signaled,         /* signaled */
+    NULL,                          /* get_esync_fd */
     no_satisfied,                  /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
@@ -203,6 +207,7 @@ static const struct object_ops job_ops =
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     job_signaled,                  /* signaled */
+    NULL,                          /* get_esync_fd */
     no_satisfied,                  /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
@@ -632,6 +637,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->trace_data      = 0;
     process->rawinput_mouse  = NULL;
     process->rawinput_kbd    = NULL;
+    process->esync_fd        = -1;
     list_init( &process->kernel_object );
     list_init( &process->thread_list );
     list_init( &process->locks );
@@ -659,7 +665,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     if (!parent)
     {
         process->handles = alloc_handle_table( process, 0 );
-        process->token = token_create_admin( TokenElevationTypeFull );
+        process->token = token_create_admin( TokenElevationTypeLimited );
         process->affinity = ~0;
     }
     else
@@ -687,6 +693,9 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
      * makes more sense for the time being. */
     if (!token_assign_label( process->token, security_high_label_sid ))
         goto error;
+
+    if (do_esync())
+        process->esync_fd = esync_create_fd( 0, 0 );
 
     set_fd_events( process->msg_fd, POLLIN );  /* start listening to events */
     return process;
@@ -734,6 +743,7 @@ static void process_destroy( struct object *obj )
     if (process->token) release_object( process->token );
     free( process->dir_cache );
     free( process->image );
+    if (do_esync()) close( process->esync_fd );
 }
 
 /* dump a process on stdout for debugging purposes */
@@ -749,6 +759,13 @@ static int process_signaled( struct object *obj, struct wait_queue_entry *entry 
 {
     struct process *process = (struct process *)obj;
     return !process->running_threads;
+}
+
+static int process_get_esync_fd( struct object *obj, enum esync_type *type )
+{
+    struct process *process = (struct process *)obj;
+    *type = ESYNC_MANUAL_SERVER;
+    return process->esync_fd;
 }
 
 static unsigned int process_map_access( struct object *obj, unsigned int access )

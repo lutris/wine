@@ -33,6 +33,13 @@
 @ cdecl wined3d_buffer_get_resource(ptr)
 @ cdecl wined3d_buffer_incref(ptr)
 
+@ cdecl wined3d_command_list_decref(ptr)
+@ cdecl wined3d_command_list_incref(ptr)
+
+@ cdecl wined3d_deferred_context_create(ptr ptr)
+@ cdecl wined3d_deferred_context_destroy(ptr)
+@ cdecl wined3d_deferred_context_record_command_list(ptr long ptr)
+
 @ cdecl wined3d_depth_stencil_state_create(ptr ptr ptr ptr ptr)
 @ cdecl wined3d_depth_stencil_state_decref(ptr)
 @ cdecl wined3d_depth_stencil_state_get_parent(ptr)
@@ -89,6 +96,7 @@
 @ cdecl wined3d_device_context_draw_indirect(ptr ptr long long)
 @ cdecl wined3d_device_context_dispatch(ptr long long long)
 @ cdecl wined3d_device_context_dispatch_indirect(ptr ptr long)
+@ cdecl wined3d_device_context_execute_command_list(ptr ptr long)
 @ cdecl wined3d_device_context_flush(ptr)
 @ cdecl wined3d_device_context_generate_mipmaps(ptr ptr)
 @ cdecl wined3d_device_context_get_blend_state(ptr ptr ptr)
@@ -111,9 +119,11 @@
 @ cdecl wined3d_device_context_get_viewports(ptr ptr ptr)
 @ cdecl wined3d_device_context_issue_query(ptr ptr long)
 @ cdecl wined3d_device_context_map(ptr ptr long ptr ptr long)
+@ cdecl wined3d_device_context_reset_state(ptr)
 @ cdecl wined3d_device_context_resolve_sub_resource(ptr ptr long ptr long long)
 @ cdecl wined3d_device_context_set_blend_state(ptr ptr ptr long)
 @ cdecl wined3d_device_context_set_constant_buffer(ptr long long ptr)
+@ cdecl wined3d_device_context_set_depth_bounds(ptr long float float)
 @ cdecl wined3d_device_context_set_depth_stencil_state(ptr ptr long)
 @ cdecl wined3d_device_context_set_depth_stencil_view(ptr ptr)
 @ cdecl wined3d_device_context_set_index_buffer(ptr ptr long long)
