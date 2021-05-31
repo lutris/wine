@@ -1,0 +1,2 @@
+@ stub VidMmInterface
+@ stub VidSchInterface

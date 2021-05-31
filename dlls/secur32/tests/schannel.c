@@ -1317,7 +1317,7 @@ todo_wine
     status = InitializeSecurityContextA(&cred_handle, &context, (SEC_CHAR *)"localhost",
         ISC_REQ_CONFIDENTIALITY|ISC_REQ_STREAM,
         0, 0, NULL, 0, &context, &buffers[0], &attrs, NULL);
-    todo_wine ok(status == SEC_I_CONTINUE_NEEDED, "Expected SEC_I_CONTINUE_NEEDED, got %08x\n", status);
+    ok(status == SEC_I_CONTINUE_NEEDED, "Expected SEC_I_CONTINUE_NEEDED, got %08x\n", status);
     if (status != SEC_I_CONTINUE_NEEDED)
     {
         skip("skipping remaining renegotiate test\n");
@@ -1355,7 +1355,7 @@ todo_wine
             ISC_REQ_USE_SUPPLIED_CREDS, 0, 0, &buffers[1], 0, NULL, &buffers[0], &attrs, NULL);
         buffers[1].pBuffers[0].cbBuffer = buf_size;
     }
-    ok (status == SEC_E_OK, "got %08x\n", status);
+    todo_wine ok (status == SEC_E_OK, "got %08x\n", status);
 
     buf = &buffers[0].pBuffers[0];
     buf->cbBuffer = buf_size;
@@ -1365,7 +1365,7 @@ todo_wine
     buffers[0].pBuffers[0].BufferType = SECBUFFER_DATA;
     buffers[0].pBuffers[1].BufferType = SECBUFFER_EMPTY;
     status = DecryptMessage(&context, &buffers[0], 0, NULL);
-    ok(status == SEC_E_OK, "DecryptMessage failed: %08x\n", status);
+    todo_wine ok(status == SEC_E_OK, "DecryptMessage failed: %08x\n", status);
     if (status == SEC_E_OK)
     {
         ok(buffers[0].pBuffers[0].BufferType == SECBUFFER_STREAM_HEADER, "Expected first buffer to be SECBUFFER_STREAM_HEADER\n");

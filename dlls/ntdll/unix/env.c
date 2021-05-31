@@ -1921,6 +1921,7 @@ static inline DWORD append_string( void **ptr, const RTL_USER_PROCESS_PARAMETERS
  */
 static RTL_USER_PROCESS_PARAMETERS *build_initial_params(void)
 {
+    static const char *args[] = { "start.exe", "/exec" };
     static const WCHAR valueW[] = {'1',0};
     static const WCHAR pathW[] = {'P','A','T','H'};
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
@@ -1928,7 +1929,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params(void)
     WCHAR *dst, *image, *cmdline, *path, *bootstrap;
     WCHAR *env = get_initial_environment( &env_pos, &env_size );
     WCHAR *curdir = get_initial_directory();
-    void *module = NULL;
+    void *module;
     NTSTATUS status;
 
     /* store the initial PATH value */
@@ -1950,24 +1951,8 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params(void)
     add_registry_environment( &env, &env_pos, &env_size );
     env[env_pos++] = 0;
 
-    status = load_main_exe( NULL, main_argv[1], curdir, &image, &module );
-    if (!status)
-    {
-        if (main_image_info.ImageCharacteristics & IMAGE_FILE_DLL) status = STATUS_INVALID_IMAGE_FORMAT;
-        if (main_image_info.ImageFlags & IMAGE_FLAGS_ComPlusNativeReady)
-            main_image_info.Machine = native_machine;
-        if (main_image_info.Machine != current_machine) status = STATUS_INVALID_IMAGE_FORMAT;
-    }
-
-    if (status)  /* try launching it through start.exe */
-    {
-        static const char *args[] = { "start.exe", "/exec" };
-        free( image );
-        if (module) NtUnmapViewOfSection( GetCurrentProcess(), module );
-        load_start_exe( &image, &module );
-        prepend_argv( args, 2 );
-    }
-    else rebuild_argv();
+    load_start_exe( &image, &module );
+    prepend_argv( args, 2 );
 
     NtCurrentTeb()->Peb->ImageBaseAddress = module;
     main_wargv = build_wargv( get_dos_path( image ));

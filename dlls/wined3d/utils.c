@@ -5143,11 +5143,9 @@ const char *debug_d3dtstype(enum wined3d_transform_state tstype)
     TSTYPE_TO_STR(WINED3D_TS_WORLD_MATRIX(3));
 #undef TSTYPE_TO_STR
     default:
-        if (tstype > 256 && tstype < 512)
-        {
-            FIXME("WINED3D_TS_WORLD_MATRIX(%u). 1..255 not currently supported.\n", tstype);
-            return ("WINED3D_TS_WORLD_MATRIX > 0");
-        }
+        if (tstype > WINED3D_TS_WORLD_MATRIX(3) && tstype < WINED3D_TS_WORLD_MATRIX(256))
+            return ("WINED3D_TS_WORLD_MATRIX > 3");
+
         FIXME("Unrecognized transform state %#x.\n", tstype);
         return "unrecognized";
     }
@@ -5244,6 +5242,8 @@ const char *debug_d3dstate(DWORD state)
         return "STATE_DEPTH_STENCIL";
     if (STATE_IS_STENCIL_REF(state))
         return "STATE_STENCIL_REF";
+    if (STATE_IS_DEPTH_BOUNDS(state))
+        return "STATE_DEPTH_BOUNDS";
 
     return wine_dbg_sprintf("UNKNOWN_STATE(%#x)", state);
 }
@@ -6639,6 +6639,7 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
         settings->flatshading = FALSE;
 
     settings->swizzle_map = si->swizzle_map;
+    settings->vb_indices = is_indexed_vertex_blending(context, state);
 }
 
 int wined3d_ffp_vertex_program_key_compare(const void *key, const struct wine_rb_entry *entry)
