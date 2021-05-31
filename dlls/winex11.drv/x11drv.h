@@ -289,11 +289,9 @@ extern int *get_window_surface_mapping( int bpp, int *mapping ) DECLSPEC_HIDDEN;
 enum x11drv_escape_codes
 {
     X11DRV_SET_DRAWABLE,     /* set current drawable for a DC */
-    X11DRV_GET_DRAWABLE,     /* get current drawable for a DC */
     X11DRV_START_EXPOSURES,  /* start graphics exposures */
     X11DRV_END_EXPOSURES,    /* end graphics exposures */
-    X11DRV_FLUSH_GL_DRAWABLE, /* flush changes made to the gl drawable */
-    X11DRV_FLUSH_GDI_DISPLAY /* flush the gdi display */
+    X11DRV_PRESENT_DRAWABLE, /* present the drawable on screen */
 };
 
 struct x11drv_escape_set_drawable
@@ -304,18 +302,10 @@ struct x11drv_escape_set_drawable
     RECT                     dc_rect;      /* DC rectangle relative to drawable */
 };
 
-struct x11drv_escape_get_drawable
+struct x11drv_escape_present_drawable
 {
-    enum x11drv_escape_codes code;         /* escape code (X11DRV_GET_DRAWABLE) */
-    Drawable                 drawable;     /* X drawable */
-    Drawable                 gl_drawable;  /* GL drawable */
-    int                      pixel_format; /* internal GL pixel format */
-};
-
-struct x11drv_escape_flush_gl_drawable
-{
-    enum x11drv_escape_codes code;         /* escape code (X11DRV_FLUSH_GL_DRAWABLE) */
-    Drawable                 gl_drawable;  /* GL drawable */
+    enum x11drv_escape_codes code;         /* escape code (X11DRV_PRESENT_DRAWABLE) */
+    Drawable                 drawable;     /* GL / VK drawable */
     BOOL                     flush;        /* flush X11 before copying */
 };
 
@@ -406,6 +396,8 @@ extern BOOL show_systray DECLSPEC_HIDDEN;
 extern BOOL grab_pointer DECLSPEC_HIDDEN;
 extern BOOL grab_fullscreen DECLSPEC_HIDDEN;
 extern BOOL usexcomposite DECLSPEC_HIDDEN;
+extern BOOL use_xfixes DECLSPEC_HIDDEN;
+extern BOOL use_xpresent DECLSPEC_HIDDEN;
 extern BOOL managed_mode DECLSPEC_HIDDEN;
 extern BOOL decorated_mode DECLSPEC_HIDDEN;
 extern BOOL private_color_map DECLSPEC_HIDDEN;
@@ -413,6 +405,7 @@ extern int primary_monitor DECLSPEC_HIDDEN;
 extern int copy_default_colors DECLSPEC_HIDDEN;
 extern int alloc_system_colors DECLSPEC_HIDDEN;
 extern int xrender_error_base DECLSPEC_HIDDEN;
+extern int xfixes_event_base DECLSPEC_HIDDEN;
 extern HMODULE x11drv_module DECLSPEC_HIDDEN;
 extern char *process_name DECLSPEC_HIDDEN;
 extern Display *clipboard_display DECLSPEC_HIDDEN;
@@ -463,6 +456,7 @@ enum x11drv_atoms
     XATOM__NET_WM_STATE_ABOVE,
     XATOM__NET_WM_STATE_DEMANDS_ATTENTION,
     XATOM__NET_WM_STATE_FULLSCREEN,
+    XATOM__NET_WM_STATE_HIDDEN,
     XATOM__NET_WM_STATE_MAXIMIZED_HORZ,
     XATOM__NET_WM_STATE_MAXIMIZED_VERT,
     XATOM__NET_WM_STATE_SKIP_PAGER,
@@ -558,6 +552,7 @@ enum x11drv_net_wm_state
 {
     NET_WM_STATE_FULLSCREEN,
     NET_WM_STATE_ABOVE,
+    NET_WM_STATE_HIDDEN,
     NET_WM_STATE_MAXIMIZED,
     NET_WM_STATE_SKIP_PAGER,
     NET_WM_STATE_SKIP_TASKBAR,
@@ -581,10 +576,13 @@ struct x11drv_win_data
     BOOL        managed : 1;    /* is window managed? */
     BOOL        mapped : 1;     /* is window mapped? (in either normal or iconic state) */
     BOOL        iconic : 1;     /* is window in iconic state? */
+    BOOL        cloaked : 1;    /* is window cloaked manually? */
     BOOL        embedded : 1;   /* is window an XEMBED client? */
     BOOL        shaped : 1;     /* is window using a custom region shape? */
     BOOL        layered : 1;    /* is window layered and with valid attributes? */
     BOOL        use_alpha : 1;  /* does window use an alpha channel? */
+    BOOL        off_desktop : 1;/* is window on another WM desktop? */
+    BOOL        shell_cloak : 1;/* the shell is (un)cloaking the window */
     int         wm_state;       /* current value of the WM_STATE property */
     DWORD       net_wm_state;   /* bit mask of active x11drv_net_wm_state values */
     Window      embedder;       /* window id of embedder */
@@ -605,6 +603,8 @@ extern void sync_gl_drawable( HWND hwnd, BOOL known_child ) DECLSPEC_HIDDEN;
 extern void set_gl_drawable_parent( HWND hwnd, HWND parent ) DECLSPEC_HIDDEN;
 extern void destroy_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void wine_vk_surface_destroy( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void resize_vk_surfaces( HWND hwnd, Window active, int mask, XWindowChanges *changes ) DECLSPEC_HIDDEN;
+extern void sync_vk_surface( HWND hwnd, BOOL known_child ) DECLSPEC_HIDDEN;
 
 extern void wait_for_withdrawn_state( HWND hwnd, BOOL set ) DECLSPEC_HIDDEN;
 extern Window init_clip_window(void) DECLSPEC_HIDDEN;
@@ -614,6 +614,7 @@ extern void update_net_wm_states( struct x11drv_win_data *data ) DECLSPEC_HIDDEN
 extern void make_window_embedded( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern Window create_dummy_client_window(void) DECLSPEC_HIDDEN;
 extern Window create_client_window( HWND hwnd, const XVisualInfo *visual ) DECLSPEC_HIDDEN;
+extern void destroy_client_window( HWND hwnd, Window old_window, Window new_window ) DECLSPEC_HIDDEN;
 extern void set_window_visual( struct x11drv_win_data *data, const XVisualInfo *vis, BOOL use_alpha ) DECLSPEC_HIDDEN;
 extern void change_systray_owner( Display *display, Window systray_window ) DECLSPEC_HIDDEN;
 extern void update_systray_balloon_position(void) DECLSPEC_HIDDEN;
@@ -836,5 +837,45 @@ static inline BOOL is_window_rect_mapped( const RECT *rect )
             max( rect->right, rect->left + 1 ) > virtual_rect.left &&
             max( rect->bottom, rect->top + 1 ) > virtual_rect.top);
 }
+
+/* Undocumented structure for (Get|Set)WindowCompositionAttribute */
+struct WINCOMPATTRDATA
+{
+    DWORD attribute;
+    void *pData;
+    ULONG dataSize;
+};
+enum
+{
+    WCA_UNDEFINED = 0,
+    WCA_NCRENDERING_ENABLED = 1,
+    WCA_NCRENDERING_POLICY = 2,
+    WCA_TRANSITIONS_FORCEDISABLED = 3,
+    WCA_ALLOW_NCPAINT = 4,
+    WCA_CAPTION_BUTTON_BOUNDS = 5,
+    WCA_NONCLIENT_RTL_LAYOUT = 6,
+    WCA_FORCE_ICONIC_REPRESENTATION = 7,
+    WCA_EXTENDED_FRAME_BOUNDS = 8,
+    WCA_HAS_ICONIC_BITMAP = 9,
+    WCA_THEME_ATTRIBUTES = 10,
+    WCA_NCRENDERING_EXILED = 11,
+    WCA_NCADORNMENTINFO = 12,
+    WCA_EXCLUDED_FROM_LIVEPREVIEW = 13,
+    WCA_VIDEO_OVERLAY_ACTIVE = 14,
+    WCA_FORCE_ACTIVEWINDOW_APPEARANCE = 15,
+    WCA_DISALLOW_PEEK = 16,
+    WCA_CLOAK = 17,
+    WCA_CLOAKED = 18,
+    WCA_ACCENT_POLICY = 19,
+    WCA_FREEZE_REPRESENTATION = 20,
+    WCA_EVER_UNCLOAKED = 21,
+    WCA_VISUAL_OWNER = 22,
+    WCA_HOLOGRAPHIC = 23,
+    WCA_EXCLUDED_FROM_DDA = 24,
+    WCA_PASSIVEUPDATEMODE = 25,
+    WCA_USEDARKMODECOLORS = 26,
+    WCA_LAST
+};
+BOOL WINAPI SetWindowCompositionAttribute(HWND, const struct WINCOMPATTRDATA*);
 
 #endif  /* __WINE_X11DRV_H */

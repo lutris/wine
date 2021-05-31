@@ -1,0 +1,21 @@
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index f934d00792a..8afbf5b94d3 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -1918,6 +1918,7 @@ static void setup_raise_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec
+     size_t stack_size;
+     NTSTATUS status;
+     XSTATE *src_xs;
++    size_t i;
+ 
+     if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP)
+     {
+@@ -1954,6 +1955,8 @@ static void setup_raise_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec
+     }
+ 
+     stack = virtual_setup_exception( stack_ptr, stack_size, rec );
++    for (i = 0; i < sizeof(stack->rec); ++i)
++        *((volatile char*)&stack->rec + i) = 0;
+     stack->rec          = *rec;
+     stack->context      = *context;
+     if (src_xs)

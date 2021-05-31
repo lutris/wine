@@ -38,6 +38,7 @@
 #include "process.h"
 #include "user.h"
 #include "unicode.h"
+#include "dwmapi.h"
 
 /* a window property */
 struct property
@@ -82,6 +83,8 @@ struct window
     unsigned int     is_unicode : 1;  /* ANSI or unicode */
     unsigned int     is_linked : 1;   /* is it linked into the parent z-order list? */
     unsigned int     is_layered : 1;  /* has layered info been set? */
+    unsigned int     is_cloaked : 1;  /* is the window cloaked by the app? */
+    unsigned int     is_cloaked_by_shell : 1;
     unsigned int     color_key;       /* color key for a layered window */
     unsigned int     alpha;           /* alpha value for a layered window */
     unsigned int     layered_flags;   /* flags for a layered window */
@@ -505,6 +508,8 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->is_unicode     = 1;
     win->is_linked      = 0;
     win->is_layered     = 0;
+    win->is_cloaked     = 0;
+    win->is_cloaked_by_shell = 0;
     win->dpi_awareness  = DPI_AWARENESS_PER_MONITOR_AWARE;
     win->dpi            = 0;
     win->user_data      = 0;
@@ -608,7 +613,7 @@ int is_child_window( user_handle_t parent, user_handle_t child )
 int is_valid_foreground_window( user_handle_t window )
 {
     struct window *win = get_user_object( window, USER_WINDOW );
-    return win && (win->style & (WS_POPUP|WS_CHILD)) != WS_CHILD;
+    return win && (win->style & (WS_POPUP|WS_CHILD)) != WS_CHILD && !win->is_cloaked_by_shell;
 }
 
 /* make a window active if possible */
@@ -789,6 +794,7 @@ static int get_window_children_from_point( struct window *parent, int x, int y,
     {
         int x_child = x, y_child = y;
 
+        if (is_desktop_window( parent ) && (ptr->is_cloaked || ptr->is_cloaked_by_shell)) continue;
         if (!is_point_in_window( ptr, &x_child, &y_child, parent->dpi )) continue;  /* skip it */
 
         /* if point is in client area, and window is not minimized or disabled, check children */
@@ -861,6 +867,21 @@ static int all_windows_from_point( struct window *top, int x, int y, unsigned in
     return 1;
 }
 
+/* fill an array with the handles of all the owned windows, recursively */
+static unsigned int get_owned_windows( struct window *win, user_handle_t *handles )
+{
+    struct window *ptr, *parent = win->parent;
+    unsigned int count = 0;
+
+    LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
+    {
+        if (ptr->owner != win->handle) continue;
+        if (handles) handles[count] = ptr->handle;
+        count++;
+        count += get_owned_windows( ptr, handles ? handles + count : NULL );
+    }
+    return count;
+}
 
 /* return the thread owning a window */
 struct thread *get_window_thread( user_handle_t handle )
@@ -1979,14 +2000,16 @@ DECL_HANDLER(create_window)
         win->dpi_awareness = req->awareness;
         win->dpi = req->dpi;
     }
+    win->is_cloaked = owner ? owner->is_cloaked : 0;
 
-    reply->handle    = win->handle;
-    reply->parent    = win->parent ? win->parent->handle : 0;
-    reply->owner     = win->owner;
-    reply->extra     = win->nb_extra_bytes;
-    reply->dpi       = win->dpi;
-    reply->awareness = win->dpi_awareness;
-    reply->class_ptr = get_class_client_ptr( win->class );
+    reply->handle      = win->handle;
+    reply->parent      = win->parent ? win->parent->handle : 0;
+    reply->owner       = win->owner;
+    reply->extra       = win->nb_extra_bytes;
+    reply->dpi         = win->dpi;
+    reply->awareness   = win->dpi_awareness;
+    reply->class_ptr   = get_class_client_ptr( win->class );
+    reply->needs_cloak = win->is_cloaked;
 }
 
 
@@ -2086,8 +2109,9 @@ DECL_HANDLER(set_window_owner)
         }
     }
 
-    reply->prev_owner = win->owner;
-    reply->full_owner = win->owner = owner ? owner->handle : 0;
+    reply->prev_owner  = win->owner;
+    reply->full_owner  = win->owner = owner ? owner->handle : 0;
+    reply->needs_cloak = owner ? owner->is_cloaked : 0;
 }
 
 
@@ -2162,6 +2186,80 @@ DECL_HANDLER(set_window_info)
 
     /* changing window style triggers a non-client paint */
     if (req->flags & SET_WIN_STYLE) win->paint_flags |= PAINT_NONCLIENT;
+}
+
+
+/* get the window's cloaked attribute as DWM_CLOAKED_* value */
+DECL_HANDLER(get_window_cloaked)
+{
+    struct window *win = get_window( req->handle );
+    unsigned int cloaked = 0;
+
+    if (!win)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+    if (!is_desktop_window( win->parent ))
+    {
+        while (!is_desktop_window( win->parent ))
+            win = win->parent;
+        cloaked |= DWM_CLOAKED_INHERITED;
+    }
+
+    if (win->is_cloaked_by_shell) cloaked |= DWM_CLOAKED_SHELL;
+    else if (win->is_cloaked) cloaked |= DWM_CLOAKED_APP;
+    else cloaked = 0;
+
+    reply->cloaked = cloaked;
+}
+
+
+/* set the window's cloaked attribute */
+DECL_HANDLER(set_window_cloaked)
+{
+    struct window *win = get_window( req->handle );
+    unsigned int i, total;
+    user_handle_t *data;
+
+    if (!win) return;
+    if (req->cloaked & SET_WINDOW_CLOAKED_SHELL)
+    {
+        /* the shell has control over cloaking windows individually */
+        win->is_cloaked_by_shell = req->cloaked & SET_WINDOW_CLOAKED_ON;
+        reply->count = 0;
+        return;
+    }
+    if (is_desktop_window( win ))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!is_desktop_window( win->parent ))
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+
+    reply->count = total = get_owned_windows( win, NULL );
+    if (get_reply_max_size() < total * sizeof(user_handle_t))
+        return;
+
+    if (total)
+    {
+        if (!(data = set_reply_data_size( total * sizeof(user_handle_t) )))
+        {
+            set_error( STATUS_NO_MEMORY );
+            return;
+        }
+        get_owned_windows( win, data );
+    }
+
+    win->is_cloaked = req->cloaked;
+
+    for (i = 0; i < total; i++)
+        if ((win = get_window( data[i] )))
+            win->is_cloaked = req->cloaked;
 }
 
 
