@@ -2217,6 +2217,7 @@ static inline DWORD is_privileged_instr( CONTEXT *context )
 #ifdef HAVE_SECCOMP
 static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
+    ULONG64 *dispatcher_address = (ULONG64 *)((char *)user_shared_data + page_size);
     ucontext_t *ctx = sigcontext;
     void ***rsp;
 
@@ -2227,7 +2228,7 @@ static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     *rsp -= 1;
     **rsp = (void *)(ctx->uc_mcontext.gregs[REG_RIP] + 0xb);
 
-    ctx->uc_mcontext.gregs[REG_RIP] = (ULONG64)__wine_syscall_dispatcher;
+    ctx->uc_mcontext.gregs[REG_RIP] = *dispatcher_address;
 }
 #endif
 

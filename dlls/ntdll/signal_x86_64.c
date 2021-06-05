@@ -407,6 +407,8 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
     UNWIND_HISTORY_TABLE table;
     DISPATCHER_CONTEXT dispatch;
     CONTEXT context;
+    MEMORY_BASIC_INFORMATION wine_frame_stack_info, current_stack_info;
+    int is_teb_frame_in_current_stack = 1;
     NTSTATUS status;
 
     context = *orig_context;
@@ -415,6 +417,13 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
     dispatch.TargetIp      = 0;
     dispatch.ContextRecord = &context;
     dispatch.HistoryTable  = &table;
+
+    if ( !(NtQueryVirtualMemory(NtCurrentProcess(), teb_frame, MemoryBasicInformation, &wine_frame_stack_info, sizeof(MEMORY_BASIC_INFORMATION), NULL)) &&
+         !(NtQueryVirtualMemory(NtCurrentProcess(), (PVOID)context.Rsp, MemoryBasicInformation, &current_stack_info, sizeof(MEMORY_BASIC_INFORMATION), NULL)))
+    {
+        is_teb_frame_in_current_stack = wine_frame_stack_info.AllocationBase == current_stack_info.AllocationBase;
+    }
+
     for (;;)
     {
         status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context );
@@ -460,7 +469,7 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
             }
         }
         /* hack: call wine handlers registered in the tib list */
-        else while ((ULONG64)teb_frame < context.Rsp)
+        else if (is_teb_frame_in_current_stack) while ((ULONG64)teb_frame < context.Rsp)
         {
             TRACE( "found wine frame %p rsp %p handler %p\n",
                    teb_frame, (void *)context.Rsp, teb_frame->Handler );

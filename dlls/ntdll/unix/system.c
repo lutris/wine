@@ -2965,6 +2965,18 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
+    case SystemHypervisorSharedPageInformation:
+    {
+        len = sizeof(void *);
+        if (size >= len)
+        {
+            if (!info) ret = STATUS_ACCESS_VIOLATION;
+            else *(void **)info = hypervisor_shared_data;
+        }
+        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+    }
+
     default:
         FIXME( "(0x%08x,%p,%u,%p,%u,%p) stub\n", class, query, query_len, info, size, ret_size );
         break;

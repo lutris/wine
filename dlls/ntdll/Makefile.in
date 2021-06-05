@@ -9,6 +9,7 @@ EXTRADLLFLAGS = -mno-cygwin -nodefaultlibs -Wl,--image-base,0x7bc00000
 C_SRCS = \
 	actctx.c \
 	atom.c \
+	critsection.c \
 	crypt.c \
 	debugbuffer.c \
 	directory.c \
@@ -17,6 +18,7 @@ C_SRCS = \
 	exception.c \
 	handletable.c \
 	heap.c \
+	heap_lfh.c \
 	large_int.c \
 	loader.c \
 	locale.c \

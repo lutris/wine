@@ -400,6 +400,7 @@
 @ stdcall GetUserObjectSecurity (long ptr ptr long ptr)
 # @ stub GetWinStationInfo
 @ stdcall GetWindow(long long)
+@ stdcall GetWindowCompositionAttribute(ptr ptr)
 @ stdcall GetWindowContextHelpId(long)
 @ stdcall GetWindowDC(long)
 @ stdcall GetWindowDisplayAffinity(long ptr)

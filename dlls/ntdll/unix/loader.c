@@ -1812,6 +1812,20 @@ static struct unix_funcs unix_funcs =
 #endif
     DbgUiIssueRemoteBreakin,
     RtlGetSystemTimePrecise,
+    RtlWaitOnAddress,
+    RtlWakeAddressAll,
+    RtlWakeAddressSingle,
+    fast_RtlpWaitForCriticalSection,
+    fast_RtlpUnWaitCriticalSection,
+    fast_RtlDeleteCriticalSection,
+    fast_RtlTryAcquireSRWLockExclusive,
+    fast_RtlAcquireSRWLockExclusive,
+    fast_RtlTryAcquireSRWLockShared,
+    fast_RtlAcquireSRWLockShared,
+    fast_RtlReleaseSRWLockExclusive,
+    fast_RtlReleaseSRWLockShared,
+    fast_RtlWakeConditionVariable,
+    fast_wait_cv,
     ntdll_atan,
     ntdll_ceil,
     ntdll_cos,
@@ -1849,6 +1863,7 @@ static void start_main_thread(void)
     startup_info_size = server_init_process();
     esync_init();
     virtual_map_user_shared_data();
+    virtual_map_hypervisor_shared_data();
     init_cpu_info();
     syscall_dispatcher = signal_init_syscalls();
     init_files();
