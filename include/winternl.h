@@ -23,6 +23,7 @@
 
 #include <ntdef.h>
 #include <windef.h>
+#include <apiset.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -321,7 +322,7 @@ typedef struct _PEB
     PVOID                        KernelCallbackTable;               /* 02c/058 */
     ULONG                        Reserved;                          /* 030/060 */
     ULONG                        AtlThunkSListPtr32;                /* 034/064 */
-    PVOID /*PPEB_FREE_BLOCK*/    FreeList;                          /* 038/068 */
+    PAPI_SET_NAMESPACE_ARRAY     ApiSetMap;                         /* 038/068 */
     ULONG                        TlsExpansionCounter;               /* 03c/070 */
     PRTL_BITMAP                  TlsBitmap;                         /* 040/078 */
     ULONG                        TlsBitmapBits[2];                  /* 044/080 */
@@ -2679,6 +2680,7 @@ typedef struct _RTL_ATOM_TABLE
 #define FILE_OVERWRITE                  4
 #define FILE_OVERWRITE_IF               5
 #define FILE_MAXIMUM_DISPOSITION        5
+#define FILE_WINE_PATH                  6
 
 /* Characteristics of a File System */
 #define FILE_REMOVABLE_MEDIA                      0x00000001
@@ -3205,8 +3207,8 @@ typedef struct _LDR_DATA_TABLE_ENTRY
     ULONG               Flags;
     SHORT               LoadCount;
     SHORT               TlsIndex;
-    HANDLE              SectionHandle;
     ULONG               CheckSum;
+    LIST_ENTRY          HashLinks;
     ULONG               TimeDateStamp;
     HANDLE              ActivationContext;
     void*               Lock;
@@ -3659,6 +3661,7 @@ NTSYSAPI NTSTATUS  WINAPI NtAdjustGroupsToken(HANDLE,BOOLEAN,PTOKEN_GROUPS,ULONG
 NTSYSAPI NTSTATUS  WINAPI NtAdjustPrivilegesToken(HANDLE,BOOLEAN,PTOKEN_PRIVILEGES,DWORD,PTOKEN_PRIVILEGES,PDWORD);
 NTSYSAPI NTSTATUS  WINAPI NtAlertResumeThread(HANDLE,PULONG);
 NTSYSAPI NTSTATUS  WINAPI NtAlertThread(HANDLE ThreadHandle);
+NTSYSAPI NTSTATUS  WINAPI NtAlertThreadByThreadId(HANDLE);
 NTSYSAPI NTSTATUS  WINAPI NtAllocateLocallyUniqueId(PLUID lpLuid);
 NTSYSAPI NTSTATUS  WINAPI NtAllocateUuids(PULARGE_INTEGER,PULONG,PULONG,PUCHAR);
 NTSYSAPI NTSTATUS  WINAPI NtAllocateVirtualMemory(HANDLE,PVOID*,ULONG_PTR,SIZE_T*,ULONG,ULONG);
@@ -3896,6 +3899,7 @@ NTSYSAPI NTSTATUS  WINAPI NtUnlockFile(HANDLE,PIO_STATUS_BLOCK,PLARGE_INTEGER,PL
 NTSYSAPI NTSTATUS  WINAPI NtUnlockVirtualMemory(HANDLE,PVOID*,SIZE_T*,ULONG);
 NTSYSAPI NTSTATUS  WINAPI NtUnmapViewOfSection(HANDLE,PVOID);
 NTSYSAPI NTSTATUS  WINAPI NtVdmControl(ULONG,PVOID);
+NTSYSAPI NTSTATUS  WINAPI NtWaitForAlertByThreadId(const void*,const LARGE_INTEGER*);
 NTSYSAPI NTSTATUS  WINAPI NtWaitForDebugEvent(HANDLE,BOOLEAN,LARGE_INTEGER*,DBGUI_WAIT_STATE_CHANGE*);
 NTSYSAPI NTSTATUS  WINAPI NtWaitForKeyedEvent(HANDLE,const void*,BOOLEAN,const LARGE_INTEGER*);
 NTSYSAPI NTSTATUS  WINAPI NtWaitForSingleObject(HANDLE,BOOLEAN,const LARGE_INTEGER*);
