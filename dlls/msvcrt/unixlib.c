@@ -95,6 +95,112 @@ static float CDECL unix_fmaf( float x, float y, float z )
 }
 
 /*********************************************************************
+ *      lgamma
+ */
+static double CDECL unix_lgamma(double x)
+{
+#ifdef HAVE_LGAMMA
+    return lgamma(x);
+#else
+    FIXME( "not implemented\n" );
+    return 0;
+#endif
+}
+
+/*********************************************************************
+ *      lgammaf
+ */
+static float CDECL unix_lgammaf(float x)
+{
+#ifdef HAVE_LGAMMAF
+    return lgammaf(x);
+#else
+    FIXME( "not implemented\n" );
+    return 0;
+#endif
+}
+
+/*********************************************************************
+ *      log
+ */
+static double CDECL unix_log( double x )
+{
+    return log( x );
+}
+
+/*********************************************************************
+ *      logf
+ */
+static float CDECL unix_logf( float x )
+{
+    return logf( x );
+}
+
+/*********************************************************************
+ *      log10
+ */
+static double CDECL unix_log10( double x )
+{
+    return log10( x );
+}
+
+/*********************************************************************
+ *      log10f
+ */
+static float CDECL unix_log10f( float x )
+{
+    return log10f( x );
+}
+
+/*********************************************************************
+ *      log1p
+ */
+static double CDECL unix_log1p(double x)
+{
+#ifdef HAVE_LOG1P
+    return log1p(x);
+#else
+    return log(1 + x);
+#endif
+}
+
+/*********************************************************************
+ *      log1pf
+ */
+static float CDECL unix_log1pf(float x)
+{
+#ifdef HAVE_LOG1PF
+    return log1pf(x);
+#else
+    return log(1 + x);
+#endif
+}
+
+/*********************************************************************
+ *      log2
+ */
+static double CDECL unix_log2(double x)
+{
+#ifdef HAVE_LOG2
+    return log2(x);
+#else
+    return log(x) / log(2);
+#endif
+}
+
+/*********************************************************************
+ *      log2f
+ */
+static float CDECL unix_log2f(float x)
+{
+#ifdef HAVE_LOG2F
+    return log2f(x);
+#else
+    return unix_log2(x);
+#endif
+}
+
+/*********************************************************************
  *      pow
  */
 static double CDECL unix_pow( double x, double y )
@@ -143,6 +249,16 @@ static const struct unix_funcs funcs =
     unix_exp2,
     unix_exp2f,
     unix_fmaf,
+    unix_lgamma,
+    unix_lgammaf,
+    unix_log,
+    unix_logf,
+    unix_log10,
+    unix_log10f,
+    unix_log1p,
+    unix_log1pf,
+    unix_log2,
+    unix_log2f,
     unix_pow,
     unix_powf,
     unix_tgamma,

@@ -1343,9 +1343,18 @@ static BOOL xrandr14_get_modes( ULONG_PTR id, DWORD flags, DEVMODEW **new_modes,
     if (!modes)
         goto done;
 
+    int limit = 53; // required by nier_automata (55), sekiro (53), dark_souls3 (53)
+    int capped_resources_nmode = 1;
+
+    if (screen_resources->nmode > limit) {
+        capped_resources_nmode = limit;
+    } else {
+        capped_resources_nmode = screen_resources->nmode;
+    }
+
     for (i = 0; i < output_info->nmode; ++i)
     {
-        for (j = 0; j < screen_resources->nmode; ++j)
+        for (j = 0; j < capped_resources_nmode; ++j)
         {
             if (output_info->modes[i] != screen_resources->modes[j].id)
                 continue;

@@ -814,22 +814,16 @@ static HRESULT WINAPI video_mixer_transform_SetInputType(IMFTransform *iface, DW
 
 static HRESULT WINAPI video_mixer_transform_SetOutputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
 {
-    const unsigned int equality_flags = MF_MEDIATYPE_EQUAL_MAJOR_TYPES | MF_MEDIATYPE_EQUAL_FORMAT_TYPES;
+    const unsigned int equality_flags = MF_MEDIATYPE_EQUAL_MAJOR_TYPES |
+            MF_MEDIATYPE_EQUAL_FORMAT_TYPES | MF_MEDIATYPE_EQUAL_FORMAT_DATA;
     struct video_mixer *mixer = impl_from_IMFTransform(iface);
     HRESULT hr = MF_E_INVALIDMEDIATYPE;
     unsigned int i, compare_flags;
-    BOOL is_compressed = TRUE;
 
     TRACE("%p, %u, %p, %#x.\n", iface, id, type, flags);
 
     if (id)
         return MF_E_INVALIDSTREAMNUMBER;
-
-    if (!type)
-        return E_INVALIDARG;
-
-    if (FAILED(IMFMediaType_IsCompressedFormat(type, &is_compressed)) || is_compressed)
-        return MF_E_INVALIDMEDIATYPE;
 
     EnterCriticalSection(&mixer->cs);
 

@@ -861,6 +861,7 @@ static HRESULT parser_init_stream(struct strmbase_filter *iface)
     struct parser *filter = impl_from_strmbase_filter(iface);
     DWORD stop_flags = AM_SEEKING_NoPositioning;
     const SourceSeeking *seeking;
+    uint64_t stop_pos = ((uint64_t)0x80000000) << 32;
     unsigned int i;
 
     if (!filter->sink_connected)
@@ -875,8 +876,15 @@ static HRESULT parser_init_stream(struct strmbase_filter *iface)
     seeking = &filter->sources[0]->seek;
     if (seeking->llStop)
         stop_flags = AM_SEEKING_AbsolutePositioning;
+
+    /* Stream duration is determined incorrectly for some formats (e.g. mp3).
+     * Until this is fixed, setting stop position to infinity instead of
+     * seeking->llDuration helps avoid truncating the stream. */
+    if (seeking->llStop != seeking->llDuration)
+        stop_pos = seeking->llStop;
+
     unix_funcs->wg_parser_stream_seek(filter->sources[0]->wg_stream, seeking->dRate,
-            seeking->llCurrent, seeking->llStop, AM_SEEKING_AbsolutePositioning, stop_flags);
+            seeking->llCurrent, stop_pos, AM_SEEKING_AbsolutePositioning, stop_flags);
 
     for (i = 0; i < filter->source_count; ++i)
     {

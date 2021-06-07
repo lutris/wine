@@ -1,0 +1,106 @@
+From 626438a6be2df298c527870c8df9e6deb2f1c0fc Mon Sep 17 00:00:00 2001
+From: Nikolay Sivov <nsivov@codeweavers.com>
+Date: Fri, 28 May 2021 15:43:07 +0300
+Subject: [PATCH] evr/mixer: Test format only when setting output type.
+
+Signed-off-by: Nikolay Sivov <nsivov@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/evr/mixer.c     | 10 ++++++++--
+ dlls/evr/tests/evr.c | 42 +++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 49 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/evr/mixer.c b/dlls/evr/mixer.c
+index 554fb0725e81..c18bf0450bfa 100644
+--- a/dlls/evr/mixer.c
++++ b/dlls/evr/mixer.c
+@@ -810,17 +810,23 @@ static HRESULT WINAPI video_mixer_transform_SetInputType(IMFTransform *iface, DW
+ 
+ static HRESULT WINAPI video_mixer_transform_SetOutputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
+ {
+-    const unsigned int equality_flags = MF_MEDIATYPE_EQUAL_MAJOR_TYPES |
+-            MF_MEDIATYPE_EQUAL_FORMAT_TYPES | MF_MEDIATYPE_EQUAL_FORMAT_DATA;
++    const unsigned int equality_flags = MF_MEDIATYPE_EQUAL_MAJOR_TYPES | MF_MEDIATYPE_EQUAL_FORMAT_TYPES;
+     struct video_mixer *mixer = impl_from_IMFTransform(iface);
+     HRESULT hr = MF_E_INVALIDMEDIATYPE;
+     unsigned int i, compare_flags;
++    BOOL is_compressed = TRUE;
+ 
+     TRACE("%p, %u, %p, %#x.\n", iface, id, type, flags);
+ 
+     if (id)
+         return MF_E_INVALIDSTREAMNUMBER;
+ 
++    if (!type)
++        return E_INVALIDARG;
++
++    if (FAILED(IMFMediaType_IsCompressedFormat(type, &is_compressed)) || is_compressed)
++        return MF_E_INVALIDMEDIATYPE;
++
+     EnterCriticalSection(&mixer->cs);
+ 
+     for (i = 0; i < mixer->output.rt_formats_count; ++i)
+diff --git a/dlls/evr/tests/evr.c b/dlls/evr/tests/evr.c
+index dd38a75ca2b5..91fff21ebed4 100644
+--- a/dlls/evr/tests/evr.c
++++ b/dlls/evr/tests/evr.c
+@@ -942,11 +942,11 @@ static void test_default_mixer_type_negotiation(void)
+     IDirect3DDeviceManager9 *manager;
+     DXVA2_VideoProcessorCaps caps;
+     IMFVideoProcessor *processor;
++    GUID subtype, guid, *guids;
+     IDirect3DDevice9 *device;
+     IMFMediaType *video_type;
+     IMFTransform *transform;
+     DWORD index, count;
+-    GUID guid, *guids;
+     IUnknown *unk;
+     HWND window;
+     HRESULT hr;
+@@ -1070,6 +1070,46 @@ static void test_default_mixer_type_negotiation(void)
+     IMFMediaType_Release(media_type);
+     IMFMediaType_Release(media_type2);
+ 
++    /* Minimal valid attribute set for output type. */
++    hr = IMFTransform_GetOutputAvailableType(transform, 0, 0, &media_type);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++
++    hr = MFCreateMediaType(&media_type2);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++
++    hr = IMFMediaType_GetGUID(media_type, &MF_MT_SUBTYPE, &subtype);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++
++    hr = IMFMediaType_SetGUID(media_type2, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++    hr = IMFMediaType_SetGUID(media_type2, &MF_MT_SUBTYPE, &subtype);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++
++    hr = IMFTransform_SetOutputType(transform, 1, NULL, MFT_SET_TYPE_TEST_ONLY);
++    ok(hr == MF_E_INVALIDSTREAMNUMBER, "Unexpected hr %#x.\n", hr);
++
++    hr = IMFTransform_SetOutputType(transform, 0, NULL, MFT_SET_TYPE_TEST_ONLY);
++    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
++
++    hr = IMFTransform_SetOutputType(transform, 0, media_type2, MFT_SET_TYPE_TEST_ONLY);
++    ok(hr == MF_E_INVALIDMEDIATYPE, "Unexpected hr %#x.\n", hr);
++
++    hr = IMFMediaType_SetUINT32(media_type2, &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++
++    hr = IMFTransform_SetOutputType(transform, 0, media_type2, MFT_SET_TYPE_TEST_ONLY);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++
++    /* Candidate type have frame size set, mismatching size is accepted. */
++    hr = IMFMediaType_SetUINT64(media_type2, &MF_MT_FRAME_SIZE, (UINT64)64 << 32 | 64);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++
++    hr = IMFTransform_SetOutputType(transform, 0, media_type2, MFT_SET_TYPE_TEST_ONLY);
++    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
++
++    IMFMediaType_Release(media_type2);
++    IMFMediaType_Release(media_type);
++
+     hr = IMFTransform_QueryInterface(transform, &IID_IMFVideoProcessor, (void **)&processor);
+     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+ 
