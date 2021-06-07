@@ -1422,6 +1422,7 @@ static HRESULT interp_newenum(exec_ctx_t *ctx)
         V_UNKNOWN(r) = (IUnknown*)iter;
         break;
     }
+    case VT_BSTR|VT_ARRAY:
     case VT_VARIANT|VT_ARRAY:
     case VT_VARIANT|VT_ARRAY|VT_BYREF: {
         IEnumVARIANT *iter;

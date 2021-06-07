@@ -52,6 +52,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "wingdi.h"
 #include "winnls.h"
 #include "winreg.h"
 #include "ddk/hidsdi.h"
@@ -86,6 +87,7 @@ static int (WINAPI *pGetMouseMovePointsEx) (UINT, LPMOUSEMOVEPOINT, LPMOUSEMOVEP
 static UINT (WINAPI *pGetRawInputDeviceList) (PRAWINPUTDEVICELIST, PUINT, UINT);
 static UINT (WINAPI *pGetRawInputDeviceInfoW) (HANDLE, UINT, void *, UINT *);
 static UINT (WINAPI *pGetRawInputDeviceInfoA) (HANDLE, UINT, void *, UINT *);
+static int  (WINAPI *pGetWindowRgnBox)(HWND, LPRECT);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
 
 #define MAXKEYEVENTS 12
@@ -165,6 +167,7 @@ static void init_function_pointers(void)
     GET_PROC(GetRawInputDeviceList);
     GET_PROC(GetRawInputDeviceInfoW);
     GET_PROC(GetRawInputDeviceInfoA);
+    GET_PROC(GetWindowRgnBox);
 
     hdll = GetModuleHandleA("kernel32");
     GET_PROC(IsWow64Process);
@@ -3356,6 +3359,23 @@ static LRESULT CALLBACK mouse_move_wndproc(HWND hwnd, UINT msg, WPARAM wparam, L
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
+static void get_dc_region(RECT *region, HWND hwnd, DWORD flags)
+{
+    int region_type;
+    HRGN hregion;
+    HDC hdc;
+
+    hdc = GetDCEx(hwnd, 0, flags);
+    ok(hdc != NULL, "GetDCEx failed\n");
+    hregion = CreateRectRgn(40, 40, 60, 60);
+    ok(hregion != NULL, "CreateRectRgn failed\n");
+    GetRandomRgn(hdc, hregion, SYSRGN);
+    region_type = GetRgnBox(hregion, region);
+    ok(region_type == SIMPLEREGION, "expected SIMPLEREGION, got %d\n", region_type);
+    DeleteObject(hregion);
+    ReleaseDC(hwnd, hdc);
+}
+
 static void test_Input_mouse(void)
 {
     BOOL got_button_down, got_button_up;
@@ -3363,7 +3383,11 @@ static void test_Input_mouse(void)
     struct thread_data thread_data;
     HANDLE thread;
     DWORD thread_id;
+    WNDCLASSA wclass;
     POINT pt, pt_org;
+    int region_type;
+    HRGN hregion;
+    RECT region;
     MSG msg;
     BOOL ret;
 
@@ -3466,8 +3490,8 @@ static void test_Input_mouse(void)
         }
     }
     ok(hittest_no && hittest_no<50, "expected WM_NCHITTEST message\n");
-    todo_wine ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
-    todo_wine ok(got_button_up, "expected WM_LBUTTONUP message\n");
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
     DestroyWindow(static_win);
 
     /* click on HTTRANSPARENT top-level window that belongs to other thread */
@@ -3577,6 +3601,247 @@ static void test_Input_mouse(void)
     ok(got_button_up, "expected WM_LBUTTONUP message\n");
     DestroyWindow(hwnd);
     ok(ReleaseCapture(), "ReleaseCapture failed\n");
+
+    wclass.style         = 0;
+    wclass.lpfnWndProc   = WndProc;
+    wclass.cbClsExtra    = 0;
+    wclass.cbWndExtra    = 0;
+    wclass.hInstance     = GetModuleHandleA(NULL);
+    wclass.hIcon         = LoadIconA(0, (LPCSTR)IDI_APPLICATION);
+    wclass.hCursor       = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+    wclass.hbrBackground = CreateSolidBrush(RGB(128, 128, 128));
+    wclass.lpszMenuName  = NULL;
+    wclass.lpszClassName = "InputLayeredTestClass";
+    RegisterClassA( &wclass );
+
+    /* click through layered window with alpha channel / color key */
+    hwnd = CreateWindowA(wclass.lpszClassName, "InputLayeredTest",
+            WS_VISIBLE | WS_POPUP, 100, 100, 100, 100, button_win, NULL, NULL, NULL);
+    ok(hwnd != NULL, "CreateWindowEx failed\n");
+
+    static_win = CreateWindowA("static", "Title", WS_VISIBLE | WS_CHILD,
+                          10, 10, 20, 20, hwnd, NULL, NULL, NULL);
+    ok(static_win != NULL, "CreateWindowA failed %u\n", GetLastError());
+
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowLongA(hwnd, GWL_EXSTYLE, GetWindowLongA(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED);
+    ret = SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    ok(ret, "SetLayeredWindowAttributes failed\n");
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    get_dc_region(&region, hwnd, DCX_PARENTCLIP);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, hwnd, DCX_WINDOW | DCX_USESTYLE);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, hwnd, DCX_USESTYLE);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, static_win, DCX_PARENTCLIP);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, static_win, DCX_WINDOW | DCX_USESTYLE);
+    ok(region.left == 110 && region.top == 110 && region.right == 130 && region.bottom == 130,
+       "expected region (110,110)-(130,130), got %s\n", wine_dbgstr_rect(&region));
+    get_dc_region(&region, static_win, DCX_USESTYLE);
+    ok(region.left == 100 && region.top == 100 && region.right == 200 && region.bottom == 200,
+       "expected region (100,100)-(200,200), got %s\n", wine_dbgstr_rect(&region));
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    ret = SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+    ok(ret, "SetLayeredWindowAttributes failed\n");
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down || broken(!got_button_down), "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    ret = SetLayeredWindowAttributes(hwnd, RGB(0, 255, 0), 255, LWA_ALPHA | LWA_COLORKEY);
+    ok(ret, "SetLayeredWindowAttributes failed\n");
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    ret = SetLayeredWindowAttributes(hwnd, RGB(128, 128, 128), 0, LWA_COLORKEY);
+    ok(ret, "SetLayeredWindowAttributes failed\n");
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            todo_wine
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            todo_wine
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    SetWindowLongA(hwnd, GWL_EXSTYLE, GetWindowLongA(hwnd, GWL_EXSTYLE) & ~WS_EX_LAYERED);
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(100);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == ERROR, "expected ERROR, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == hwnd, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    hregion = CreateRectRgn(0, 0, 10, 10);
+    ok(hregion != NULL, "CreateRectRgn failed\n");
+    ret = SetWindowRgn(hwnd, hregion, TRUE);
+    ok(ret, "SetWindowRgn failed\n");
+    DeleteObject(hregion);
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
+    Sleep(1000);
+
+    if (pGetWindowRgnBox)
+    {
+        region_type = pGetWindowRgnBox(hwnd, &region);
+        ok(region_type == SIMPLEREGION, "expected SIMPLEREGION, got %d\n", region_type);
+    }
+
+    got_button_down = got_button_up = FALSE;
+    simulate_click(TRUE, 150, 150);
+    while (wait_for_message(&msg))
+    {
+        DispatchMessageA(&msg);
+
+        if (msg.message == WM_LBUTTONDOWN)
+        {
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_down = TRUE;
+        }
+        else if (msg.message == WM_LBUTTONUP)
+        {
+            ok(msg.hwnd == button_win, "msg.hwnd = %p\n", msg.hwnd);
+            got_button_up = TRUE;
+            break;
+        }
+    }
+    ok(got_button_down, "expected WM_LBUTTONDOWN message\n");
+    ok(got_button_up, "expected WM_LBUTTONUP message\n");
+
+    DestroyWindow(static_win);
+    DestroyWindow(hwnd);
     SetCursorPos(pt_org.x, pt_org.y);
 
     CloseHandle(thread_data.start_event);
@@ -3961,8 +4226,8 @@ struct get_key_state_thread_params
     int index;
 };
 
-#define check_get_keyboard_state(i, j, c, x, todo_c, todo_x) check_get_keyboard_state_(i, j, c, x, todo_c, todo_x, __LINE__)
-static void check_get_keyboard_state_(int i, int j, int c, int x, int todo_c, int todo_x, int line)
+#define check_get_keyboard_state(i, j, c, x) check_get_keyboard_state_(i, j, c, x, __LINE__)
+static void check_get_keyboard_state_(int i, int j, int c, int x, int line)
 {
     unsigned char keystate[256];
     BOOL ret;
@@ -3970,28 +4235,28 @@ static void check_get_keyboard_state_(int i, int j, int c, int x, int todo_c, in
     memset(keystate, 0, sizeof(keystate));
     ret = GetKeyboardState(keystate);
     ok_(__FILE__, line)(ret, "GetKeyboardState failed, %u\n", GetLastError());
-    todo_wine_if(todo_x) ok_(__FILE__, line)(!(keystate['X'] & 0x80) == !x, "%d:%d: expected that X keystate is %s\n", i, j, x ? "set" : "unset");
-    todo_wine_if(todo_c) ok_(__FILE__, line)(!(keystate['C'] & 0x80) == !c, "%d:%d: expected that C keystate is %s\n", i, j, c ? "set" : "unset");
+    ok_(__FILE__, line)(!(keystate['X'] & 0x80) == !x, "%d:%d: expected that X keystate is %s\n", i, j, x ? "set" : "unset");
+    ok_(__FILE__, line)(!(keystate['C'] & 0x80) == !c, "%d:%d: expected that C keystate is %s\n", i, j, c ? "set" : "unset");
 
     /* calling it twice shouldn't change */
     memset(keystate, 0, sizeof(keystate));
     ret = GetKeyboardState(keystate);
     ok_(__FILE__, line)(ret, "GetKeyboardState failed, %u\n", GetLastError());
-    todo_wine_if(todo_x) ok_(__FILE__, line)(!(keystate['X'] & 0x80) == !x, "%d:%d: expected that X keystate is %s\n", i, j, x ? "set" : "unset");
-    todo_wine_if(todo_c) ok_(__FILE__, line)(!(keystate['C'] & 0x80) == !c, "%d:%d: expected that C keystate is %s\n", i, j, c ? "set" : "unset");
+    ok_(__FILE__, line)(!(keystate['X'] & 0x80) == !x, "%d:%d: expected that X keystate is %s\n", i, j, x ? "set" : "unset");
+    ok_(__FILE__, line)(!(keystate['C'] & 0x80) == !c, "%d:%d: expected that C keystate is %s\n", i, j, c ? "set" : "unset");
 }
 
-#define check_get_key_state(i, j, c, x, todo_c, todo_x) check_get_key_state_(i, j, c, x, todo_c, todo_x, __LINE__)
-static void check_get_key_state_(int i, int j, int c, int x, int todo_c, int todo_x, int line)
+#define check_get_key_state(i, j, c, x) check_get_key_state_(i, j, c, x, __LINE__)
+static void check_get_key_state_(int i, int j, int c, int x, int line)
 {
     SHORT state;
 
     state = GetKeyState('X');
-    todo_wine_if(todo_x) ok_(__FILE__, line)(!(state & 0x8000) == !x, "%d:%d: expected that X highest bit is %s, got %#x\n", i, j, x ? "set" : "unset", state);
+    ok_(__FILE__, line)(!(state & 0x8000) == !x, "%d:%d: expected that X highest bit is %s, got %#x\n", i, j, x ? "set" : "unset", state);
     ok_(__FILE__, line)(!(state & 0x007e), "%d:%d: expected that X undefined bits are unset, got %#x\n", i, j, state);
 
     state = GetKeyState('C');
-    todo_wine_if(todo_c) ok_(__FILE__, line)(!(state & 0x8000) == !c, "%d:%d: expected that C highest bit is %s, got %#x\n", i, j, c ? "set" : "unset", state);
+    ok_(__FILE__, line)(!(state & 0x8000) == !c, "%d:%d: expected that C highest bit is %s, got %#x\n", i, j, c ? "set" : "unset", state);
     ok_(__FILE__, line)(!(state & 0x007e), "%d:%d: expected that C undefined bits are unset, got %#x\n", i, j, state);
 }
 
@@ -4008,7 +4273,7 @@ static DWORD WINAPI get_key_state_thread(void *arg)
     int i = params->index, j;
 
     test = get_key_state_tests + i;
-    has_queue = test->peek_message;
+    has_queue = test->peek_message || test->set_keyboard_state;
 
     if (test->peek_message)
     {
@@ -4041,18 +4306,18 @@ static DWORD WINAPI get_key_state_thread(void *arg)
         if (test->set_keyboard_state) expect_c = TRUE;
         else expect_c = FALSE;
 
-        check_get_keyboard_state(i, j, expect_c, FALSE, /* todo */ i == 6, !has_queue);
-        check_get_key_state(i, j, expect_c, expect_x, /* todo */ i == 6, i != 6 && (has_queue || j == 0));
-        check_get_keyboard_state(i, j, expect_c, expect_x, /* todo */ i == 6, i != 6 && (has_queue || j == 0));
+        check_get_keyboard_state(i, j, expect_c, FALSE);
+        check_get_key_state(i, j, expect_c, expect_x);
+        check_get_keyboard_state(i, j, expect_c, expect_x);
 
         /* key released */
         ReleaseSemaphore(semaphores[0], 1, NULL);
         result = WaitForSingleObject(semaphores[1], 1000);
         ok(result == WAIT_OBJECT_0, "%d: WaitForSingleObject returned %u\n", i, result);
 
-        check_get_keyboard_state(i, j, expect_c, expect_x, /* todo */ i == 6, has_queue || i == 6 || j > 0);
-        check_get_key_state(i, j, expect_c, FALSE, /* todo */ i == 6, FALSE);
-        check_get_keyboard_state(i, j, expect_c, FALSE, /* todo */ i == 6, FALSE);
+        check_get_keyboard_state(i, j, expect_c, expect_x);
+        check_get_key_state(i, j, expect_c, FALSE);
+        check_get_keyboard_state(i, j, expect_c, FALSE);
     }
 
     return 0;
@@ -4120,18 +4385,18 @@ static void test_GetKeyState(void)
             }
             else expect_c = FALSE;
 
-            check_get_keyboard_state(i, j, expect_c, FALSE, /* todo */ FALSE, FALSE);
-            check_get_key_state(i, j, expect_c, FALSE, /* todo */ FALSE, FALSE);
-            check_get_keyboard_state(i, j, expect_c, FALSE, /* todo */ FALSE, FALSE);
+            check_get_keyboard_state(i, j, expect_c, FALSE);
+            check_get_key_state(i, j, expect_c, FALSE);
+            check_get_keyboard_state(i, j, expect_c, FALSE);
 
             if (test->peek_message_main) while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
 
             if (test->peek_message_main) expect_x = TRUE;
             else expect_x = FALSE;
 
-            check_get_keyboard_state(i, j, expect_c, expect_x, /* todo */ FALSE, FALSE);
-            check_get_key_state(i, j, expect_c, expect_x, /* todo */ FALSE, FALSE);
-            check_get_keyboard_state(i, j, expect_c, expect_x, /* todo */ FALSE, FALSE);
+            check_get_keyboard_state(i, j, expect_c, expect_x);
+            check_get_key_state(i, j, expect_c, expect_x);
+            check_get_keyboard_state(i, j, expect_c, expect_x);
 
             ReleaseSemaphore(params.semaphores[1], 1, NULL);
 
@@ -4147,15 +4412,15 @@ static void test_GetKeyState(void)
                 SetKeyboardState(keystate);
             }
 
-            check_get_keyboard_state(i, j, FALSE, expect_x, /* todo */ FALSE, FALSE);
-            check_get_key_state(i, j, FALSE, expect_x, /* todo */ FALSE, FALSE);
-            check_get_keyboard_state(i, j, FALSE, expect_x, /* todo */ FALSE, FALSE);
+            check_get_keyboard_state(i, j, FALSE, expect_x);
+            check_get_key_state(i, j, FALSE, expect_x);
+            check_get_keyboard_state(i, j, FALSE, expect_x);
 
             if (test->peek_message_main) while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
 
-            check_get_keyboard_state(i, j, FALSE, FALSE, /* todo */ FALSE, FALSE);
-            check_get_key_state(i, j, FALSE, FALSE, /* todo */ FALSE, FALSE);
-            check_get_keyboard_state(i, j, FALSE, FALSE, /* todo */ FALSE, FALSE);
+            check_get_keyboard_state(i, j, FALSE, FALSE);
+            check_get_key_state(i, j, FALSE, FALSE);
+            check_get_keyboard_state(i, j, FALSE, FALSE);
 
             ReleaseSemaphore(params.semaphores[1], 1, NULL);
         }
@@ -4481,6 +4746,40 @@ static void test_SendInput(void)
     DestroyWindow( hwnd );
 }
 
+static void test_GetKeyboardLayoutList(void)
+{
+    int cnt, cnt2;
+    HKL *layouts;
+    ULONG_PTR baselayout;
+    LANGID langid;
+
+    baselayout = GetUserDefaultLCID();
+    langid = PRIMARYLANGID(LANGIDFROMLCID(baselayout));
+    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
+        baselayout = MAKELONG( baselayout, 0xe001 ); /* IME */
+    else
+        baselayout |= baselayout << 16;
+
+    cnt = GetKeyboardLayoutList(0, NULL);
+    /* Most users will not have more than a few keyboard layouts installed at a time. */
+    ok(cnt > 0 && cnt < 10, "Layout count %d\n", cnt);
+    if (cnt > 0)
+    {
+        layouts = HeapAlloc(GetProcessHeap(), 0, sizeof(*layouts) * cnt );
+
+        cnt2 = GetKeyboardLayoutList(cnt, layouts);
+        ok(cnt == cnt2, "wrong value %d!=%d\n", cnt, cnt2);
+        for(cnt = 0; cnt < cnt2; cnt++)
+        {
+            if(layouts[cnt] == (HKL)baselayout)
+                break;
+        }
+        ok(cnt < cnt2, "Didnt find current keyboard\n");
+
+        HeapFree(GetProcessHeap(), 0, layouts);
+    }
+}
+
 START_TEST(input)
 {
     char **argv;
@@ -4523,6 +4822,7 @@ START_TEST(input)
     test_GetRawInputBuffer();
     test_RegisterRawInputDevices();
     test_rawinput(argv[0]);
+    test_GetKeyboardLayoutList();
 
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx(argv[0]);

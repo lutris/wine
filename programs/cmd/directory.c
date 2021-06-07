@@ -23,6 +23,8 @@
 
 #include "wcmd.h"
 #include "wine/debug.h"
+#include "winioctl.h"
+#include "ntifs.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cmd);
 
@@ -393,6 +395,65 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
             cur_width = 0;
         } else {
             WCMD_output(L"%1!*s!", cur_width - tmp_width, L"");
+        }
+
+      } else if (fd[i].dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+        if (!bare) {
+           const WCHAR *type;
+
+           switch(fd[i].dwReserved0) {
+           case IO_REPARSE_TAG_MOUNT_POINT:
+              type = L"<JUNCTION>";
+              break;
+           case IO_REPARSE_TAG_SYMLINK:
+           default:
+              type = (fd[i].dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? L"<SYMLINKD>" : L"<SYMLINK>";
+              break;
+           }
+           WCMD_output (L"%1!10s!  %2!8s!  %3!-14s!", datestring, timestring, type);
+           if (shortname) WCMD_output (L"%1!-13s!", fd[i].cAlternateFileName);
+           if (usernames) WCMD_output (L"%1!-23s!", username);
+           WCMD_output(L"%1",fd[i].cFileName);
+           if (fd[i].dwReserved0) {
+              REPARSE_DATA_BUFFER *buffer = NULL;
+              WCHAR *target = NULL;
+              INT buffer_len;
+              HANDLE hlink;
+              DWORD dwret;
+              BOOL bret;
+
+              lstrcpyW(string, inputparms->dirName);
+              lstrcatW(string, fd[i].cFileName);
+              hlink = CreateFileW(string, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
+                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+              buffer_len = sizeof(*buffer) + 2*MAX_PATH*sizeof(WCHAR);
+              buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_len);
+              bret = DeviceIoControl(hlink, FSCTL_GET_REPARSE_POINT, NULL, 0, (LPVOID)buffer,
+                                     buffer_len, &dwret, 0);
+              if (bret) {
+                 INT offset;
+                 switch(buffer->ReparseTag) {
+                 case IO_REPARSE_TAG_MOUNT_POINT:
+                    offset = buffer->MountPointReparseBuffer.PrintNameOffset/sizeof(WCHAR);
+                    target = &buffer->MountPointReparseBuffer.PathBuffer[offset];
+                    break;
+                 case IO_REPARSE_TAG_SYMLINK:
+                    offset = buffer->SymbolicLinkReparseBuffer.PrintNameOffset/sizeof(WCHAR);
+                    target = &buffer->SymbolicLinkReparseBuffer.PathBuffer[offset];
+                    break;
+                 }
+              }
+              CloseHandle(hlink);
+              if (target) WCMD_output(L" [%1]", target);
+              HeapFree(GetProcessHeap(), 0, buffer);
+           }
+        } else {
+           if (!((lstrcmpW(fd[i].cFileName, L".") == 0) ||
+                 (lstrcmpW(fd[i].cFileName, L"..") == 0))) {
+              WCMD_output (L"%1%2", recurse?inputparms->dirName : L"", fd[i].cFileName);
+           } else {
+              addNewLine = FALSE;
+           }
         }
 
       } else if (fd[i].dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
