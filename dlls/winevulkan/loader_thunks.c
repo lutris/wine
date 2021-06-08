@@ -1603,11 +1603,6 @@ VkResult WINAPI vkGetPhysicalDevicePresentRectanglesKHR(VkPhysicalDevice physica
     return unix_funcs->p_vkGetPhysicalDevicePresentRectanglesKHR(physicalDevice, surface, pRectCount, pRects);
 }
 
-void WINAPI vkGetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties *pProperties)
-{
-    unix_funcs->p_vkGetPhysicalDeviceProperties(physicalDevice, pProperties);
-}
-
 void WINAPI vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR(VkPhysicalDevice physicalDevice, const VkQueryPoolPerformanceCreateInfoKHR *pPerformanceQueryCreateInfo, uint32_t *pNumPasses)
 {
     unix_funcs->p_vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR(physicalDevice, pPerformanceQueryCreateInfo, pNumPasses);

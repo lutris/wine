@@ -31,6 +31,7 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "winreg.h"
+#include "dwmapi.h"
 
 #include "wine/test.h"
 
@@ -45,10 +46,51 @@
 #define LONG_PTR INT_PTR
 #define ULONG_PTR UINT_PTR
 
+/* Undocumented structure for (Get|Set)WindowCompositionAttribute */
+struct WINCOMPATTRDATA
+{
+    DWORD attribute;
+    void *pData;
+    ULONG dataSize;
+};
+enum
+{
+    WCA_UNDEFINED = 0,
+    WCA_NCRENDERING_ENABLED = 1,
+    WCA_NCRENDERING_POLICY = 2,
+    WCA_TRANSITIONS_FORCEDISABLED = 3,
+    WCA_ALLOW_NCPAINT = 4,
+    WCA_CAPTION_BUTTON_BOUNDS = 5,
+    WCA_NONCLIENT_RTL_LAYOUT = 6,
+    WCA_FORCE_ICONIC_REPRESENTATION = 7,
+    WCA_EXTENDED_FRAME_BOUNDS = 8,
+    WCA_HAS_ICONIC_BITMAP = 9,
+    WCA_THEME_ATTRIBUTES = 10,
+    WCA_NCRENDERING_EXILED = 11,
+    WCA_NCADORNMENTINFO = 12,
+    WCA_EXCLUDED_FROM_LIVEPREVIEW = 13,
+    WCA_VIDEO_OVERLAY_ACTIVE = 14,
+    WCA_FORCE_ACTIVEWINDOW_APPEARANCE = 15,
+    WCA_DISALLOW_PEEK = 16,
+    WCA_CLOAK = 17,
+    WCA_CLOAKED = 18,
+    WCA_ACCENT_POLICY = 19,
+    WCA_FREEZE_REPRESENTATION = 20,
+    WCA_EVER_UNCLOAKED = 21,
+    WCA_VISUAL_OWNER = 22,
+    WCA_HOLOGRAPHIC = 23,
+    WCA_EXCLUDED_FROM_DDA = 24,
+    WCA_PASSIVEUPDATEMODE = 25,
+    WCA_USEDARKMODECOLORS = 26,
+    WCA_LAST
+};
+
 void dump_region(HRGN hrgn);
 
 static BOOL (WINAPI *pGetWindowInfo)(HWND,WINDOWINFO*);
 static UINT (WINAPI *pGetWindowModuleFileNameA)(HWND,LPSTR,UINT);
+static BOOL (WINAPI *pGetWindowCompositionAttribute)(HWND, struct WINCOMPATTRDATA*);
+static BOOL (WINAPI *pSetWindowCompositionAttribute)(HWND, struct WINCOMPATTRDATA*);
 static BOOL (WINAPI *pGetLayeredWindowAttributes)(HWND,COLORREF*,BYTE*,DWORD*);
 static BOOL (WINAPI *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
 static BOOL (WINAPI *pUpdateLayeredWindow)(HWND,HDC,POINT*,SIZE*,HDC,POINT*,COLORREF,BLENDFUNCTION*,DWORD);
@@ -8571,6 +8613,551 @@ static void test_layered_window(void)
     DeleteObject( hbm );
 }
 
+static void cloaked_attribute_proc(HWND hwndOtherProc)
+{
+    HWND hwnd;
+    MSG msg;
+
+    hwnd = CreateWindowExA(0, "static", "static", WS_OVERLAPPED | WS_VISIBLE,
+                           0, 0, 100, 100, hwndOtherProc, 0, NULL, NULL);
+    ok(hwnd != 0, "CreateWindowEx failed\n");
+
+    if (!PostMessageA(hwndOtherProc, WM_APP, 0, (LPARAM)hwnd))
+    {
+        ok(0, "PostMessage failed, error %u\n", GetLastError());
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    while (GetMessageA(&msg, NULL, 0, 0) > 0 && (msg.hwnd != hwnd || msg.message != WM_APP))
+        DispatchMessageA(&msg);
+    ok(msg.hwnd == hwnd && msg.message == WM_APP, "didn't get WM_APP message\n");
+    SetWindowLongPtrA(hwnd, GWLP_HWNDPARENT, 0);
+    ok(PostMessageA(hwndOtherProc, WM_APP, 0, 0), "PostMessage failed, error %u\n", GetLastError());
+
+    while (GetMessageA(&msg, NULL, 0, 0) > 0 && (msg.hwnd != hwnd || msg.message != WM_APP))
+        DispatchMessageW(&msg);
+    DestroyWindow(hwnd);
+    ok(PostMessageA(hwndOtherProc, WM_APP, 0, 0), "PostMessage failed, error %u\n", GetLastError());
+}
+
+static void test_cloaked_attribute(const char *argv0)
+{
+    struct WINCOMPATTRDATA data, set_data;
+    HWND hwnd, hwnd2, hwndOwner;
+    PROCESS_INFORMATION info;
+    BOOL ret, cloak = FALSE;
+    DWORD cloaked, version;
+    STARTUPINFOA startup;
+    char cmd[MAX_PATH];
+    RECT rect;
+    POINT pt;
+    MSG msg;
+
+    if (!pGetWindowCompositionAttribute || !pSetWindowCompositionAttribute)
+    {
+        win_skip("window composition APIs not supported\n");
+        return;
+    }
+
+    version = GetVersion();
+    if (broken(LOBYTE(LOWORD(version)) < 6 || (LOBYTE(LOWORD(version)) == 6 && HIBYTE(LOWORD(version)) < 2)))
+    {
+        win_skip("cloak attribute is not supported\n");
+        return;
+    }
+
+    hwnd = CreateWindowA("MainWindowClass", NULL, WS_OVERLAPPED | WS_VISIBLE,
+                         200, 200, 200, 200, 0, 0, 0, NULL);
+    assert(hwnd);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetWindowCompositionAttribute(hwnd, NULL);
+    ok(!ret, "GetWindowCompositionAttribute should fail with NULL pointer\n");
+    ok(GetLastError() == ERROR_NOACCESS, "expected ERROR_NOACCESS, got %u\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(hwnd, NULL);
+    ok(!ret, "SetWindowCompositionAttribute should fail with NULL pointer\n");
+    ok(GetLastError() == ERROR_NOACCESS, "expected ERROR_NOACCESS, got %u\n", GetLastError());
+
+    data.attribute = WCA_CLOAKED;
+    data.pData = NULL;
+    data.dataSize = sizeof(cloaked);
+    SetLastError(0xdeadbeef);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(!ret, "GetWindowCompositionAttribute should fail with NULL pData\n");
+    ok(GetLastError() == ERROR_NOACCESS, "expected ERROR_NOACCESS, got %u\n", GetLastError());
+    set_data.attribute = WCA_CLOAK;
+    set_data.pData = NULL;
+    set_data.dataSize = sizeof(cloak);
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should fail with NULL pData\n");
+    ok(GetLastError() == ERROR_NOACCESS, "expected ERROR_NOACCESS, got %u\n", GetLastError());
+
+    data.pData = &cloaked;
+    data.dataSize = sizeof(cloaked) - 1;
+    SetLastError(0xdeadbeef);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(!ret, "GetWindowCompositionAttribute should have failed\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
+    set_data.pData = &cloak;
+    set_data.dataSize = sizeof(cloak) - 1;
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should have failed\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
+
+    data.dataSize = sizeof(cloaked);
+    SetLastError(0xdeadbeef);
+    ret = pGetWindowCompositionAttribute(NULL, &data);
+    ok(!ret, "GetWindowCompositionAttribute should have failed with NULL hwnd\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %u\n", GetLastError());
+    set_data.dataSize = sizeof(cloak);
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(NULL, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should have failed with NULL hwnd\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetWindowCompositionAttribute(HWND_BROADCAST, &data);
+    ok(!ret, "GetWindowCompositionAttribute should have failed with broadcast hwnd\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %u\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pGetWindowCompositionAttribute(HWND_TOPMOST, &data);
+    ok(!ret, "GetWindowCompositionAttribute should have failed with broadcast hwnd\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %u\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(HWND_BROADCAST, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should have failed with broadcast hwnd\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %u\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(HWND_TOPMOST, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should have failed with broadcast hwnd\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %u\n", GetLastError());
+
+    data.dataSize = sizeof(cloaked) + 1;
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    data.dataSize = sizeof(cloaked);
+
+    set_data.dataSize = sizeof(cloak) + 1;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    set_data.dataSize = sizeof(cloak);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    /* cloaking and visibility are unrelated */
+    ret = ShowWindow(hwnd, SW_HIDE);
+    ok(ret, "ShowWindow returned %u\n", ret);
+    ok(!(GetWindowLongA(hwnd, GWL_STYLE) & WS_VISIBLE), "window has the WS_VISIBLE style\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ok(GetActiveWindow() == hwndMain, "wrong active window\n");
+
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    ok(GetActiveWindow() == hwndMain, "wrong active window\n");
+
+    ret = ShowWindow(hwnd, SW_SHOW);
+    ok(!ret, "ShowWindow returned %u\n", ret);
+    ok(GetWindowLongA(hwnd, GWL_STYLE) & WS_VISIBLE, "window does not have the WS_VISIBLE style\n");
+    ok(GetActiveWindow() == hwnd, "wrong active window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    /* cloaking and minimization are unrelated */
+    ret = ShowWindow(hwnd, SW_MINIMIZE);
+    ok(ret, "ShowWindow returned %u\n", ret);
+    ok(GetWindowLongA(hwnd, GWL_STYLE) & WS_MINIMIZE, "window does not have the WS_MINIMIZE style\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ok(GetWindowLongA(hwnd, GWL_STYLE) & WS_MINIMIZE, "window does not have the WS_MINIMIZE style\n");
+
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    ok(GetWindowLongA(hwnd, GWL_STYLE) & WS_MINIMIZE, "window does not have the WS_MINIMIZE style\n");
+
+    ret = ShowWindow(hwnd, SW_RESTORE);
+    ok(ret, "ShowWindow returned %u\n", ret);
+    ok(!(GetWindowLongA(hwnd, GWL_STYLE) & WS_MINIMIZE), "window has the WS_MINIMIZE style\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    /* cloaked windows can be activated and have valid rects */
+    GetWindowRect(hwnd, &rect);
+    ok(rect.left == 200 && rect.top == 200 && rect.right == 400 && rect.bottom == 400,
+       "wrong window rect %s\n", wine_dbgstr_rect(&rect));
+    ok(SetForegroundWindow(hwndMain), "SetForegroundWindow failed\n");
+    ok(GetActiveWindow() == hwndMain, "wrong active window\n");
+    ok(SetForegroundWindow(hwnd), "SetForegroundWindow failed\n");
+    ok(GetActiveWindow() == hwnd, "wrong active window\n");
+
+    /* cloaked windows can't be retrieved via WindowFromPoint */
+    pt.x = pt.y = 350;
+    hwnd2 = WindowFromPoint(pt);
+    ok(hwnd2 != hwnd, "cloaked window returned from WindowFromPoint\n");
+    pt.x = pt.y = 250;
+    hwnd2 = WindowFromPoint(pt);
+    ok(hwnd2 == hwndMain, "unexpected window returned %p (expected %p)\n", hwnd2, hwndMain);
+    pt.x = pt.y = 10;
+    hwnd2 = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPDISABLED | CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+    ok(hwnd2 == hwnd, "unexpected window returned %p (expected %p)\n", hwnd2, hwnd);
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    pt.x = pt.y = 350;
+    hwnd2 = WindowFromPoint(pt);
+    ok(hwnd2 == hwnd, "unexpected window returned %p (expected %p)\n", hwnd2, hwnd);
+
+    /* child windows can't be cloaked, but remember their cloaked status */
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    hwndOwner = CreateWindowA("MainWindowClass", NULL, WS_OVERLAPPED | WS_VISIBLE,
+                              100, 100, 300, 300, 0, 0, 0, NULL);
+    assert(hwndOwner);
+
+    ok(SetParent(hwnd, hwndOwner) == GetDesktopWindow(), "SetParent failed, error %u\n", GetLastError());
+    ok(GetAncestor(hwnd, GA_PARENT) == hwndOwner, "unexpected parent window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    ok(SetParent(hwnd, NULL) == hwndOwner, "SetParent failed, error %u\n", GetLastError());
+    ok(GetAncestor(hwnd, GA_PARENT) == GetDesktopWindow(), "unexpected parent window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    ok(SetParent(hwnd, hwndOwner) == GetDesktopWindow(), "SetParent failed, error %u\n", GetLastError());
+    ok(GetAncestor(hwnd, GA_PARENT) == hwndOwner, "unexpected parent window\n");
+    cloak = TRUE;
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should have failed on a child window\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ok(SetParent(hwnd, NULL) == hwndOwner, "SetParent failed, error %u\n", GetLastError());
+    ok(GetAncestor(hwnd, GA_PARENT) == GetDesktopWindow(), "unexpected parent window\n");
+
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwndOwner, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwndOwner, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    ok(SetParent(hwnd, hwndOwner) == GetDesktopWindow(), "SetParent failed, error %u\n", GetLastError());
+    ok(GetAncestor(hwnd, GA_PARENT) == hwndOwner, "unexpected parent window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == (DWM_CLOAKED_APP | DWM_CLOAKED_INHERITED),
+        "window was not cloaked as DWM_CLOAKED_APP | DWM_CLOAKED_INHERITED, got %u\n", cloaked);
+    pt.x = pt.y = 205;
+    hwnd2 = ChildWindowFromPointEx(hwndOwner, pt, CWP_SKIPDISABLED | CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+    ok(hwnd2 == hwnd, "unexpected window returned %p (expected %p)\n", hwnd2, hwnd);
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwndOwner, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwndOwner, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    ok(SetParent(hwnd, NULL) == hwndOwner, "SetParent failed, error %u\n", GetLastError());
+    ok(GetAncestor(hwnd, GA_PARENT) == GetDesktopWindow(), "unexpected parent window\n");
+
+    /* owned windows inherit the cloaked status from the owner */
+    SetWindowLongPtrA(hwnd, GWLP_HWNDPARENT, (LONG_PTR)hwndOwner);
+    ok(GetWindow(hwnd, GW_OWNER) == hwndOwner, "unexpected owner window\n");
+
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwndOwner, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwndOwner, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwndOwner, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwndOwner, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    /* owned windows can't be uncloaked if their owner is cloaked, but they can be cloaked */
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwndOwner, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    cloak = FALSE;
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should have failed on an owned window\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwndOwner, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwndOwner, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwndOwner, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwndOwner, &set_data);
+    ok(ret, "SetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwndOwner, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    /* owned windows remain cloaked after inheriting it, even if they get disowned */
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwndOwner, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    SetWindowLongPtrA(hwnd, GWLP_HWNDPARENT, 0);
+    ok(GetWindow(hwnd, GW_OWNER) == 0, "unexpected owner window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    /* owned windows inherit the cloak attribute when setting new owner */
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    SetWindowLongPtrA(hwnd, GWLP_HWNDPARENT, (LONG_PTR)hwndOwner);
+    ok(GetWindow(hwnd, GW_OWNER) == hwndOwner, "unexpected owner window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    SetWindowLongPtrA(hwnd, GWLP_HWNDPARENT, 0);
+    ok(GetWindow(hwnd, GW_OWNER) == 0, "unexpected owner window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    /* DWM_CLOAKED_INHERITED is not used even if the window is created as owned */
+    DestroyWindow(hwnd);
+    ret = pGetWindowCompositionAttribute(hwndOwner, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    hwnd = CreateWindowA("MainWindowClass", NULL, WS_POPUP | WS_VISIBLE,
+                         200, 200, 200, 200, hwndOwner, 0, 0, NULL);
+    assert(hwnd);
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    SetWindowLongPtrA(hwnd, GWLP_HWNDPARENT, 0);
+    ok(GetWindow(hwnd, GW_OWNER) == 0, "unexpected owner window\n");
+    DestroyWindow(hwndOwner);
+
+    /* windows belonging to another process can't be cloaked directly */
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    sprintf(cmd, "%s win test_cloaked_attribute %p\n", argv0, hwnd);
+    memset(&startup, 0, sizeof(startup));
+    startup.cb = sizeof(startup);
+    ok(CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL,
+                      &startup, &info), "CreateProcess failed.\n");
+    CloseHandle(info.hThread);
+
+    while (GetMessageA(&msg, NULL, 0, 0) > 0 && (msg.hwnd != hwnd || msg.message != WM_APP))
+        DispatchMessageA(&msg);
+    ok(msg.hwnd == hwnd && msg.message == WM_APP, "didn't get WM_APP message with hwnd\n");
+    hwnd2 = (HWND)msg.lParam;
+    flush_events(TRUE);
+
+    ok(GetWindow(hwnd2, GW_OWNER) == hwnd, "unexpected owner window\n");
+    ret = pGetWindowCompositionAttribute(hwnd2, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    cloak = TRUE;
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(hwnd2, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should fail with NULL pData\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %u\n", GetLastError());
+
+    /* but they can be cloaked by inheriting the owner's cloaked status */
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd2, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    ok(PostMessageA(hwnd2, WM_APP, 0, 0), "PostMessage failed, error %u\n", GetLastError());
+    while (GetMessageA(&msg, NULL, 0, 0) > 0 && (msg.hwnd != hwnd || msg.message != WM_APP))
+        DispatchMessageA(&msg);
+    ok(msg.hwnd == hwnd && msg.message == WM_APP, "didn't get WM_APP message\n");
+    flush_events(TRUE);
+    ok(GetWindow(hwnd2, GW_OWNER) == 0, "unexpected owner window\n");
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd2, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(hwnd2, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should fail with NULL pData\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %u\n", GetLastError());
+
+    SetWindowLongPtrA(hwnd, GWLP_HWNDPARENT, (LONG_PTR)hwnd2);
+    ok(GetWindow(hwnd, GW_OWNER) == hwnd2, "unexpected owner window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    cloak = FALSE;
+    SetLastError(0xdeadbeef);
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(!ret, "SetWindowCompositionAttribute should have failed on an owned window\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetWindowLongPtrA(hwnd, GWLP_HWNDPARENT, 0);
+    ok(GetWindow(hwnd, GW_OWNER) == 0, "unexpected owner window\n");
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    /* child windows behave identically whether they're on different process or not */
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ok(SetParent(hwnd2, hwnd) == GetDesktopWindow(), "SetParent failed, error %u\n", GetLastError());
+    flush_events(TRUE);
+    ok(GetAncestor(hwnd2, GA_PARENT) == hwnd, "unexpected parent window\n");
+    ret = pGetWindowCompositionAttribute(hwnd2, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    cloak = TRUE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd2, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == (DWM_CLOAKED_APP | DWM_CLOAKED_INHERITED),
+        "window was not cloaked as DWM_CLOAKED_APP | DWM_CLOAKED_INHERITED, got %u\n", cloaked);
+
+    cloak = FALSE;
+    ret = pSetWindowCompositionAttribute(hwnd, &set_data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ret = pGetWindowCompositionAttribute(hwnd, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+    ret = pGetWindowCompositionAttribute(hwnd2, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(!cloaked, "window was not supposed to be cloaked: %u\n", cloaked);
+
+    ok(SetParent(hwnd2, NULL) == hwnd, "SetParent failed, error %u\n", GetLastError());
+    flush_events(TRUE);
+    ok(GetAncestor(hwnd, GA_PARENT) == GetDesktopWindow(), "unexpected parent window\n");
+    ret = pGetWindowCompositionAttribute(hwnd2, &data);
+    ok(ret, "GetWindowCompositionAttribute failed, error %u\n", GetLastError());
+    ok(cloaked == DWM_CLOAKED_APP, "window was not cloaked as DWM_CLOAKED_APP, got %u\n", cloaked);
+
+    ok(PostMessageA(hwnd2, WM_APP, 0, 0), "PostMessage failed, error %u\n", GetLastError());
+    while (GetMessageA(&msg, NULL, 0, 0) > 0 && (msg.hwnd != hwnd || msg.message != WM_APP))
+        DispatchMessageA(&msg);
+    ok(msg.hwnd == hwnd && msg.message == WM_APP, "didn't get WM_APP message\n");
+    flush_events(TRUE);
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
+
+    DestroyWindow(hwnd);
+}
+
 static MONITORINFO mi;
 
 static LRESULT CALLBACK fullscreen_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -12302,6 +12889,8 @@ START_TEST(win)
     HMODULE gdi32 = GetModuleHandleA("gdi32.dll");
     pGetWindowInfo = (void *)GetProcAddress( user32, "GetWindowInfo" );
     pGetWindowModuleFileNameA = (void *)GetProcAddress( user32, "GetWindowModuleFileNameA" );
+    pGetWindowCompositionAttribute = (void *)GetProcAddress( user32, "GetWindowCompositionAttribute" );
+    pSetWindowCompositionAttribute = (void *)GetProcAddress( user32, "SetWindowCompositionAttribute" );
     pGetLayeredWindowAttributes = (void *)GetProcAddress( user32, "GetLayeredWindowAttributes" );
     pSetLayeredWindowAttributes = (void *)GetProcAddress( user32, "SetLayeredWindowAttributes" );
     pUpdateLayeredWindow = (void *)GetProcAddress( user32, "UpdateLayeredWindow" );
@@ -12332,6 +12921,11 @@ START_TEST(win)
         else if (!strcmp(argv[2], "test_other_process_window"))
         {
             other_process_proc(hwnd);
+            return;
+        }
+        else if (!strcmp(argv[2], "test_cloaked_attribute"))
+        {
+            cloaked_attribute_proc(hwnd);
             return;
         }
     }
@@ -12438,6 +13032,7 @@ START_TEST(win)
     test_GetUpdateRect();
     test_Expose();
     test_layered_window();
+    test_cloaked_attribute(argv[0]);
 
     test_SetForegroundWindow(hwndMain);
     test_handles( hwndMain );

@@ -2289,6 +2289,7 @@ enum message_type
     client_ptr_t   class_ptr;   /* pointer to class in client address space */
     int            dpi;         /* window DPI if not per-monitor aware */
     int            awareness;   /* window DPI awareness */
+    int            needs_cloak; /* the window needs to be cloaked by the driver */
 @END
 
 
@@ -2314,6 +2315,7 @@ enum message_type
 @REPLY
     user_handle_t  full_owner;  /* full handle of new owner */
     user_handle_t  prev_owner;  /* full handle of previous owner */
+    int            needs_cloak; /* the owned window needs to be cloaked */
 @END
 
 
@@ -2360,6 +2362,26 @@ enum message_type
 #define SET_WIN_USERDATA  0x10
 #define SET_WIN_EXTRA     0x20
 #define SET_WIN_UNICODE   0x40
+
+
+/* Get the window's cloaked attribute */
+@REQ(get_window_cloaked)
+    user_handle_t  handle;        /* handle to the window */
+@REPLY
+    unsigned int   cloaked;       /* cloaked attribute (DMW_CLOAKED_*) */
+@END
+
+
+/* Set the window's cloaked attribute */
+@REQ(set_window_cloaked)
+    user_handle_t  handle;        /* handle to the window */
+    unsigned int   cloaked;       /* cloaked attribute to set (see below) */
+@REPLY
+    unsigned int   count;         /* total count of windows inheriting it */
+    VARARG(windows,user_handles); /* window handles that inherit it */
+@END
+#define SET_WINDOW_CLOAKED_ON     0x01
+#define SET_WINDOW_CLOAKED_SHELL  0x02
 
 
 /* Set the parent of a window */

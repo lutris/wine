@@ -50,6 +50,10 @@
 # include <sys/poll.h>
 #endif
 
+#include <sys/types.h>
+#include <dirent.h>
+#include <limits.h>
+
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "wine/list.h"
@@ -68,7 +72,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 
-#define EVDEVPREFIX "/dev/input/event"
+#define EVDEVDIR "/dev/input/"
+#define EVDEVFILE "event"
+#define EVDEVPREFIX EVDEVDIR EVDEVFILE
 #define EVDEVDRIVER " (event)"
 
 /* Wine joystick driver object instances */
@@ -171,13 +177,17 @@ static struct JoyDev *joydevs = NULL;
 
 static void find_joydevs(void)
 {
-    int i;
+    int i, max_joydev;
+    DIR *evdev_dir;
 
     if (InterlockedCompareExchange(&have_joydevs, 0, -1) != -1)
         /* Someone beat us to it */
         return;
 
-    for (i = 0; i < MAX_JOYDEV; i++)
+    evdev_dir = opendir(EVDEVDIR);
+
+    max_joydev = evdev_dir ? INT_MAX : MAX_JOYDEV;
+    for (i = 0; i < max_joydev; i++)
     {
         char buf[MAX_PATH];
         struct JoyDev joydev = {0};
@@ -187,7 +197,17 @@ static void find_joydevs(void)
         struct JoyDev *new_joydevs;
         struct input_id device_id = {0};
 
-        snprintf(buf, sizeof(buf), EVDEVPREFIX"%d", i);
+        if (!evdev_dir)
+            snprintf(buf, sizeof(buf), EVDEVPREFIX"%d", i);
+        else
+        {
+            struct dirent *dir_entry;
+            while ((dir_entry = readdir(evdev_dir)) &&
+                   strncmp(dir_entry->d_name, EVDEVPREFIX, strlen(EVDEVPREFIX)) != 0);
+            if (!dir_entry)
+                break;
+            snprintf(buf, sizeof(buf), EVDEVDIR"%s", dir_entry->d_name);
+        }
 
         if ((fd = open(buf, O_RDWR)) == -1)
         {
