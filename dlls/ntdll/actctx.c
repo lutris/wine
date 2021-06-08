@@ -54,6 +54,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(actctx);
 /* we don't want to include winuser.h */
 #define RT_MANIFEST                        ((ULONG_PTR)24)
 #define CREATEPROCESS_MANIFEST_RESOURCE_ID ((ULONG_PTR)1)
+#define MINIMUM_RESERVED_MANIFEST_RESOURCE_ID ((ULONG_PTR)1)
+#define MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID ((ULONG_PTR)16)
 
 /* from oaidl.h */
 typedef enum tagLIBFLAGS {
@@ -3235,8 +3237,14 @@ static NTSTATUS lookup_assembly(struct actctx_loader* acl,
             status = open_nt_file( &file, &nameW );
             if (!status)
             {
-                status = get_manifest_in_pe_file( acl, ai, nameW.Buffer, directory, FALSE, file,
-                                                  (LPCWSTR)CREATEPROCESS_MANIFEST_RESOURCE_ID, 0 );
+                INT rid;
+                for (rid = MINIMUM_RESERVED_MANIFEST_RESOURCE_ID;
+                     rid <= MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID; rid++)
+                {
+                    status = get_manifest_in_pe_file( acl, ai, nameW.Buffer, directory, FALSE, file,
+                                                      (LPCWSTR)(ULONG_PTR)rid, 0 );
+                    if (status == STATUS_SUCCESS) break;
+                }
                 NtClose( file );
                 if (status == STATUS_SUCCESS)
                     break;

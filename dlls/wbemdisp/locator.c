@@ -1302,6 +1302,90 @@ static HRESULT WINAPI object_Invoke(
         memset( params, 0, sizeof(*params) );
         return IWbemClassObject_Get( object->object, name, 0, result, NULL, NULL );
     }
+    else if (flags == DISPATCH_METHOD)
+    {
+        IWbemClassObject *sig_in, *in, *out = NULL;
+        VARIANT path;
+        int i;
+        BSTR param;
+
+        if (!params->cArgs || !params->rgvarg)
+        {
+            WARN( "Missing property value\n" );
+            return E_INVALIDARG;
+        }
+
+        hr = IWbemClassObject_GetMethod( object->object, name, 0, &sig_in, NULL );
+        if (FAILED(hr))
+            return hr;
+
+        hr = IWbemClassObject_SpawnInstance( sig_in, 0, &in );
+        IWbemClassObject_Release( sig_in );
+        if (FAILED(hr))
+            return hr;
+
+        IWbemClassObject_BeginEnumeration( in, 0 );
+        i = params->cArgs - 1;
+        while (IWbemClassObject_Next( in, 0, &param, NULL, NULL, NULL ) == S_OK)
+        {
+            TRACE("Param %s = %s\n", debugstr_w(param), debugstr_variant(&params->rgvarg[i]));
+            hr = IWbemClassObject_Put( in, param, 0, &params->rgvarg[i], 0 );
+            SysFreeString( param );
+            if (FAILED(hr))
+            {
+                WARN("Failed to set paramter\n");
+                break;
+            }
+            i--;
+        }
+        IWbemClassObject_EndEnumeration( in );
+
+        V_VT( &path ) = VT_EMPTY;
+        hr = IWbemClassObject_Get( object->object, L"__PATH", 0, &path, NULL, NULL );
+        if (FAILED(hr))
+        {
+            IWbemClassObject_Release( in );
+            return hr;
+        }
+
+        hr = IWbemServices_ExecMethod( object->services->services, V_BSTR(&path), name, 0, NULL, in, &out, NULL );
+        IWbemClassObject_Release( in );
+        VariantClear(&path);
+        if (FAILED(hr))
+            return hr;
+
+        IWbemClassObject_BeginEnumeration( out, 0 );
+        while (IWbemClassObject_Next( out, 0, &param, NULL, NULL, NULL ) == S_OK)
+        {
+            TRACE("Output parameter %s\n", debugstr_w(param));
+
+            if (i < 0)
+            {
+                ERR("Unexpected output parameter\n");
+                hr = E_FAIL;
+                break;
+            }
+            if (!lstrcmpiW(param, L"ReturnValue"))
+            {
+                SysFreeString( param );
+                continue;
+            }
+            hr = IWbemClassObject_Get( out, param, 0, V_VARIANTREF(&params->rgvarg[i]), NULL, NULL );
+            if (FAILED(hr))
+            {
+                ERR("Failed to get output paramter\n");
+                break;
+            }
+
+            SysFreeString( param );
+            i--;
+        }
+        IWbemClassObject_EndEnumeration( out );
+
+        IWbemClassObject_Release( out );
+
+        return hr;
+    }
     else if (flags == DISPATCH_PROPERTYPUT)
     {
         if (!params->cArgs || !params->rgvarg)

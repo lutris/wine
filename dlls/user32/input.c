@@ -235,6 +235,7 @@ UINT WINAPI SendInput( UINT count, LPINPUT inputs, int size )
 {
     UINT i;
     NTSTATUS status = STATUS_SUCCESS;
+    RAWINPUT rawinput;
 
     if (size != sizeof(INPUT))
     {
@@ -264,7 +265,7 @@ UINT WINAPI SendInput( UINT count, LPINPUT inputs, int size )
             update_mouse_coords( &input );
             /* fallthrough */
         case INPUT_KEYBOARD:
-            status = send_hardware_message( 0, &input, NULL, SEND_HWMSG_INJECTED );
+            status = send_hardware_message( 0, &input, &rawinput, SEND_HWMSG_INJECTED );
             break;
         case INPUT_HARDWARE:
             SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
@@ -1426,9 +1427,7 @@ BOOL WINAPI BlockInput(BOOL fBlockIt)
  */
 UINT WINAPI GetKeyboardLayoutList( INT size, HKL *layouts )
 {
-    WCHAR klid[KL_NAMELENGTH], value[5];
-    DWORD value_size, count, tmp, i = 0;
-    HKEY hkey;
+    DWORD count;
     HKL layout;
 
     TRACE_(keyboard)( "size %d, layouts %p.\n", size, layouts );
@@ -1436,37 +1435,13 @@ UINT WINAPI GetKeyboardLayoutList( INT size, HKL *layouts )
     if ((count = USER_Driver->pGetKeyboardLayoutList( size, layouts )) != ~0) return count;
 
     layout = get_locale_kbd_layout();
-    count = 0;
 
-    count++;
     if (size && layouts)
     {
-        layouts[count - 1] = layout;
-        if (count == size) return count;
+        layouts[0] = layout;
     }
 
-    if (!RegOpenKeyW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Keyboard Layouts", &hkey ))
-    {
-        while (!RegEnumKeyW( hkey, i++, klid, ARRAY_SIZE(klid) ))
-        {
-            tmp = wcstoul( klid, NULL, 16 );
-            value_size = sizeof(value);
-            if (!RegGetValueW( hkey, klid, L"Layout Id", RRF_RT_REG_SZ, NULL, (void *)&value, &value_size ))
-                tmp = MAKELONG( LOWORD( tmp ), 0xf000 | (wcstoul( value, NULL, 16 ) & 0xfff) );
-
-            if (layout == UlongToHandle( tmp )) continue;
-
-            count++;
-            if (size && layouts)
-            {
-                layouts[count - 1] = UlongToHandle( tmp );
-                if (count == size) break;
-            }
-        }
-        RegCloseKey( hkey );
-    }
-
-    return count;
+    return 1;
 }
 
 
@@ -1583,6 +1558,15 @@ HKL WINAPI LoadKeyboardLayoutA(LPCSTR pwszKLID, UINT Flags)
     return ret;
 }
 
+/***********************************************************************
+ *              LoadKeyboardLayoutEx (USER32.@)
+ */
+HKL WINAPI LoadKeyboardLayoutEx(DWORD unknown, const WCHAR *locale, UINT flags)
+{
+    FIXME("(%d, %s, %x) semi-stub!\n", unknown, debugstr_w(locale), flags);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return LoadKeyboardLayoutW(locale, flags);
+}
 
 /***********************************************************************
  *		UnloadKeyboardLayout (USER32.@)

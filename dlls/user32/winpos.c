@@ -1131,8 +1131,8 @@ static BOOL show_window( HWND hwnd, INT cmd )
     }
     swp = new_swp;
 
-    parent = GetAncestor( hwnd, GA_PARENT );
-    if (parent && !IsWindowVisible( parent ) && !(swp & SWP_STATECHANGED))
+    if ((style & WS_CHILD) && (parent = GetAncestor( hwnd, GA_PARENT )) &&
+        !IsWindowVisible( parent ) && !(swp & SWP_STATECHANGED))
     {
         /* if parent is not visible simply toggle WS_VISIBLE and return */
         if (showFlag) WIN_SetStyle( hwnd, WS_VISIBLE, 0 );
@@ -1981,8 +1981,11 @@ static BOOL fixup_flags( WINDOWPOS *winpos, const RECT *old_window_rect, int par
     if (winpos->cy < 0) winpos->cy = 0;
     else if (winpos->cy > 32767) winpos->cy = 32767;
 
-    parent = GetAncestor( winpos->hwnd, GA_PARENT );
-    if (!IsWindowVisible( parent )) winpos->flags |= SWP_NOREDRAW;
+    if (wndPtr->dwStyle & WS_CHILD)
+    {
+        parent = GetAncestor( winpos->hwnd, GA_PARENT );
+        if (!IsWindowVisible( parent )) winpos->flags |= SWP_NOREDRAW;
+    }
 
     if (wndPtr->dwStyle & WS_VISIBLE) winpos->flags &= ~SWP_SHOWWINDOW;
     else
