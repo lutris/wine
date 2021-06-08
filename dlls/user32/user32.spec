@@ -204,7 +204,7 @@
 @ stdcall EditWndProc(long long long long) EditWndProcA
 @ stdcall EmptyClipboard()
 @ stdcall EnableMenuItem(long long long)
-@ stdcall EnableMouseInPointer(long)
+
 @ stdcall EnableNonClientDpiScaling(long)
 @ stdcall EnableScrollBar(long long long)
 @ stdcall EnableWindow(long long)
@@ -400,6 +400,7 @@
 @ stdcall GetUserObjectSecurity (long ptr ptr long ptr)
 # @ stub GetWinStationInfo
 @ stdcall GetWindow(long long)
+@ stdcall GetWindowCompositionAttribute(ptr ptr)
 @ stdcall GetWindowContextHelpId(long)
 @ stdcall GetWindowDC(long)
 @ stdcall GetWindowDisplayAffinity(long ptr)

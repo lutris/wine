@@ -1882,16 +1882,7 @@ int WINAPI GetMouseMovePointsEx( UINT size, LPMOUSEMOVEPOINT ptin, LPMOUSEMOVEPO
     return copied;
 }
 
-/***********************************************************************
- *		EnableMouseInPointer (USER32.@)
- */
-BOOL WINAPI EnableMouseInPointer(BOOL enable)
-{
-    FIXME("(%#x) stub\n", enable);
 
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
 
 static DWORD CALLBACK devnotify_window_callback(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
 {

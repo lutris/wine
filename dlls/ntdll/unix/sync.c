@@ -32,9 +32,6 @@
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif
 #ifdef HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h>
 #endif
@@ -81,10 +78,48 @@ WINE_DEFAULT_DEBUG_CHANNEL(sync);
 
 HANDLE keyed_event = 0;
 
-static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
+static const LARGE_INTEGER zero_timeout;
+
+static pthread_mutex_t addr_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+#ifndef __NR_clock_gettime64
+#define __NR_clock_gettime64 403
+#endif
+
+struct timespec64
 {
-    if (!timeout) return "(infinite)";
-    return wine_dbgstr_longlong( timeout->QuadPart );
+    long long tv_sec;
+    long long tv_nsec;
+};
+
+static inline int do_clock_gettime( clockid_t clock_id, ULONGLONG *ticks )
+{
+    static int clock_gettime64_supported = -1;
+    struct timespec64 ts64;
+    struct timespec ts;
+    int ret;
+
+    if (clock_gettime64_supported < 0)
+    {
+        if (!syscall( __NR_clock_gettime64, clock_id, &ts64 ))
+        {
+            clock_gettime64_supported = 1;
+            *ticks = ts64.tv_sec * (ULONGLONG)TICKSPERSEC + ts64.tv_nsec / 100;
+            return 0;
+        }
+        clock_gettime64_supported = 0;
+    }
+
+    if (clock_gettime64_supported)
+    {
+        if (!(ret = syscall( __NR_clock_gettime64, clock_id, &ts64 )))
+            *ticks = ts64.tv_sec * (ULONGLONG)TICKSPERSEC + ts64.tv_nsec / 100;
+        return ret;
+    }
+
+    if (!(ret = clock_gettime( clock_id, &ts )))
+        *ticks = ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
+    return ret;
 }
 
 /* return a monotonic time counter, in Win32 ticks */
@@ -101,13 +136,13 @@ static inline ULONGLONG monotonic_counter(void)
 #endif
     return mach_absolute_time() * timebase.numer / timebase.denom / 100;
 #elif defined(HAVE_CLOCK_GETTIME)
-    struct timespec ts;
-#ifdef CLOCK_MONOTONIC_RAW
-    if (!clock_gettime( CLOCK_MONOTONIC_RAW, &ts ))
-        return ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
+    ULONGLONG ticks;
+#if 0
+    if (!do_clock_gettime( CLOCK_MONOTONIC_RAW, &ticks ))
+        return ticks;
 #endif
-    if (!clock_gettime( CLOCK_MONOTONIC, &ts ))
-        return ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
+    if (!do_clock_gettime( CLOCK_MONOTONIC, &ticks ))
+        return ticks;
 #endif
     gettimeofday( &now, 0 );
     return ticks_from_time_t( now.tv_sec ) + now.tv_usec * 10 - server_start_time;
@@ -118,6 +153,8 @@ static inline ULONGLONG monotonic_counter(void)
 
 #define FUTEX_WAIT 0
 #define FUTEX_WAKE 1
+#define FUTEX_WAIT_BITSET 9
+#define FUTEX_WAKE_BITSET 10
 
 static int futex_private = 128;
 
@@ -129,6 +166,16 @@ static inline int futex_wait( const int *addr, int val, struct timespec *timeout
 static inline int futex_wake( const int *addr, int val )
 {
     return syscall( __NR_futex, addr, FUTEX_WAKE | futex_private, val, NULL, 0, 0 );
+}
+
+static inline int futex_wait_bitset( const int *addr, int val, struct timespec *timeout, int mask )
+{
+    return syscall( __NR_futex, addr, FUTEX_WAIT_BITSET | futex_private, val, timeout, 0, mask );
+}
+
+static inline int futex_wake_bitset( const int *addr, int val, int mask )
+{
+    return syscall( __NR_futex, addr, FUTEX_WAKE_BITSET | futex_private, val, NULL, 0, mask );
 }
 
 static inline int use_futexes(void)
@@ -148,7 +195,52 @@ static inline int use_futexes(void)
     return supported;
 }
 
+static int *get_futex(void **ptr)
+{
+    if (sizeof(void *) == 8)
+        return (int *)((((ULONG_PTR)ptr) + 3) & ~3);
+    else if (!(((ULONG_PTR)ptr) & 3))
+        return (int *)ptr;
+    else
+        return NULL;
+}
+
+static void timespec_from_timeout( struct timespec *timespec, const LARGE_INTEGER *timeout )
+{
+    LARGE_INTEGER now;
+    timeout_t diff;
+
+    if (timeout->QuadPart > 0)
+    {
+        NtQuerySystemTime( &now );
+        diff = timeout->QuadPart - now.QuadPart;
+    }
+    else
+        diff = -timeout->QuadPart;
+
+    timespec->tv_sec  = diff / TICKSPERSEC;
+    timespec->tv_nsec = (diff % TICKSPERSEC) * 100;
+}
+
 #endif
+
+
+static BOOL compare_addr( const void *addr, const void *cmp, SIZE_T size )
+{
+    switch (size)
+    {
+        case 1:
+            return (*(const UCHAR *)addr == *(const UCHAR *)cmp);
+        case 2:
+            return (*(const USHORT *)addr == *(const USHORT *)cmp);
+        case 4:
+            return (*(const ULONG *)addr == *(const ULONG *)cmp);
+        case 8:
+            return (*(const ULONG64 *)addr == *(const ULONG64 *)cmp);
+    }
+
+    return FALSE;
+}
 
 
 /* create a struct security_descriptor and contained information in one contiguous piece of memory */
@@ -2281,235 +2373,591 @@ NTSTATUS WINAPI NtQueryInformationAtom( RTL_ATOM atom, ATOM_INFORMATION_CLASS cl
 }
 
 
-union tid_alert_entry
-{
-#ifdef __APPLE__
-    semaphore_t sem;
-#else
-    HANDLE event;
 #ifdef __linux__
-    int futex;
-#endif
-#endif
-};
 
-#define TID_ALERT_BLOCK_SIZE (65536 / sizeof(union tid_alert_entry))
-static union tid_alert_entry *tid_alert_blocks[4096];
-
-static unsigned int handle_to_index( HANDLE handle, unsigned int *block_idx )
+NTSTATUS CDECL fast_RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit, int timeout )
 {
-    unsigned int idx = (wine_server_obj_handle(handle) >> 2) - 1;
-    *block_idx = idx / TID_ALERT_BLOCK_SIZE;
-    return idx % TID_ALERT_BLOCK_SIZE;
+    int val;
+    struct timespec timespec;
+
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+
+    timespec.tv_sec  = timeout;
+    timespec.tv_nsec = 0;
+    while ((val = InterlockedCompareExchange( (int *)&crit->LockSemaphore, 0, 1 )) != 1)
+    {
+        /* note: this may wait longer than specified in case of signals or */
+        /*       multiple wake-ups, but that shouldn't be a problem */
+        if (futex_wait( (int *)&crit->LockSemaphore, val, &timespec ) == -1 && errno == ETIMEDOUT)
+            return STATUS_TIMEOUT;
+    }
+    return STATUS_WAIT_0;
 }
 
-static union tid_alert_entry *get_tid_alert_entry( HANDLE tid )
+NTSTATUS CDECL fast_RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
-    unsigned int block_idx, idx = handle_to_index( tid, &block_idx );
-    union tid_alert_entry *entry;
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
 
-    if (block_idx > ARRAY_SIZE(tid_alert_blocks))
-    {
-        FIXME( "tid %p is too high\n", tid );
-        return NULL;
-    }
+    *(int *)&crit->LockSemaphore = 1;
+    futex_wake( (int *)&crit->LockSemaphore, 1 );
+    return STATUS_SUCCESS;
+}
 
-    if (!tid_alert_blocks[block_idx])
-    {
-        static const size_t size = TID_ALERT_BLOCK_SIZE * sizeof(union tid_alert_entry);
-        void *ptr = anon_mmap_alloc( size, PROT_READ | PROT_WRITE );
-        if (ptr == MAP_FAILED) return NULL;
-        if (InterlockedCompareExchangePointer( (void **)&tid_alert_blocks[block_idx], ptr, NULL ))
-            munmap( ptr, size ); /* someone beat us to it */
-    }
+NTSTATUS CDECL fast_RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
+{
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+    return STATUS_SUCCESS;
+}
 
-    entry = &tid_alert_blocks[block_idx][idx % TID_ALERT_BLOCK_SIZE];
+#elif defined(__APPLE__)
 
-#ifdef __APPLE__
-    if (!entry->sem)
+static inline semaphore_t get_mach_semaphore( RTL_CRITICAL_SECTION *crit )
+{
+    semaphore_t ret = *(int *)&crit->LockSemaphore;
+    if (!ret)
     {
         semaphore_t sem;
-
-        if (semaphore_create( mach_task_self(), &sem, SYNC_POLICY_FIFO, 0 ))
-            return NULL;
-        if (InterlockedCompareExchange( (int *)&entry->sem, sem, NULL ))
-            semaphore_destroy( mach_task_self(), sem );
-    }
-#else
-#ifdef __linux__
-    if (use_futexes())
-        return entry;
-#endif
-
-    if (!entry->event)
-    {
-        HANDLE event;
-
-        if (NtCreateEvent( &event, EVENT_ALL_ACCESS, NULL, SynchronizationEvent, FALSE ))
-            return NULL;
-        if (InterlockedCompareExchangePointer( &entry->event, event, NULL ))
-            NtClose( event );
-    }
-#endif
-
-    return entry;
-}
-
-
-/***********************************************************************
- *             NtAlertThreadByThreadId (NTDLL.@)
- */
-NTSTATUS WINAPI NtAlertThreadByThreadId( HANDLE tid )
-{
-    union tid_alert_entry *entry = get_tid_alert_entry( tid );
-
-    TRACE( "%p\n", tid );
-
-    if (!entry) return STATUS_INVALID_CID;
-
-#ifdef __APPLE__
-    semaphore_signal( entry->sem );
-    return STATUS_SUCCESS;
-#else
-#ifdef __linux__
-    if (use_futexes())
-    {
-        int *futex = &entry->futex;
-        if (!InterlockedExchange( futex, 1 ))
-            futex_wake( futex, 1 );
-        return STATUS_SUCCESS;
-    }
-#endif
-
-    return NtSetEvent( entry->event, NULL );
-#endif
-}
-
-
-#if defined(__linux__) || defined(__APPLE__)
-static LONGLONG get_absolute_timeout( const LARGE_INTEGER *timeout )
-{
-    LARGE_INTEGER now;
-
-    if (timeout->QuadPart >= 0) return timeout->QuadPart;
-    NtQuerySystemTime( &now );
-    return now.QuadPart - timeout->QuadPart;
-}
-
-static LONGLONG update_timeout( ULONGLONG end )
-{
-    LARGE_INTEGER now;
-    LONGLONG timeleft;
-
-    NtQuerySystemTime( &now );
-    timeleft = end - now.QuadPart;
-    if (timeleft < 0) timeleft = 0;
-    return timeleft;
-}
-#endif
-
-
-#ifdef __APPLE__
-
-/***********************************************************************
- *             NtWaitForAlertByThreadId (NTDLL.@)
- */
-NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEGER *timeout )
-{
-    union tid_alert_entry *entry = get_tid_alert_entry( NtCurrentTeb()->ClientId.UniqueThread );
-    semaphore_t sem;
-    ULONGLONG end;
-    kern_return_t ret;
-
-    TRACE( "%p %s\n", address, debugstr_timeout( timeout ) );
-
-    if (!entry) return STATUS_INVALID_CID;
-    sem = entry->sem;
-
-    if (timeout)
-    {
-        if (timeout->QuadPart == TIMEOUT_INFINITE)
-            timeout = NULL;
+        if (semaphore_create( mach_task_self(), &sem, SYNC_POLICY_FIFO, 0 )) return 0;
+        if (!(ret = InterlockedCompareExchange( (int *)&crit->LockSemaphore, sem, 0 )))
+            ret = sem;
         else
-            end = get_absolute_timeout( timeout );
+            semaphore_destroy( mach_task_self(), sem );  /* somebody beat us to it */
     }
+    return ret;
+}
+
+NTSTATUS CDECL fast_RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit, int timeout )
+{
+    mach_timespec_t timespec;
+    semaphore_t sem = get_mach_semaphore( crit );
+
+    timespec.tv_sec = timeout;
+    timespec.tv_nsec = 0;
+    for (;;)
+    {
+        switch( semaphore_timedwait( sem, timespec ))
+        {
+        case KERN_SUCCESS:
+            return STATUS_WAIT_0;
+        case KERN_ABORTED:
+            continue;  /* got a signal, restart */
+        case KERN_OPERATION_TIMED_OUT:
+            return STATUS_TIMEOUT;
+        default:
+            return STATUS_INVALID_HANDLE;
+        }
+    }
+}
+
+NTSTATUS CDECL fast_RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
+{
+    semaphore_t sem = get_mach_semaphore( crit );
+    semaphore_signal( sem );
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS CDECL fast_RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
+{
+    semaphore_destroy( mach_task_self(), *(int *)&crit->LockSemaphore );
+    return STATUS_SUCCESS;
+}
+
+#else  /* __APPLE__ */
+
+NTSTATUS CDECL fast_RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit, int timeout )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS CDECL fast_RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS CDECL fast_RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+#endif
+
+
+#ifdef __linux__
+
+/* Futex-based SRW lock implementation:
+ *
+ * Since we can rely on the kernel to release all threads and don't need to
+ * worry about NtReleaseKeyedEvent(), we can simplify the layout a bit. The
+ * layout looks like this:
+ *
+ *    31 - Exclusive lock bit, set if the resource is owned exclusively.
+ * 30-16 - Number of exclusive waiters. Unlike the fallback implementation,
+ *         this does not include the thread owning the lock, or shared threads
+ *         waiting on the lock.
+ *    15 - Does this lock have any shared waiters? We use this as an
+ *         optimization to avoid unnecessary FUTEX_WAKE_BITSET calls when
+ *         releasing an exclusive lock.
+ *  14-0 - Number of shared owners. Unlike the fallback implementation, this
+ *         does not include the number of shared threads waiting on the lock.
+ *         Thus the state [1, x, >=1] will never occur.
+ */
+
+#define SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT        0x80000000
+#define SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK    0x7fff0000
+#define SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_INC     0x00010000
+#define SRWLOCK_FUTEX_SHARED_WAITERS_BIT        0x00008000
+#define SRWLOCK_FUTEX_SHARED_OWNERS_MASK        0x00007fff
+#define SRWLOCK_FUTEX_SHARED_OWNERS_INC         0x00000001
+
+/* Futex bitmasks; these are independent from the bits in the lock itself. */
+#define SRWLOCK_FUTEX_BITSET_EXCLUSIVE  1
+#define SRWLOCK_FUTEX_BITSET_SHARED     2
+
+NTSTATUS CDECL fast_RtlTryAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
+{
+    int old, new, *futex;
+    NTSTATUS ret;
+
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+
+    if (!(futex = get_futex( &lock->Ptr )))
+        return STATUS_NOT_IMPLEMENTED;
+
+    do
+    {
+        old = *futex;
+
+        if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
+                && !(old & SRWLOCK_FUTEX_SHARED_OWNERS_MASK))
+        {
+            /* Not locked exclusive or shared. We can try to grab it. */
+            new = old | SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT;
+            ret = STATUS_SUCCESS;
+        }
+        else
+        {
+            new = old;
+            ret = STATUS_TIMEOUT;
+        }
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
+
+    return ret;
+}
+
+NTSTATUS CDECL fast_RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
+{
+    int old, new, *futex;
+    BOOLEAN wait;
+
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+
+    if (!(futex = get_futex( &lock->Ptr )))
+        return STATUS_NOT_IMPLEMENTED;
+
+    /* Atomically increment the exclusive waiter count. */
+    do
+    {
+        old = *futex;
+        new = old + SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_INC;
+        assert(new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK);
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
 
     for (;;)
     {
-        if (timeout)
+        do
         {
-            LONGLONG timeleft = update_timeout( end );
-            mach_timespec_t timespec;
+            old = *futex;
 
-            timespec.tv_sec = timeleft / (ULONGLONG)TICKSPERSEC;
-            timespec.tv_nsec = (timeleft % TICKSPERSEC) * 100;
-            ret = semaphore_timedwait( sem, timespec );
+            if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
+                    && !(old & SRWLOCK_FUTEX_SHARED_OWNERS_MASK))
+            {
+                /* Not locked exclusive or shared. We can try to grab it. */
+                new = old | SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT;
+                assert(old & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK);
+                new -= SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_INC;
+                wait = FALSE;
+            }
+            else
+            {
+                new = old;
+                wait = TRUE;
+            }
+        } while (InterlockedCompareExchange( futex, new, old ) != old);
+
+        if (!wait)
+            return STATUS_SUCCESS;
+
+        futex_wait_bitset( futex, new, NULL, SRWLOCK_FUTEX_BITSET_EXCLUSIVE );
+    }
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS CDECL fast_RtlTryAcquireSRWLockShared( RTL_SRWLOCK *lock )
+{
+    int new, old, *futex;
+    NTSTATUS ret;
+
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+
+    if (!(futex = get_futex( &lock->Ptr )))
+        return STATUS_NOT_IMPLEMENTED;
+
+    do
+    {
+        old = *futex;
+
+        if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
+                && !(old & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
+        {
+            /* Not locked exclusive, and no exclusive waiters. We can try to
+             * grab it. */
+            new = old + SRWLOCK_FUTEX_SHARED_OWNERS_INC;
+            assert(new & SRWLOCK_FUTEX_SHARED_OWNERS_MASK);
+            ret = STATUS_SUCCESS;
         }
         else
-            ret = semaphore_wait( sem );
-
-        switch (ret)
         {
-        case KERN_SUCCESS: return STATUS_ALERTED;
-        case KERN_ABORTED: continue;
-        case KERN_OPERATION_TIMED_OUT: return STATUS_TIMEOUT;
-        default: return STATUS_INVALID_HANDLE;
+            new = old;
+            ret = STATUS_TIMEOUT;
         }
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
+
+    return ret;
+}
+
+NTSTATUS CDECL fast_RtlAcquireSRWLockShared( RTL_SRWLOCK *lock )
+{
+    int old, new, *futex;
+    BOOLEAN wait;
+
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+
+    if (!(futex = get_futex( &lock->Ptr )))
+        return STATUS_NOT_IMPLEMENTED;
+
+    for (;;)
+    {
+        do
+        {
+            old = *futex;
+
+            if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
+                    && !(old & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
+            {
+                /* Not locked exclusive, and no exclusive waiters. We can try
+                 * to grab it. */
+                new = old + SRWLOCK_FUTEX_SHARED_OWNERS_INC;
+                assert(new & SRWLOCK_FUTEX_SHARED_OWNERS_MASK);
+                wait = FALSE;
+            }
+            else
+            {
+                new = old | SRWLOCK_FUTEX_SHARED_WAITERS_BIT;
+                wait = TRUE;
+            }
+        } while (InterlockedCompareExchange( futex, new, old ) != old);
+
+        if (!wait)
+            return STATUS_SUCCESS;
+
+        futex_wait_bitset( futex, new, NULL, SRWLOCK_FUTEX_BITSET_SHARED );
     }
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS CDECL fast_RtlReleaseSRWLockExclusive( RTL_SRWLOCK *lock )
+{
+    int old, new, *futex;
+
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+
+    if (!(futex = get_futex( &lock->Ptr )))
+        return STATUS_NOT_IMPLEMENTED;
+
+    do
+    {
+        old = *futex;
+
+        if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT))
+        {
+            ERR("Lock %p is not owned exclusive! (%#x)\n", lock, *futex);
+            return STATUS_RESOURCE_NOT_OWNED;
+        }
+
+        new = old & ~SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT;
+
+        if (!(new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
+            new &= ~SRWLOCK_FUTEX_SHARED_WAITERS_BIT;
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
+
+    if (new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK)
+        futex_wake_bitset( futex, 1, SRWLOCK_FUTEX_BITSET_EXCLUSIVE );
+    else if (old & SRWLOCK_FUTEX_SHARED_WAITERS_BIT)
+        futex_wake_bitset( futex, INT_MAX, SRWLOCK_FUTEX_BITSET_SHARED );
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS CDECL fast_RtlReleaseSRWLockShared( RTL_SRWLOCK *lock )
+{
+    int old, new, *futex;
+
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+
+    if (!(futex = get_futex( &lock->Ptr )))
+        return STATUS_NOT_IMPLEMENTED;
+
+    do
+    {
+        old = *futex;
+
+        if (old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
+        {
+            ERR("Lock %p is owned exclusive! (%#x)\n", lock, *futex);
+            return STATUS_RESOURCE_NOT_OWNED;
+        }
+        else if (!(old & SRWLOCK_FUTEX_SHARED_OWNERS_MASK))
+        {
+            ERR("Lock %p is not owned shared! (%#x)\n", lock, *futex);
+            return STATUS_RESOURCE_NOT_OWNED;
+        }
+
+        new = old - SRWLOCK_FUTEX_SHARED_OWNERS_INC;
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
+
+    /* Optimization: only bother waking if there are actually exclusive waiters. */
+    if (!(new & SRWLOCK_FUTEX_SHARED_OWNERS_MASK) && (new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
+        futex_wake_bitset( futex, 1, SRWLOCK_FUTEX_BITSET_EXCLUSIVE );
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS CDECL fast_wait_cv( RTL_CONDITION_VARIABLE *variable, const void *value, const LARGE_INTEGER *timeout )
+{
+    const char *value_ptr;
+    int aligned_value, *futex;
+    struct timespec timespec;
+    int ret;
+
+    if (!use_futexes())
+        return STATUS_NOT_IMPLEMENTED;
+
+    if (!(futex = get_futex( &variable->Ptr )))
+        return STATUS_NOT_IMPLEMENTED;
+
+    value_ptr = (const char *)&value;
+    value_ptr += ((ULONG_PTR)futex) - ((ULONG_PTR)&variable->Ptr);
+    aligned_value = *(int *)value_ptr;
+
+    if (timeout && timeout->QuadPart != TIMEOUT_INFINITE)
+    {
+        timespec_from_timeout( &timespec, timeout );
+        ret = futex_wait( futex, aligned_value, &timespec );
+    }
+    else
+        ret = futex_wait( futex, aligned_value, NULL );
+
+    if (ret == -1 && errno == ETIMEDOUT)
+        return STATUS_TIMEOUT;
+    return STATUS_WAIT_0;
+}
+
+NTSTATUS CDECL fast_RtlWakeConditionVariable( RTL_CONDITION_VARIABLE *variable, int count )
+{
+    int *futex;
+
+    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+
+    if (!(futex = get_futex( &variable->Ptr )))
+        return STATUS_NOT_IMPLEMENTED;
+
+    InterlockedIncrement( futex );
+    futex_wake( futex, count );
+    return STATUS_SUCCESS;
+}
+
+
+/* We can't map addresses to futex directly, because an application can wait on
+ * 8 bytes, and we can't pass all 8 as the compare value to futex(). Instead we
+ * map all addresses to a small fixed table of futexes. This may result in
+ * spurious wakes, but the application is already expected to handle those. */
+
+static int addr_futex_table[256];
+
+static inline int *hash_addr( const void *addr )
+{
+    ULONG_PTR val = (ULONG_PTR)addr;
+
+    return &addr_futex_table[(val >> 2) & 255];
+}
+
+static inline NTSTATUS fast_wait_addr( const void *addr, const void *cmp, SIZE_T size,
+                                       const LARGE_INTEGER *timeout )
+{
+    int *futex;
+    int val;
+    struct timespec timespec;
+    int ret;
+
+    if (!use_futexes())
+        return STATUS_NOT_IMPLEMENTED;
+
+    futex = hash_addr( addr );
+
+    /* We must read the previous value of the futex before checking the value
+     * of the address being waited on. That way, if we receive a wake between
+     * now and waiting on the futex, we know that val will have changed.
+     * Use an atomic load so that memory accesses are ordered between this read
+     * and the increment below. */
+    val = InterlockedCompareExchange( futex, 0, 0 );
+    if (!compare_addr( addr, cmp, size ))
+        return STATUS_SUCCESS;
+
+    if (timeout)
+    {
+        timespec_from_timeout( &timespec, timeout );
+        ret = futex_wait( futex, val, &timespec );
+    }
+    else
+        ret = futex_wait( futex, val, NULL );
+
+    if (ret == -1 && errno == ETIMEDOUT)
+        return STATUS_TIMEOUT;
+    return STATUS_SUCCESS;
+}
+
+static inline NTSTATUS fast_wake_addr( const void *addr )
+{
+    int *futex;
+
+    if (!use_futexes())
+        return STATUS_NOT_IMPLEMENTED;
+
+    futex = hash_addr( addr );
+
+    InterlockedIncrement( futex );
+
+    futex_wake( futex, INT_MAX );
+    return STATUS_SUCCESS;
 }
 
 #else
 
-/***********************************************************************
- *             NtWaitForAlertByThreadId (NTDLL.@)
- */
-NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEGER *timeout )
+NTSTATUS CDECL fast_RtlTryAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
 {
-    union tid_alert_entry *entry = get_tid_alert_entry( NtCurrentTeb()->ClientId.UniqueThread );
-    NTSTATUS status;
+    return STATUS_NOT_IMPLEMENTED;
+}
 
-    TRACE( "%p %s\n", address, debugstr_timeout( timeout ) );
+NTSTATUS CDECL fast_RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
 
-    if (!entry) return STATUS_INVALID_CID;
+NTSTATUS CDECL fast_RtlTryAcquireSRWLockShared( RTL_SRWLOCK *lock )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
 
-#ifdef __linux__
-    if (use_futexes())
-    {
-        int *futex = &entry->futex;
-        ULONGLONG end;
-        int ret;
+NTSTATUS CDECL fast_RtlAcquireSRWLockShared( RTL_SRWLOCK *lock )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
 
-        if (timeout)
-        {
-            if (timeout->QuadPart == TIMEOUT_INFINITE)
-                timeout = NULL;
-            else
-                end = get_absolute_timeout( timeout );
-        }
+NTSTATUS CDECL fast_RtlReleaseSRWLockExclusive( RTL_SRWLOCK *lock )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
 
-        while (!InterlockedExchange( futex, 0 ))
-        {
-            if (timeout)
-            {
-                LONGLONG timeleft = update_timeout( end );
-                struct timespec timespec;
+NTSTATUS CDECL fast_RtlReleaseSRWLockShared( RTL_SRWLOCK *lock )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
 
-                timespec.tv_sec = timeleft / (ULONGLONG)TICKSPERSEC;
-                timespec.tv_nsec = (timeleft % TICKSPERSEC) * 100;
-                ret = futex_wait( futex, 0, &timespec );
-            }
-            else
-                ret = futex_wait( futex, 0, NULL );
+NTSTATUS CDECL fast_RtlWakeConditionVariable( RTL_CONDITION_VARIABLE *variable, int count )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
 
-            if (ret == -1 && errno == ETIMEDOUT) return STATUS_TIMEOUT;
-        }
-        return STATUS_ALERTED;
-    }
-#endif
+NTSTATUS CDECL fast_wait_cv( RTL_CONDITION_VARIABLE *variable, const void *value, const LARGE_INTEGER *timeout )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
 
-    status = NtWaitForSingleObject( entry->event, FALSE, timeout );
-    if (!status) return STATUS_ALERTED;
-    return status;
+static inline NTSTATUS fast_wait_addr( const void *addr, const void *cmp, SIZE_T size,
+                                       const LARGE_INTEGER *timeout )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+static inline NTSTATUS fast_wake_addr( const void *addr )
+{
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 #endif
+
+
+/***********************************************************************
+ *           RtlWaitOnAddress   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWaitOnAddress( const void *addr, const void *cmp, SIZE_T size,
+                                  const LARGE_INTEGER *timeout )
+{
+    select_op_t select_op;
+    NTSTATUS ret;
+    timeout_t abs_timeout = timeout ? timeout->QuadPart : TIMEOUT_INFINITE;
+
+    if (size != 1 && size != 2 && size != 4 && size != 8)
+        return STATUS_INVALID_PARAMETER;
+
+    if ((ret = fast_wait_addr( addr, cmp, size, timeout )) != STATUS_NOT_IMPLEMENTED)
+        return ret;
+
+    mutex_lock( &addr_mutex );
+    if (!compare_addr( addr, cmp, size ))
+    {
+        mutex_unlock( &addr_mutex );
+        return STATUS_SUCCESS;
+    }
+
+    if (abs_timeout < 0)
+    {
+        LARGE_INTEGER now;
+
+        NtQueryPerformanceCounter( &now, NULL );
+        abs_timeout -= now.QuadPart;
+    }
+
+    select_op.keyed_event.op     = SELECT_KEYED_EVENT_WAIT;
+    select_op.keyed_event.handle = wine_server_obj_handle( keyed_event );
+    select_op.keyed_event.key    = wine_server_client_ptr( addr );
+
+    return server_select( &select_op, sizeof(select_op.keyed_event), SELECT_INTERRUPTIBLE,
+                          abs_timeout, NULL, &addr_mutex, NULL );
+}
+
+/***********************************************************************
+ *           RtlWakeAddressAll    (NTDLL.@)
+ */
+void WINAPI RtlWakeAddressAll( const void *addr )
+{
+    if (fast_wake_addr( addr ) != STATUS_NOT_IMPLEMENTED) return;
+
+    mutex_lock( &addr_mutex );
+    while (NtReleaseKeyedEvent( 0, addr, 0, &zero_timeout ) == STATUS_SUCCESS) {}
+    mutex_unlock( &addr_mutex );
+}
+
+/***********************************************************************
+ *           RtlWakeAddressSingle (NTDLL.@)
+ */
+void WINAPI RtlWakeAddressSingle( const void *addr )
+{
+    if (fast_wake_addr( addr ) != STATUS_NOT_IMPLEMENTED) return;
+
+    mutex_lock( &addr_mutex );
+    NtReleaseKeyedEvent( 0, addr, 0, &zero_timeout );
+    mutex_unlock( &addr_mutex );
+}

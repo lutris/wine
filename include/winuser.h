@@ -3715,7 +3715,7 @@ WINUSERAPI INT         WINAPI DrawTextExW(HDC,LPWSTR,INT,LPRECT,UINT,LPDRAWTEXTP
 #define                       DrawTextEx WINELIB_NAME_AW(DrawTextEx)
 WINUSERAPI BOOL        WINAPI EmptyClipboard(void);
 WINUSERAPI BOOL        WINAPI EnableMenuItem(HMENU,UINT,UINT);
-WINUSERAPI BOOL        WINAPI EnableMouseInPointer(BOOL);
+
 WINUSERAPI BOOL        WINAPI EnableNonClientDpiScaling(HWND);
 WINUSERAPI BOOL        WINAPI EnableScrollBar(HWND,UINT,UINT);
 WINUSERAPI BOOL        WINAPI EnableWindow(HWND,BOOL);

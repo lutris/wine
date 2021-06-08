@@ -18,6 +18,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -343,6 +344,26 @@ static void fill_luid_property(VkPhysicalDeviceProperties2 *properties2)
             id->deviceNodeMask);
 }
 
+void WINAPI vkGetPhysicalDeviceProperties(VkPhysicalDevice phys_dev,
+        VkPhysicalDeviceProperties *properties)
+{
+    TRACE("%p, %p\n", phys_dev, properties);
+
+    unix_funcs->p_vkGetPhysicalDeviceProperties(phys_dev, properties);
+
+    {
+        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
+        if (sgi && *sgi != '0')
+        {
+            if (properties->vendorID == 0x10de /* NVIDIA */)
+            {
+                properties->vendorID = 0x1002; /* AMD */
+                properties->deviceID = 0x67df; /* RX 480 */
+            }
+        }
+    }
+}
+
 void WINAPI vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
         VkPhysicalDeviceProperties2 *properties2)
 {
@@ -350,6 +371,18 @@ void WINAPI vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
 
     unix_funcs->p_vkGetPhysicalDeviceProperties2(phys_dev, properties2);
     fill_luid_property(properties2);
+
+    {
+        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
+        if (sgi && *sgi != '0')
+        {
+            if (properties2->properties.vendorID == 0x10de /* NVIDIA */)
+            {
+                properties2->properties.vendorID = 0x1002; /* AMD */
+                properties2->properties.deviceID = 0x67df; /* RX 480 */
+            }
+        }
+    }
 }
 
 void WINAPI vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
@@ -359,6 +392,18 @@ void WINAPI vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
 
     unix_funcs->p_vkGetPhysicalDeviceProperties2KHR(phys_dev, properties2);
     fill_luid_property(properties2);
+
+    {
+        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
+        if (sgi && *sgi != '0')
+        {
+            if (properties2->properties.vendorID == 0x10de /* NVIDIA */)
+            {
+                properties2->properties.vendorID = 0x1002; /* AMD */
+                properties2->properties.deviceID = 0x67df; /* RX 480 */
+            }
+        }
+    }
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
