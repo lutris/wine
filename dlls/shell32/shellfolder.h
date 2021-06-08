@@ -48,7 +48,7 @@ DECLARE_INTERFACE_(ISFHelper,IUnknown)
     /*** ISFHelper methods ***/
     STDMETHOD(GetUniqueName)(THIS_ LPWSTR  lpName, UINT  uLen) PURE;
     STDMETHOD(AddFolder)(THIS_ HWND  hwnd, LPCWSTR  lpName, LPITEMIDLIST * ppidlOut) PURE;
-    STDMETHOD(DeleteItems)(THIS_ UINT  cidl, LPCITEMIDLIST * apidl) PURE;
+    STDMETHOD(DeleteItems)(THIS_ UINT cidl, LPCITEMIDLIST *apidl, BOOL confirm) PURE;
     STDMETHOD(CopyItems)(THIS_ IShellFolder * pSFFrom, UINT  cidl, LPCITEMIDLIST * apidl) PURE;
 };
 #undef INTERFACE
@@ -61,7 +61,7 @@ DECLARE_INTERFACE_(ISFHelper,IUnknown)
 /*** ISFHelper methods ***/
 #define ISFHelper_GetUniqueName(p,a,b)          (p)->lpVtbl->GetUniqueName(p,a,b)
 #define ISFHelper_AddFolder(p,a,b,c)            (p)->lpVtbl->AddFolder(p,a,b,c)
-#define ISFHelper_DeleteItems(p,a,b)            (p)->lpVtbl->DeleteItems(p,a,b)
+#define ISFHelper_DeleteItems(p,a,b,c)          (p)->lpVtbl->DeleteItems(p,a,b,c)
 #define ISFHelper_CopyItems(p,a,b,c)            (p)->lpVtbl->CopyItems(p,a,b,c)
 #endif
 
