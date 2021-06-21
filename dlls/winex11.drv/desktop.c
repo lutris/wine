@@ -315,6 +315,7 @@ void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
     settings_handler.free_modes = X11DRV_desktop_free_modes;
     settings_handler.get_current_mode = X11DRV_desktop_get_current_mode;
     settings_handler.set_current_mode = X11DRV_desktop_set_current_mode;
+    settings_handler.convert_coordinates = NULL;
     X11DRV_Settings_SetHandler( &settings_handler );
 }
 
@@ -418,6 +419,7 @@ void X11DRV_resize_desktop( BOOL send_display_change )
 {
     RECT primary_rect, virtual_rect;
     HWND hwnd = GetDesktopWindow();
+    DEVMODEW current_mode;
     INT width, height;
 
     virtual_rect = get_virtual_screen_rect();
@@ -425,23 +427,19 @@ void X11DRV_resize_desktop( BOOL send_display_change )
     width = primary_rect.right;
     height = primary_rect.bottom;
 
-    if (GetWindowThreadProcessId( hwnd, NULL ) != GetCurrentThreadId())
-    {
-        SendMessageW( hwnd, WM_X11DRV_RESIZE_DESKTOP, 0, (LPARAM)send_display_change );
-    }
-    else
-    {
-        TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
-        update_desktop_fullscreen( width, height );
-        SetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top,
-                      virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
-                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
-        ungrab_clipping_window();
+    TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
+    update_desktop_fullscreen( width, height );
+    SetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top,
+                  virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
+                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
+    ungrab_clipping_window();
 
-        if (send_display_change)
-        {
-            SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp, MAKELPARAM( width, height ),
-                                 SMTO_ABORTIFHUNG, 2000, NULL );
-        }
+    if (send_display_change)
+    {
+        SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp, MAKELPARAM( width, height ),
+                             SMTO_ABORTIFHUNG, 2000, NULL );
     }
+
+    EnumDisplaySettingsW( NULL, ENUM_CURRENT_SETTINGS, &current_mode );
+    ChangeDisplaySettingsExW( NULL, &current_mode, NULL, 0, NULL );
 }
