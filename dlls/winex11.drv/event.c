@@ -565,15 +565,20 @@ DWORD EVENT_x11_time_to_win32_time(Time time)
 static inline BOOL can_activate_window( HWND hwnd )
 {
     LONG style = GetWindowLongW( hwnd, GWL_STYLE );
+    struct x11drv_win_data *data;
+    BOOL off_desktop;
     RECT rect;
 
     if (!(style & WS_VISIBLE)) return FALSE;
     if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return FALSE;
-    if (style & WS_MINIMIZE) return FALSE;
+    if (style & (WS_MINIMIZE | WS_DISABLED)) return FALSE;
     if (GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_NOACTIVATE) return FALSE;
     if (hwnd == GetDesktopWindow()) return FALSE;
     if (GetWindowRect( hwnd, &rect ) && IsRectEmpty( &rect )) return FALSE;
-    return !(style & WS_DISABLED);
+    if (!(data = get_win_data( hwnd ))) return FALSE;
+    off_desktop = data->off_desktop;
+    release_win_data( data );
+    return !off_desktop;
 }
 
 
@@ -612,26 +617,12 @@ static void set_input_focus( struct x11drv_win_data *data )
  */
 static void set_focus( Display *display, HWND hwnd, Time time )
 {
-    HWND focus, old_active;
+    HWND focus;
     Window win;
     GUITHREADINFO threadinfo;
 
-    old_active = GetForegroundWindow();
-
-    /* prevent recursion */
-    x11drv_thread_data()->active_window = hwnd;
-
     TRACE( "setting foreground window to %p\n", hwnd );
     SetForegroundWindow( hwnd );
-
-    /* Some applications expect that a being deactivated topmost window
-     * receives the WM_WINDOWPOSCHANGING/WM_WINDOWPOSCHANGED messages,
-     * and perform some specific actions. Chessmaster is one of such apps.
-     * Window Manager keeps a topmost window on top in z-oder, so there is
-     * no need to actually do anything, just send the messages.
-     */
-    if (old_active && (GetWindowLongW( old_active, GWL_EXSTYLE ) & WS_EX_TOPMOST))
-        SetWindowPos( old_active, hwnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER );
 
     threadinfo.cbSize = sizeof(threadinfo);
     GetGUIThreadInfo(0, &threadinfo);
@@ -877,8 +868,6 @@ static void focus_out( Display *display , HWND hwnd )
 
     if (!focus_win)
     {
-        x11drv_thread_data()->active_window = 0;
-
         /* Abey : 6-Oct-99. Check again if the focus out window is the
            Foreground window, because in most cases the messages sent
            above must have already changed the foreground window, in which
@@ -1145,7 +1134,7 @@ static BOOL X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
 
     if (!hwnd) return FALSE;
     if (!(data = get_win_data( hwnd ))) return FALSE;
-    if (!data->mapped || data->iconic) goto done;
+    if (!data->mapped || data->iconic || data->off_desktop) goto done;
     if (data->whole_window && !data->managed) goto done;
     /* ignore synthetic events on foreign windows */
     if (event->send_event && !data->whole_window) goto done;
@@ -1364,8 +1353,6 @@ static void handle_wm_state_notify( HWND hwnd, XPropertyEvent *event, BOOL updat
             {
                 TRACE( "restoring win %p/%lx\n", data->hwnd, data->whole_window );
                 release_win_data( data );
-                if ((style & (WS_MINIMIZE | WS_VISIBLE)) == (WS_MINIMIZE | WS_VISIBLE))
-                    SetActiveWindow( hwnd );
                 SendMessageW( hwnd, WM_SYSCOMMAND, SC_RESTORE, 0 );
                 return;
             }
@@ -1374,6 +1361,26 @@ static void handle_wm_state_notify( HWND hwnd, XPropertyEvent *event, BOOL updat
     }
     else if (!data->iconic && data->wm_state == IconicState)
     {
+        /* Check if the window is on another desktop rather than actually minimized */
+        read_net_wm_states( event->display, data );
+        if (!(data->net_wm_state & (1 << NET_WM_STATE_HIDDEN)))
+        {
+            if (!data->off_desktop)
+            {
+                struct WINCOMPATTRDATA attr;
+                BOOL cloak = TRUE;
+
+                attr.attribute = WCA_CLOAK;
+                attr.pData = &cloak;
+                attr.dataSize = sizeof(cloak);
+                data->shell_cloak = TRUE;
+                SetWindowCompositionAttribute( hwnd, &attr );
+                data->shell_cloak = FALSE;
+                data->off_desktop = TRUE;
+            }
+            goto done;
+        }
+
         data->iconic = TRUE;
         if ((style & WS_MINIMIZEBOX) && !(style & WS_DISABLED))
         {
@@ -1383,6 +1390,22 @@ static void handle_wm_state_notify( HWND hwnd, XPropertyEvent *event, BOOL updat
             return;
         }
         TRACE( "not minimizing win %p/%lx style %08x\n", data->hwnd, data->whole_window, style );
+    }
+    else if (!data->iconic && data->wm_state == NormalState)
+    {
+        if (data->off_desktop)
+        {
+            struct WINCOMPATTRDATA attr;
+            BOOL cloak = FALSE;
+
+            attr.attribute = WCA_CLOAK;
+            attr.pData = &cloak;
+            attr.dataSize = sizeof(cloak);
+            data->shell_cloak = TRUE;
+            SetWindowCompositionAttribute( hwnd, &attr );
+            data->shell_cloak = FALSE;
+            data->off_desktop = FALSE;
+        }
     }
 done:
     release_win_data( data );

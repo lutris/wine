@@ -1896,6 +1896,8 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
     case WM_WINE_UPDATEWINDOWSTATE:
         update_window_state( hwnd );
         return 0;
+    case WM_WINE_SETWINDOWCLOAKED:
+        return USER_Driver->pSetWindowCompositionAttribute( hwnd, WCA_CLOAK, &wparam );
     default:
         if (msg >= WM_WINE_FIRST_DRIVER_MSG && msg <= WM_WINE_LAST_DRIVER_MSG)
             return USER_Driver->pWindowMessage( hwnd, msg, wparam, lparam );
@@ -2594,6 +2596,38 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     /* Windows sends the normal mouse message as the message parameter
        in the WM_SETCURSOR message even if it's non-client mouse message */
     SendMessageW( msg->hwnd, WM_SETCURSOR, (WPARAM)msg->hwnd, MAKELONG( hittest, msg->message ));
+
+    if (enable_mouse_in_pointer) switch (msg->message)
+    {
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+    {
+        WORD flags = POINTER_MESSAGE_FLAG_INRANGE|POINTER_MESSAGE_FLAG_INCONTACT|POINTER_MESSAGE_FLAG_PRIMARY;
+        if (msg->message == WM_LBUTTONDOWN) flags |= POINTER_MESSAGE_FLAG_FIRSTBUTTON;
+        if (msg->message == WM_RBUTTONDOWN) flags |= POINTER_MESSAGE_FLAG_SECONDBUTTON;
+        if (msg->message == WM_MBUTTONDOWN) flags |= POINTER_MESSAGE_FLAG_THIRDBUTTON;
+        if (msg->message == WM_XBUTTONDOWN && LOWORD( msg->wParam ) == MK_LBUTTON) flags |= POINTER_MESSAGE_FLAG_FIRSTBUTTON;
+        if (msg->message == WM_XBUTTONDOWN && LOWORD( msg->wParam ) == MK_RBUTTON) flags |= POINTER_MESSAGE_FLAG_SECONDBUTTON;
+        if (msg->message == WM_XBUTTONDOWN && LOWORD( msg->wParam ) == MK_MBUTTON) flags |= POINTER_MESSAGE_FLAG_THIRDBUTTON;
+        if (msg->message == WM_XBUTTONDOWN && LOWORD( msg->wParam ) == MK_XBUTTON1) flags |= POINTER_MESSAGE_FLAG_FOURTHBUTTON;
+        if (msg->message == WM_XBUTTONDOWN && LOWORD( msg->wParam ) == MK_XBUTTON2) flags |= POINTER_MESSAGE_FLAG_FIFTHBUTTON;
+        SendMessageW( msg->hwnd, WM_POINTERUPDATE, MAKELONG( 1, flags ), MAKELONG( msg->pt.x, msg->pt.y ) );
+        break;
+    }
+    case WM_MOUSEWHEEL:
+        SendMessageW( msg->hwnd, WM_POINTERWHEEL, MAKELONG( 1, HIWORD( msg->wParam ) ), MAKELONG( msg->pt.x, msg->pt.y ) );
+        break;
+    case WM_MOUSEHWHEEL:
+        SendMessageW( msg->hwnd, WM_POINTERHWHEEL, MAKELONG( 1, HIWORD( msg->wParam ) ), MAKELONG( msg->pt.x, msg->pt.y ) );
+        break;
+    }
 
     msg->message = message;
     return !eatMsg;
@@ -4497,7 +4531,7 @@ UINT_PTR WINAPI SetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC 
 
     if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
 
-    timeout = min( max( 5, timeout ), USER_TIMER_MAXIMUM );
+    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
 
     SERVER_START_REQ( set_win_timer )
     {

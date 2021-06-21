@@ -421,7 +421,6 @@ static int GLXErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
 static BOOL X11DRV_WineGL_InitOpenglInfo(void)
 {
     static const char legacy_extensions[] = " WGL_EXT_extensions_string WGL_EXT_swap_control";
-    static const char direct_extension[] = " WINE_EXT_direct_rendering";
 
     int screen = DefaultScreen(gdi_display);
     Window win = 0, root = 0;
@@ -477,18 +476,16 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     }
     gl_renderer = (const char *)opengl_funcs.gl.p_glGetString(GL_RENDERER);
     gl_version  = (const char *)opengl_funcs.gl.p_glGetString(GL_VERSION);
-    glx_direct = pglXIsDirect(gdi_display, ctx);
     str = (const char *) opengl_funcs.gl.p_glGetString(GL_EXTENSIONS);
-    glExtensions = HeapAlloc(GetProcessHeap(), 0, strlen(str)+sizeof(legacy_extensions)+sizeof(direct_extension));
+    glExtensions = HeapAlloc(GetProcessHeap(), 0, strlen(str)+sizeof(legacy_extensions));
     strcpy(glExtensions, str);
     strcat(glExtensions, legacy_extensions);
-    if (glx_direct)
-        strcat(glExtensions, direct_extension);
 
     /* Get the common GLX version supported by GLX client and server ( major/minor) */
     pglXQueryVersion(gdi_display, &glxVersion[0], &glxVersion[1]);
 
     glxExtensions = pglXQueryExtensionsString(gdi_display, screen);
+    glx_direct = pglXIsDirect(gdi_display, ctx);
 
     TRACE("GL version             : %s.\n", gl_version);
     TRACE("GL renderer            : %s.\n", gl_renderer);
@@ -1946,20 +1943,20 @@ static BOOL WINAPI glxdrv_wglShareLists(struct wgl_context *org, struct wgl_cont
 
 static void wglFinish(void)
 {
-    struct x11drv_escape_flush_gl_drawable escape;
+    struct x11drv_escape_present_drawable escape;
     struct gl_drawable *gl;
     struct wgl_context *ctx = NtCurrentTeb()->glContext;
 
-    escape.code = X11DRV_FLUSH_GL_DRAWABLE;
-    escape.gl_drawable = 0;
+    escape.code = X11DRV_PRESENT_DRAWABLE;
+    escape.drawable = 0;
     escape.flush = FALSE;
 
     if ((gl = get_gl_drawable( WindowFromDC( ctx->hdc ), 0 )))
     {
         switch (gl->type)
         {
-        case DC_GL_PIXMAP_WIN: escape.gl_drawable = gl->pixmap; break;
-        case DC_GL_CHILD_WIN:  escape.gl_drawable = gl->window; break;
+        case DC_GL_PIXMAP_WIN: escape.drawable = gl->pixmap; break;
+        case DC_GL_CHILD_WIN:  escape.drawable = gl->window; break;
         default: break;
         }
         sync_context(ctx);
@@ -1967,25 +1964,25 @@ static void wglFinish(void)
     }
 
     pglFinish();
-    if (escape.gl_drawable) ExtEscape( ctx->hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
+    if (escape.drawable) ExtEscape( ctx->hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 }
 
 static void wglFlush(void)
 {
-    struct x11drv_escape_flush_gl_drawable escape;
+    struct x11drv_escape_present_drawable escape;
     struct gl_drawable *gl;
     struct wgl_context *ctx = NtCurrentTeb()->glContext;
 
-    escape.code = X11DRV_FLUSH_GL_DRAWABLE;
-    escape.gl_drawable = 0;
+    escape.code = X11DRV_PRESENT_DRAWABLE;
+    escape.drawable = 0;
     escape.flush = FALSE;
 
     if ((gl = get_gl_drawable( WindowFromDC( ctx->hdc ), 0 )))
     {
         switch (gl->type)
         {
-        case DC_GL_PIXMAP_WIN: escape.gl_drawable = gl->pixmap; break;
-        case DC_GL_CHILD_WIN:  escape.gl_drawable = gl->window; break;
+        case DC_GL_PIXMAP_WIN: escape.drawable = gl->pixmap; break;
+        case DC_GL_CHILD_WIN:  escape.drawable = gl->window; break;
         default: break;
         }
         sync_context(ctx);
@@ -1993,7 +1990,7 @@ static void wglFlush(void)
     }
 
     pglFlush();
-    if (escape.gl_drawable) ExtEscape( ctx->hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
+    if (escape.drawable) ExtEscape( ctx->hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 }
 
 static const GLubyte *wglGetString(GLenum name)
@@ -3308,15 +3305,15 @@ static void X11DRV_WineGL_LoadExtensions(void)
  */
 static BOOL WINAPI glxdrv_wglSwapBuffers( HDC hdc )
 {
-    struct x11drv_escape_flush_gl_drawable escape;
+    struct x11drv_escape_present_drawable escape;
     struct gl_drawable *gl;
     struct wgl_context *ctx = NtCurrentTeb()->glContext;
     INT64 ust, msc, sbc, target_sbc = 0;
 
     TRACE("(%p)\n", hdc);
 
-    escape.code = X11DRV_FLUSH_GL_DRAWABLE;
-    escape.gl_drawable = 0;
+    escape.code = X11DRV_PRESENT_DRAWABLE;
+    escape.drawable = 0;
     escape.flush = !pglXWaitForSbcOML;
 
     if (!(gl = get_gl_drawable( WindowFromDC( hdc ), hdc )))
@@ -3337,7 +3334,7 @@ static BOOL WINAPI glxdrv_wglSwapBuffers( HDC hdc )
     {
     case DC_GL_PIXMAP_WIN:
         if (ctx) sync_context( ctx );
-        escape.gl_drawable = gl->pixmap;
+        escape.drawable = gl->pixmap;
         if (pglXCopySubBufferMESA) {
             /* (glX)SwapBuffers has an implicit glFlush effect, however
              * GLX_MESA_copy_sub_buffer doesn't. Make sure GL is flushed before
@@ -3358,10 +3355,10 @@ static BOOL WINAPI glxdrv_wglSwapBuffers( HDC hdc )
     case DC_GL_WINDOW:
     case DC_GL_CHILD_WIN:
         if (ctx) sync_context( ctx );
-        if (gl->type == DC_GL_CHILD_WIN) escape.gl_drawable = gl->window;
+        if (gl->type == DC_GL_CHILD_WIN) escape.drawable = gl->window;
         /* fall through */
     default:
-        if (escape.gl_drawable && pglXSwapBuffersMscOML)
+        if (escape.drawable && pglXSwapBuffersMscOML)
         {
             pglFlush();
             target_sbc = pglXSwapBuffersMscOML( gdi_display, gl->drawable, 0, 0, 0 );
@@ -3371,12 +3368,12 @@ static BOOL WINAPI glxdrv_wglSwapBuffers( HDC hdc )
         break;
     }
 
-    if (escape.gl_drawable && pglXWaitForSbcOML)
+    if (escape.drawable && pglXWaitForSbcOML)
         pglXWaitForSbcOML( gdi_display, gl->drawable, target_sbc, &ust, &msc, &sbc );
 
     release_gl_drawable( gl );
 
-    if (escape.gl_drawable) ExtEscape( ctx->hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
+    if (escape.drawable) ExtEscape( ctx->hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
     return TRUE;
 }
 

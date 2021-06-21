@@ -137,7 +137,6 @@
 @ stdcall -syscall NtAdjustPrivilegesToken(long long ptr long ptr ptr)
 @ stdcall -syscall NtAlertResumeThread(long ptr)
 @ stdcall -syscall NtAlertThread(long)
-@ stdcall -syscall NtAlertThreadByThreadId(ptr)
 @ stdcall -syscall NtAllocateLocallyUniqueId(ptr)
 # @ stub NtAllocateUserPhysicalPages
 @ stdcall -syscall NtAllocateUuids(ptr ptr ptr ptr)
@@ -424,7 +423,6 @@
 @ stdcall -syscall NtUnmapViewOfSection(long ptr)
 @ stub NtVdmControl
 @ stub NtW32Call
-@ stdcall -syscall NtWaitForAlertByThreadId(ptr ptr)
 @ stdcall -syscall NtWaitForDebugEvent(long long ptr ptr)
 @ stdcall -syscall NtWaitForKeyedEvent(long ptr long ptr)
 @ stdcall -syscall NtWaitForMultipleObjects(long ptr long long ptr)
@@ -1226,7 +1224,7 @@
 # @ stub ZwEnumerateSystemEnvironmentValuesEx
 @ stdcall -private -syscall ZwEnumerateValueKey(long long long ptr long ptr) NtEnumerateValueKey
 @ stub ZwExtendSection
-# @ stub ZwFilterToken
+@ stdcall -private -syscall ZwFilterToken(long long ptr ptr ptr ptr) NtFilterToken
 @ stdcall -private -syscall ZwFindAtom(ptr long ptr) NtFindAtom
 @ stdcall -private -syscall ZwFlushBuffersFile(long ptr) NtFlushBuffersFile
 @ stdcall -private -syscall ZwFlushInstructionCache(long ptr long) NtFlushInstructionCache
@@ -1627,6 +1625,9 @@
 @ cdecl -norelay __wine_dbg_output(str)
 @ cdecl -norelay __wine_dbg_strdup(str)
 
+# Virtual memory
+@ cdecl -syscall __wine_needs_override_large_address_aware()
+
 # Version
 @ cdecl wine_get_version()
 @ cdecl wine_get_build_id()
@@ -1635,3 +1636,5 @@
 # Filesystem
 @ cdecl -syscall wine_nt_to_unix_file_name(ptr ptr ptr long)
 @ cdecl -syscall wine_unix_to_nt_file_name(str ptr ptr)
+
+@ cdecl IsTransgaming()
