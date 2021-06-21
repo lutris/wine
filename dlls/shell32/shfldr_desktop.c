@@ -184,11 +184,26 @@ static HRESULT WINAPI ISF_Desktop_fnParseDisplayName (IShellFolder2 * iface,
     }
     else if (PathGetDriveNumberW (lpszDisplayName) >= 0)
     {
+        /*
+         * UNIXFS can't handle drives without a mount point yet. We fall back
+         * to use the MyComputer interface if we can't get the file attributes
+         * on the device.
+         */
+        char drivePath[] = "A:\\";
+        drivePath[0] = 'A' + PathGetDriveNumberW(lpszDisplayName);
+
         /* it's a filesystem path with a drive. Let MyComputer/UnixDosFolder parse it */
-        if (UNIXFS_is_rooted_at_desktop()) 
+        if (UNIXFS_is_rooted_at_desktop() &&
+            GetFileAttributesA(drivePath) != INVALID_FILE_ATTRIBUTES)
+        {
             pidlTemp = _ILCreateGuid(PT_GUID, &CLSID_UnixDosFolder);
+            TRACE("Using unixfs for %s\n", debugstr_w(lpszDisplayName));
+        }
         else
+        {
             pidlTemp = _ILCreateMyComputer ();
+            TRACE("Using MyComputer for %s\n", debugstr_w(lpszDisplayName));
+        }
         szNext = lpszDisplayName;
     }
     else if (PathIsUNCW(lpszDisplayName))

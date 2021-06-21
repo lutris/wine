@@ -1,0 +1,8 @@
+MODULE    = nvapi64.dll
+PARENTSRC = ../nvapi
+IMPORTS   = wined3d d3d11
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	nvapi.c
