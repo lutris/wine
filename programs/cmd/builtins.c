@@ -31,6 +31,9 @@
 #include "wcmd.h"
 #include <shellapi.h>
 #include "wine/debug.h"
+#include "winternl.h"
+#include "winioctl.h"
+#include "ntifs.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cmd);
 
@@ -4873,11 +4876,11 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
         /* If nothing after '=' then clear value - only valid for ASSOC */
         if (*newValue == 0x00) {
 
-          if (assoc) rc = RegDeleteKeyW(key, args);
-          if (assoc && rc == ERROR_SUCCESS) {
+          rc = RegDeleteTreeW(key, args);
+          if (rc == ERROR_SUCCESS) {
             WINE_TRACE("HKCR Key '%s' deleted\n", wine_dbgstr_w(args));
 
-          } else if (assoc && rc != ERROR_FILE_NOT_FOUND) {
+          } else if (rc != ERROR_FILE_NOT_FOUND) {
             WCMD_print_error();
             errorlevel = 2;
 
@@ -4969,6 +4972,49 @@ void WCMD_color (void) {
   }
 }
 
+BOOL WCMD_create_junction(WCHAR *link, WCHAR *target) {
+    static INT struct_size = offsetof(REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer.PathBuffer[0]);
+    static INT header_size = offsetof(REPARSE_DATA_BUFFER, GenericReparseBuffer);
+    INT buffer_size, data_size, string_len, prefix_len;
+    WCHAR *subst_dest, *print_dest, *string;
+    REPARSE_DATA_BUFFER *buffer;
+    UNICODE_STRING nt_name;
+    NTSTATUS status;
+    HANDLE hlink;
+    DWORD dwret;
+    BOOL ret;
+
+    if (!CreateDirectoryW(link, NULL ))
+        return FALSE;
+    hlink = CreateFileW(link, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
+                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+    if (hlink == INVALID_HANDLE_VALUE)
+        return FALSE;
+    status = RtlDosPathNameToNtPathName_U_WithStatus(target, &nt_name, NULL, NULL);
+    if (status)
+        return FALSE;
+    prefix_len = strlen("\\??\\");
+    string = nt_name.Buffer;
+    string_len = lstrlenW( &string[prefix_len] );
+    data_size = (prefix_len + 2 * string_len + 2) * sizeof(WCHAR);
+    buffer_size = struct_size + data_size;
+    buffer = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_size );
+    buffer->ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
+    buffer->ReparseDataLength = struct_size - header_size + data_size;
+    buffer->MountPointReparseBuffer.SubstituteNameLength = (prefix_len + string_len) * sizeof(WCHAR);
+    buffer->MountPointReparseBuffer.PrintNameOffset = (prefix_len + string_len + 1) * sizeof(WCHAR);
+    buffer->MountPointReparseBuffer.PrintNameLength = string_len * sizeof(WCHAR);
+    subst_dest = &buffer->MountPointReparseBuffer.PathBuffer[0];
+    print_dest = &buffer->MountPointReparseBuffer.PathBuffer[prefix_len + string_len + 1];
+    lstrcpyW(subst_dest, string);
+    lstrcpyW(print_dest, &string[prefix_len]);
+    RtlFreeUnicodeString(&nt_name );
+    ret = DeviceIoControl(hlink, FSCTL_SET_REPARSE_POINT, (LPVOID)buffer, buffer_size, NULL, 0,
+                          &dwret, 0 );
+    HeapFree(GetProcessHeap(), 0, buffer);
+    return ret;
+}
+
 /****************************************************************************
  * WCMD_mklink
  */
@@ -5017,7 +5063,7 @@ void WCMD_mklink(WCHAR *args)
     else if(!junction)
         ret = CreateSymbolicLinkW(file1, file2, isdir);
     else
-        WINE_TRACE("Juction links currently not supported.\n");
+        ret = WCMD_create_junction(file1, file2);
 
     if(!ret)
         WCMD_output_stderr(WCMD_LoadMessage(WCMD_READFAIL), file1);
