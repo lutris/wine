@@ -132,7 +132,6 @@ static const USER_DRIVER *load_driver(void)
         GET_USER_FUNC(MsgWaitForMultipleObjectsEx);
         GET_USER_FUNC(ReleaseDC);
         GET_USER_FUNC(ScrollDC);
-        GET_USER_FUNC(SetActiveWindow);
         GET_USER_FUNC(SetCapture);
         GET_USER_FUNC(SetFocus);
         GET_USER_FUNC(SetLayeredWindowAttributes);
@@ -325,10 +324,6 @@ static BOOL CDECL nulldrv_ScrollDC( HDC hdc, INT dx, INT dy, HRGN update )
                    hdc, rect.left - dx, rect.top - dy, SRCCOPY );
 }
 
-static void CDECL nulldrv_SetActiveWindow( HWND hwnd )
-{
-}
-
 static void CDECL nulldrv_SetCapture( HWND hwnd, UINT flags )
 {
 }
@@ -443,7 +438,6 @@ static USER_DRIVER null_driver =
     nulldrv_MsgWaitForMultipleObjectsEx,
     nulldrv_ReleaseDC,
     nulldrv_ScrollDC,
-    nulldrv_SetActiveWindow,
     nulldrv_SetCapture,
     nulldrv_SetFocus,
     nulldrv_SetLayeredWindowAttributes,
@@ -643,7 +637,6 @@ static USER_DRIVER lazy_load_driver =
     nulldrv_MsgWaitForMultipleObjectsEx,
     nulldrv_ReleaseDC,
     nulldrv_ScrollDC,
-    nulldrv_SetActiveWindow,
     nulldrv_SetCapture,
     nulldrv_SetFocus,
     loaderdrv_SetLayeredWindowAttributes,

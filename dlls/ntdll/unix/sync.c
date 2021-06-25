@@ -76,6 +76,7 @@
 #include "wine/debug.h"
 #include "unix_private.h"
 #include "esync.h"
+#include "fsync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(sync);
 
@@ -85,6 +86,46 @@ static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
 {
     if (!timeout) return "(infinite)";
     return wine_dbgstr_longlong( timeout->QuadPart );
+}
+
+#ifndef __NR_clock_gettime64
+#define __NR_clock_gettime64 403
+#endif
+
+struct timespec64
+{
+    long long tv_sec;
+    long long tv_nsec;
+};
+
+static inline int do_clock_gettime( clockid_t clock_id, ULONGLONG *ticks )
+{
+    static int clock_gettime64_supported = -1;
+    struct timespec64 ts64;
+    struct timespec ts;
+    int ret;
+
+    if (clock_gettime64_supported < 0)
+    {
+        if (!syscall( __NR_clock_gettime64, clock_id, &ts64 ))
+        {
+            clock_gettime64_supported = 1;
+            *ticks = ts64.tv_sec * (ULONGLONG)TICKSPERSEC + ts64.tv_nsec / 100;
+            return 0;
+        }
+        clock_gettime64_supported = 0;
+    }
+
+    if (clock_gettime64_supported)
+    {
+        if (!(ret = syscall( __NR_clock_gettime64, clock_id, &ts64 )))
+            *ticks = ts64.tv_sec * (ULONGLONG)TICKSPERSEC + ts64.tv_nsec / 100;
+        return ret;
+    }
+
+    if (!(ret = clock_gettime( clock_id, &ts )))
+        *ticks = ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
+    return ret;
 }
 
 /* return a monotonic time counter, in Win32 ticks */
@@ -101,13 +142,13 @@ static inline ULONGLONG monotonic_counter(void)
 #endif
     return mach_absolute_time() * timebase.numer / timebase.denom / 100;
 #elif defined(HAVE_CLOCK_GETTIME)
-    struct timespec ts;
-#ifdef CLOCK_MONOTONIC_RAW
-    if (!clock_gettime( CLOCK_MONOTONIC_RAW, &ts ))
-        return ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
+    ULONGLONG ticks;
+#if 0
+    if (!do_clock_gettime( CLOCK_MONOTONIC_RAW, &ticks ))
+        return ticks;
 #endif
-    if (!clock_gettime( CLOCK_MONOTONIC, &ts ))
-        return ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
+    if (!do_clock_gettime( CLOCK_MONOTONIC, &ticks ))
+        return ticks;
 #endif
     gettimeofday( &now, 0 );
     return ticks_from_time_t( now.tv_sec ) + now.tv_usec * 10 - server_start_time;
@@ -271,6 +312,9 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
     if (max <= 0 || initial < 0 || initial > max) return STATUS_INVALID_PARAMETER;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
+    if (do_fsync())
+        return fsync_create_semaphore( handle, access, attr, initial, max );
+
     if (do_esync())
         return esync_create_semaphore( handle, access, attr, initial, max );
 
@@ -296,6 +340,9 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
 NTSTATUS WINAPI NtOpenSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
 {
     NTSTATUS ret;
+
+    if (do_fsync())
+        return fsync_open_semaphore( handle, access, attr );
 
     if (do_esync())
         return esync_open_semaphore( handle, access, attr );
@@ -336,6 +383,9 @@ NTSTATUS WINAPI NtQuerySemaphore( HANDLE handle, SEMAPHORE_INFORMATION_CLASS cla
 
     if (len != sizeof(SEMAPHORE_BASIC_INFORMATION)) return STATUS_INFO_LENGTH_MISMATCH;
 
+    if (do_fsync())
+        return fsync_query_semaphore( handle, info, ret_len );
+
     if (do_esync())
         return esync_query_semaphore( handle, info, ret_len );
 
@@ -360,6 +410,9 @@ NTSTATUS WINAPI NtQuerySemaphore( HANDLE handle, SEMAPHORE_INFORMATION_CLASS cla
 NTSTATUS WINAPI NtReleaseSemaphore( HANDLE handle, ULONG count, ULONG *previous )
 {
     NTSTATUS ret;
+
+    if (do_fsync())
+        return fsync_release_semaphore( handle, count, previous );
 
     if (do_esync())
         return esync_release_semaphore( handle, count, previous );
@@ -389,6 +442,9 @@ NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_
     struct object_attributes *objattr;
 
     if (type != NotificationEvent && type != SynchronizationEvent) return STATUS_INVALID_PARAMETER;
+
+    if (do_fsync())
+        return fsync_create_event( handle, access, attr, type, state );
 
     if (do_esync())
         return esync_create_event( handle, access, attr, type, state );
@@ -420,6 +476,9 @@ NTSTATUS WINAPI NtOpenEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_AT
 
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
+    if (do_fsync())
+        return fsync_open_event( handle, access, attr );
+
     if (do_esync())
         return esync_open_event( handle, access, attr );
 
@@ -446,6 +505,9 @@ NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
     /* This comment is a dummy to make sure this patch applies in the right place. */
     NTSTATUS ret;
 
+    if (do_fsync())
+        return fsync_set_event( handle, prev_state );
+
     if (do_esync())
         return esync_set_event( handle );
 
@@ -468,6 +530,9 @@ NTSTATUS WINAPI NtResetEvent( HANDLE handle, LONG *prev_state )
 {
     /* This comment is a dummy to make sure this patch applies in the right place. */
     NTSTATUS ret;
+
+    if (do_fsync())
+        return fsync_reset_event( handle, prev_state );
 
     if (do_esync())
         return esync_reset_event( handle );
@@ -500,6 +565,9 @@ NTSTATUS WINAPI NtClearEvent( HANDLE handle )
 NTSTATUS WINAPI NtPulseEvent( HANDLE handle, LONG *prev_state )
 {
     NTSTATUS ret;
+
+    if (do_fsync())
+        return fsync_pulse_event( handle, prev_state );
 
     if (do_esync())
         return esync_pulse_event( handle );
@@ -536,6 +604,9 @@ NTSTATUS WINAPI NtQueryEvent( HANDLE handle, EVENT_INFORMATION_CLASS class,
 
     if (len != sizeof(EVENT_BASIC_INFORMATION)) return STATUS_INFO_LENGTH_MISMATCH;
 
+    if (do_fsync())
+        return fsync_query_event( handle, info, ret_len );
+
     if (do_esync())
         return esync_query_event( handle, info, ret_len );
 
@@ -563,6 +634,9 @@ NTSTATUS WINAPI NtCreateMutant( HANDLE *handle, ACCESS_MASK access, const OBJECT
     NTSTATUS ret;
     data_size_t len;
     struct object_attributes *objattr;
+
+    if (do_fsync())
+        return fsync_create_mutex( handle, access, attr, owned );
 
     if (do_esync())
         return esync_create_mutex( handle, access, attr, owned );
@@ -593,6 +667,9 @@ NTSTATUS WINAPI NtOpenMutant( HANDLE *handle, ACCESS_MASK access, const OBJECT_A
 
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
+    if (do_fsync())
+        return fsync_open_mutex( handle, access, attr );
+
     if (do_esync())
         return esync_open_mutex( handle, access, attr );
 
@@ -617,6 +694,9 @@ NTSTATUS WINAPI NtOpenMutant( HANDLE *handle, ACCESS_MASK access, const OBJECT_A
 NTSTATUS WINAPI NtReleaseMutant( HANDLE handle, LONG *prev_count )
 {
     NTSTATUS ret;
+
+    if (do_fsync())
+        return fsync_release_mutex( handle, prev_count );
 
     if (do_esync())
         return esync_release_mutex( handle, prev_count );
@@ -650,6 +730,9 @@ NTSTATUS WINAPI NtQueryMutant( HANDLE handle, MUTANT_INFORMATION_CLASS class,
     }
 
     if (len != sizeof(MUTANT_BASIC_INFORMATION)) return STATUS_INFO_LENGTH_MISMATCH;
+
+    if (do_fsync())
+        return fsync_query_mutex( handle, info, ret_len );
 
     if (do_esync())
         return esync_query_mutex( handle, info, ret_len );
@@ -1421,6 +1504,13 @@ NTSTATUS WINAPI NtWaitForMultipleObjects( DWORD count, const HANDLE *handles, BO
 
     if (!count || count > MAXIMUM_WAIT_OBJECTS) return STATUS_INVALID_PARAMETER_1;
 
+    if (do_fsync())
+    {
+        NTSTATUS ret = fsync_wait_objects( count, handles, wait_any, alertable, timeout );
+        if (ret != STATUS_NOT_IMPLEMENTED)
+            return ret;
+    }
+
     if (do_esync())
     {
         NTSTATUS ret = esync_wait_objects( count, handles, wait_any, alertable, timeout );
@@ -1452,6 +1542,9 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
 {
     select_op_t select_op;
     UINT flags = SELECT_INTERRUPTIBLE;
+
+    if (do_fsync())
+        return fsync_signal_and_wait( signal, wait, alertable, timeout );
 
     if (do_esync())
         return esync_signal_and_wait( signal, wait, alertable, timeout );
@@ -1486,7 +1579,24 @@ NTSTATUS WINAPI NtYieldExecution(void)
 NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeout )
 {
     /* if alertable, we need to query the server */
-    if (alertable) return server_wait( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, timeout );
+    if (alertable)
+    {
+        if (do_fsync())
+        {
+            NTSTATUS ret = fsync_wait_objects( 0, NULL, TRUE, TRUE, timeout );
+            if (ret != STATUS_NOT_IMPLEMENTED)
+                return ret;
+        }
+
+        if (do_esync())
+        {
+            NTSTATUS ret = esync_wait_objects( 0, NULL, TRUE, TRUE, timeout );
+            if (ret != STATUS_NOT_IMPLEMENTED)
+                return ret;
+        }
+
+        return server_wait( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, timeout );
+    }
 
     if (!timeout || timeout->QuadPart == TIMEOUT_INFINITE)  /* sleep forever */
     {

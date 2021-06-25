@@ -94,6 +94,9 @@
 #ifdef HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h>
 #endif
+#if defined(__i386__) || defined(__x86_64__)
+#include <x86intrin.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -103,6 +106,7 @@
 #include "process.h"
 #include "request.h"
 #include "esync.h"
+#include "fsync.h"
 
 #include "winternl.h"
 #include "winioctl.h"
@@ -207,6 +211,7 @@ struct fd
     apc_param_t          comp_key;    /* completion key to set in completion events */
     unsigned int         comp_flags;  /* completion flags */
     int                  esync_fd;    /* esync file descriptor */
+    unsigned int         fsync_idx;   /* fsync shm index */
 };
 
 static void fd_dump( struct object *obj, int verbose );
@@ -221,6 +226,7 @@ static const struct object_ops fd_ops =
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
     NULL,                     /* get_esync_fd */
+    NULL,                     /* get_fsync_idx */
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
@@ -263,6 +269,7 @@ static const struct object_ops device_ops =
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
     NULL,                     /* get_esync_fd */
+    NULL,                     /* get_fsync_idx */
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
@@ -304,6 +311,7 @@ static const struct object_ops inode_ops =
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
     NULL,                     /* get_esync_fd */
+    NULL,                     /* get_fsync_idx */
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
@@ -347,6 +355,7 @@ static const struct object_ops file_lock_ops =
     remove_queue,               /* remove_queue */
     file_lock_signaled,         /* signaled */
     NULL,                       /* get_esync_fd */
+    NULL,                       /* get_fsync_idx */
     no_satisfied,               /* satisfied */
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */
@@ -394,12 +403,47 @@ static struct list rel_timeout_list = LIST_INIT(rel_timeout_list); /* sorted rel
 timeout_t current_time;
 timeout_t monotonic_time;
 
+struct hypervisor_shared_data *hypervisor_shared_data = NULL;
 struct _KUSER_SHARED_DATA *user_shared_data = NULL;
 static const int user_shared_data_timeout = 16;
+
+/* 128-bit multiply a by b and return the high 64 bits, same as __umulh */
+static UINT64 multiply_tsc(UINT64 a, UINT64 b)
+{
+    UINT64 ah = a >> 32, al = (UINT32)a, bh = b >> 32, bl = (UINT32)b, m;
+    m = (ah * bl) + (bh * al) + ((al * bl) >> 32);
+    return (ah * bh) + (m >> 32);
+}
 
 static void set_user_shared_data_time(void)
 {
     timeout_t tick_count = monotonic_time / 10000;
+    unsigned __int64 tsc, qpc_bias, qpc_freq = user_shared_data->QpcFrequency;
+    unsigned int aux, qpc_shift = user_shared_data->QpcShift;
+    unsigned int qpc_bypass = user_shared_data->QpcBypassEnabled;
+
+    if (!(qpc_bypass & SHARED_GLOBAL_FLAGS_QPC_BYPASS_ENABLED))
+        tsc = 0;
+#if defined(__i386__) || defined(__x86_64__)
+    else if (qpc_bypass & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_RDTSCP)
+        tsc = __rdtscp(&aux);
+    else
+    {
+        if (qpc_bypass & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_MFENCE)
+            __asm__ __volatile__ ( "mfence" : : : "memory" );
+        if (qpc_bypass & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_LFENCE)
+            __asm__ __volatile__ ( "lfence" : : : "memory" );
+        tsc = __rdtsc();
+    }
+#endif
+
+    if (!(qpc_bypass & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE))
+        qpc_bias = ((monotonic_time * qpc_freq / 10000000) << qpc_shift) - tsc;
+    else
+    {
+        tsc = multiply_tsc(tsc, hypervisor_shared_data->QpcMultiplier);
+        qpc_bias = monotonic_time - tsc;
+    }
 
     /* on X86 there should be total store order guarantees, so volatile is enough
      * to ensure the stores aren't reordered by the compiler, and then they will
@@ -418,6 +462,10 @@ static void set_user_shared_data_time(void)
     user_shared_data->TickCount.LowPart   = tick_count;
     user_shared_data->TickCount.High1Time = tick_count >> 32;
     *(volatile ULONG *)&user_shared_data->TickCountLowDeprecated = tick_count;
+    if (qpc_bypass & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE)
+        hypervisor_shared_data->QpcBias = qpc_bias;
+    else
+        user_shared_data->QpcBias = qpc_bias;
 #else
     __atomic_store_n(&user_shared_data->SystemTime.High2Time, current_time >> 32, __ATOMIC_SEQ_CST);
     __atomic_store_n(&user_shared_data->SystemTime.LowPart, current_time, __ATOMIC_SEQ_CST);
@@ -431,6 +479,10 @@ static void set_user_shared_data_time(void)
     __atomic_store_n(&user_shared_data->TickCount.LowPart, tick_count, __ATOMIC_SEQ_CST);
     __atomic_store_n(&user_shared_data->TickCount.High1Time, tick_count >> 32, __ATOMIC_SEQ_CST);
     __atomic_store_n(&user_shared_data->TickCountLowDeprecated, tick_count, __ATOMIC_SEQ_CST);
+    if (qpc_bypass & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE)
+        __atomic_store_n(&hypervisor_shared_data->QpcBias, qpc_bias, __ATOMIC_SEQ_CST);
+    else
+        __atomic_store_n(&user_shared_data->QpcBias, qpc_bias, __ATOMIC_SEQ_CST);
 #endif
 }
 
@@ -1716,6 +1768,7 @@ static struct fd *alloc_fd_object(void)
     fd->completion = NULL;
     fd->comp_flags = 0;
     fd->esync_fd   = -1;
+    fd->fsync_idx  = 0;
     init_async_queue( &fd->read_q );
     init_async_queue( &fd->write_q );
     init_async_queue( &fd->wait_q );
@@ -1724,6 +1777,9 @@ static struct fd *alloc_fd_object(void)
 
     if (do_esync())
         fd->esync_fd = esync_create_fd( 1, 0 );
+
+    if (do_fsync())
+        fd->fsync_idx = fsync_alloc_shm( 1, 0 );
 
     if ((fd->poll_index = add_poll_user( fd )) == -1)
     {
@@ -1760,14 +1816,19 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     fd->comp_flags = 0;
     fd->no_fd_status = STATUS_BAD_DEVICE_TYPE;
     fd->esync_fd   = -1;
+    fd->fsync_idx  = 0;
     init_async_queue( &fd->read_q );
     init_async_queue( &fd->write_q );
     init_async_queue( &fd->wait_q );
     list_init( &fd->inode_entry );
     list_init( &fd->locks );
 
+    if (do_fsync())
+        fd->fsync_idx = fsync_alloc_shm( 0, 0 );
+
     if (do_esync())
         fd->esync_fd = esync_create_fd( 0, 0 );
+
     return fd;
 }
 
@@ -2308,6 +2369,9 @@ void set_fd_signaled( struct fd *fd, int signaled )
     fd->signaled = signaled;
     if (signaled) wake_up( fd->user, 0 );
 
+    if (do_fsync() && !signaled)
+        fsync_clear( fd->user );
+
     if (do_esync() && !signaled)
         esync_clear( fd->esync_fd );
 }
@@ -2340,6 +2404,15 @@ int default_fd_get_esync_fd( struct object *obj, enum esync_type *type )
     struct fd *fd = get_obj_fd( obj );
     int ret = fd->esync_fd;
     *type = ESYNC_MANUAL_SERVER;
+    release_object( fd );
+    return ret;
+}
+
+unsigned int default_fd_get_fsync_idx( struct object *obj, enum fsync_type *type )
+{
+    struct fd *fd = get_obj_fd( obj );
+    unsigned int ret = fd->fsync_idx;
+    *type = FSYNC_MANUAL_SERVER;
     release_object( fd );
     return ret;
 }

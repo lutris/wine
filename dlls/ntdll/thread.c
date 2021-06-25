@@ -35,6 +35,7 @@
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 WINE_DECLARE_DEBUG_CHANNEL(thread);
 
+struct hypervisor_shared_data *hypervisor_shared_data = (void *)0x7ffd0000;
 struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
 
 static int nb_debug_options;
@@ -112,6 +113,7 @@ void WINAPI RtlExitUserThread( ULONG status )
     NtQueryInformationThread( GetCurrentThread(), ThreadAmILastThread, &last, sizeof(last), NULL );
     if (last) RtlExitUserProcess( status );
     LdrShutdownThread();
+    HEAP_notify_thread_destroy(FALSE);
     for (;;) NtTerminateThread( GetCurrentThread(), status );
 }
 

@@ -3521,6 +3521,7 @@ void WINAPI RtlExitUserProcess( DWORD status )
     RtlAcquirePebLock();
     NtTerminateProcess( 0, status );
     LdrShutdownProcess();
+    HEAP_notify_thread_destroy(TRUE);
     for (;;) NtTerminateProcess( GetCurrentProcess(), status );
 }
 
@@ -3905,6 +3906,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         ANSI_STRING func_name;
         WINE_MODREF *kernel32;
         PEB *peb = NtCurrentTeb()->Peb;
+        DWORD hci = 2;
 
         peb->LdrData            = &ldr;
         peb->FastPebLock        = &peb_lock;
@@ -3931,6 +3933,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
 #endif
         wm = build_main_module();
         wm->ldr.LoadCount = -1;
+        RtlSetHeapInformation( GetProcessHeap(), HeapCompatibilityInformation, &hci, sizeof(hci) );
 
         build_ntdll_module();
 
@@ -3968,11 +3971,11 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
     InitializeObjectAttributes( &staging_event_attr, &staging_event_string, OBJ_OPENIF, NULL, NULL );
     if (NtCreateEvent( &staging_event, EVENT_ALL_ACCESS, &staging_event_attr, NotificationEvent, FALSE ) == STATUS_SUCCESS)
     {
-        FIXME_(winediag)("wine-staging %s is a testing version containing experimental patches.\n", wine_get_version());
-        FIXME_(winediag)("Please mention your exact version when filing bug reports on winehq.org.\n");
+        FIXME_(winediag)("Wine TkG (staging) %s is a testing version containing experimental patches.\n", wine_get_version());
+        FIXME_(winediag)("Please don't report bugs about it on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead.\n");
     }
     else
-        WARN_(winediag)("wine-staging %s is a testing version containing experimental patches.\n", wine_get_version());
+        WARN_(winediag)("Wine TkG (staging) %s is a testing version containing experimental patches.\n", wine_get_version());
 
 
     RtlAcquirePebLock();
