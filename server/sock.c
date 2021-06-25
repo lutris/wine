@@ -203,6 +203,7 @@ static const struct object_ops sock_ops =
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
     NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     sock_get_fd,                  /* get_fd */
@@ -1562,7 +1563,7 @@ static int sock_get_ntstatus( int err )
         case EMFILE:            return STATUS_TOO_MANY_OPENED_FILES;
         case EINPROGRESS:
         case EWOULDBLOCK:       return STATUS_DEVICE_NOT_READY;
-        case EALREADY:          return STATUS_NETWORK_BUSY;
+        case EALREADY:          return STATUS_ADDRESS_ALREADY_ASSOCIATED;
         case ENOTSOCK:          return STATUS_OBJECT_TYPE_MISMATCH;
         case EDESTADDRREQ:      return STATUS_INVALID_PARAMETER;
         case EMSGSIZE:          return STATUS_BUFFER_OVERFLOW;
@@ -2043,6 +2044,7 @@ static const struct object_ops ifchange_ops =
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
     NULL,                    /* get_esync_fd */
+    NULL,                    /* get_fsync_idx */
     no_satisfied,            /* satisfied */
     no_signal,               /* signal */
     ifchange_get_fd,         /* get_fd */
@@ -2264,6 +2266,7 @@ static const struct object_ops socket_device_ops =
     NULL,                       /* remove_queue */
     NULL,                       /* signaled */
     NULL,                       /* get_esync_fd */
+    NULL,                       /* get_fsync_idx */
     no_satisfied,               /* satisfied */
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */

@@ -132,11 +132,11 @@ static const USER_DRIVER *load_driver(void)
         GET_USER_FUNC(MsgWaitForMultipleObjectsEx);
         GET_USER_FUNC(ReleaseDC);
         GET_USER_FUNC(ScrollDC);
-        GET_USER_FUNC(SetActiveWindow);
         GET_USER_FUNC(SetCapture);
         GET_USER_FUNC(SetFocus);
         GET_USER_FUNC(SetLayeredWindowAttributes);
         GET_USER_FUNC(SetParent);
+        GET_USER_FUNC(SetWindowCompositionAttribute);
         GET_USER_FUNC(SetWindowRgn);
         GET_USER_FUNC(SetWindowIcon);
         GET_USER_FUNC(SetWindowStyle);
@@ -325,10 +325,6 @@ static BOOL CDECL nulldrv_ScrollDC( HDC hdc, INT dx, INT dy, HRGN update )
                    hdc, rect.left - dx, rect.top - dy, SRCCOPY );
 }
 
-static void CDECL nulldrv_SetActiveWindow( HWND hwnd )
-{
-}
-
 static void CDECL nulldrv_SetCapture( HWND hwnd, UINT flags )
 {
 }
@@ -343,6 +339,12 @@ static void CDECL nulldrv_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, B
 
 static void CDECL nulldrv_SetParent( HWND hwnd, HWND parent, HWND old_parent )
 {
+}
+
+static DWORD CDECL nulldrv_SetWindowCompositionAttribute( HWND hwnd, DWORD attribute, void *data )
+{
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return ~0;
 }
 
 static void CDECL nulldrv_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
@@ -443,11 +445,11 @@ static USER_DRIVER null_driver =
     nulldrv_MsgWaitForMultipleObjectsEx,
     nulldrv_ReleaseDC,
     nulldrv_ScrollDC,
-    nulldrv_SetActiveWindow,
     nulldrv_SetCapture,
     nulldrv_SetFocus,
     nulldrv_SetLayeredWindowAttributes,
     nulldrv_SetParent,
+    nulldrv_SetWindowCompositionAttribute,
     nulldrv_SetWindowRgn,
     nulldrv_SetWindowIcon,
     nulldrv_SetWindowStyle,
@@ -643,11 +645,11 @@ static USER_DRIVER lazy_load_driver =
     nulldrv_MsgWaitForMultipleObjectsEx,
     nulldrv_ReleaseDC,
     nulldrv_ScrollDC,
-    nulldrv_SetActiveWindow,
     nulldrv_SetCapture,
     nulldrv_SetFocus,
     loaderdrv_SetLayeredWindowAttributes,
     nulldrv_SetParent,
+    nulldrv_SetWindowCompositionAttribute,
     loaderdrv_SetWindowRgn,
     nulldrv_SetWindowIcon,
     nulldrv_SetWindowStyle,

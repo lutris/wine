@@ -1,0 +1,7 @@
+MODULE = atiadlxx.dll
+IMPORTS = wined3d
+
+EXTRADLLFLAGS = -mno-cygwin -Wb,--prefer-native
+
+C_SRCS = \
+	atiadlxx_main.c

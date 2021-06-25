@@ -128,7 +128,7 @@ static NTSTATUS extract_result_into_secret(gcry_sexp_t result, struct secret *se
 
     secret->data = RtlAllocateHeap(GetProcessHeap(), 0, size / 2);
     memcpy(secret->data, tmp_buffer + size % 2, size / 2);
-    secret->len = size / 2;
+    secret->data_len = size / 2;
 
 done:
     free(tmp_buffer);
@@ -216,9 +216,9 @@ static NTSTATUS CDECL key_compute_secret_ecc(unsigned char *privkey_in, struct k
         goto done;
     }
 
-    if (secret->len != key_size)
+    if (secret->data_len != key_size)
     {
-        ERR("got secret size %u, expected %u\n", secret->len, key_size);
+        ERR("got secret size %u, expected %u\n", secret->data_len, key_size);
         status = STATUS_INTERNAL_ERROR;
         goto done;
     }
@@ -240,8 +240,9 @@ static NTSTATUS CDECL key_compute_secret_ecc(unsigned char *privkey_in, struct k
     return STATUS_SUCCESS;
 }
 
-static struct key_funcs key_funcs =
+const static struct key_funcs key_funcs =
 {
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -265,7 +266,7 @@ static struct key_funcs key_funcs =
     key_compute_secret_ecc
 };
 
-struct key_funcs * gcrypt_lib_init( DWORD reason )
+const struct key_funcs * gcrypt_lib_init( DWORD reason )
 {
     switch (reason)
     {
@@ -285,7 +286,7 @@ struct key_funcs * gcrypt_lib_init( DWORD reason )
 #include "winbase.h"
 #include "winternl.h"
 
-struct key_funcs * gcrypt_lib_init( DWORD reason )
+const struct key_funcs * gcrypt_lib_init( DWORD reason )
 {
     return NULL;
 }

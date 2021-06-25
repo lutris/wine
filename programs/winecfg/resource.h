@@ -213,7 +213,7 @@
 #define IDC_SYSPARAMS_MENUBAR           8431
 
 /* Staging tab */
-#define IDC_ENABLE_CSMT                 9001
+#define IDC_DISABLE_CSMT                9001
 #define IDC_ENABLE_VAAPI                9002
 #define IDC_ENABLE_EAX                  9003
 #define IDC_ENABLE_HIDEWINE             9004
