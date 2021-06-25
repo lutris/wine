@@ -2040,42 +2040,31 @@ static void state_tessellation(struct wined3d_context *context, const struct win
                 state->render_states[WINED3D_RS_ENABLEADAPTIVETESSELLATION]);
 }
 
-static void state_nvdb(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void depth_bounds(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
-    union
-    {
-        uint32_t d;
-        float f;
-    } zmin, zmax;
+    float zmin = state->depth_bounds.min, zmax = state->depth_bounds.max;
 
-    if (state->render_states[WINED3D_RS_ADAPTIVETESS_X] == WINED3DFMT_NVDB)
+    /* If zmin is larger than zmax, an INVALID_VALUE error is generated.
+     * In d3d9, the test is not performed in this case. */
+    if (state->depth_bounds.enable && zmin <= zmax)
     {
-        zmin.d = state->render_states[WINED3D_RS_ADAPTIVETESS_Z];
-        zmax.d = state->render_states[WINED3D_RS_ADAPTIVETESS_W];
-
-        /* If zmin is larger than zmax INVALID_VALUE error is generated.
-         * In d3d9 test is not performed in this case*/
-        if (zmin.f <= zmax.f)
-        {
-            gl_info->gl_ops.gl.p_glEnable(GL_DEPTH_BOUNDS_TEST_EXT);
-            checkGLcall("glEnable(GL_DEPTH_BOUNDS_TEST_EXT)");
-            GL_EXTCALL(glDepthBoundsEXT(zmin.f, zmax.f));
-            checkGLcall("glDepthBoundsEXT(...)");
-        }
-        else
-        {
-            gl_info->gl_ops.gl.p_glDisable(GL_DEPTH_BOUNDS_TEST_EXT);
-            checkGLcall("glDisable(GL_DEPTH_BOUNDS_TEST_EXT)");
-        }
+        gl_info->gl_ops.gl.p_glEnable(GL_DEPTH_BOUNDS_TEST_EXT);
+        checkGLcall("glEnable(GL_DEPTH_BOUNDS_TEST_EXT)");
+        GL_EXTCALL(glDepthBoundsEXT(zmin, zmax));
+        checkGLcall("glDepthBoundsEXT(...)");
     }
     else
     {
         gl_info->gl_ops.gl.p_glDisable(GL_DEPTH_BOUNDS_TEST_EXT);
         checkGLcall("glDisable(GL_DEPTH_BOUNDS_TEST_EXT)");
     }
+}
 
-    state_tessellation(context, state, STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION));
+static void depth_bounds_w(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+{
+    if (state->depth_bounds.enable)
+        WARN("Depth bounds test is not supported by this GL implementation.\n");
 }
 
 static void state_wrapu(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
@@ -4549,6 +4538,11 @@ static void state_cb(struct wined3d_context *context, const struct wined3d_state
     unsigned int i, base, count;
 
     TRACE("context %p, state %p, state_id %#x.\n", context, state, state_id);
+    if (context->d3d_info->wined3d_creation_flags & WINED3D_LEGACY_SHADER_CONSTANTS)
+    {
+        WARN("Called in legacy shader constant mode.\n");
+        return;
+    }
 
     if (STATE_IS_GRAPHICS_CONSTANT_BUFFER(state_id))
         shader_type = state_id - STATE_GRAPHICS_CONSTANT_BUFFER(0);
@@ -4682,6 +4676,8 @@ const struct wined3d_state_entry_template misc_state_template_gl[] =
     { STATE_DEPTH_STENCIL,                                { STATE_DEPTH_STENCIL,                                depth_stencil_2s    }, EXT_STENCIL_TWO_SIDE            },
     { STATE_DEPTH_STENCIL,                                { STATE_DEPTH_STENCIL,                                depth_stencil       }, WINED3D_GL_EXT_NONE             },
     { STATE_STENCIL_REF,                                  { STATE_DEPTH_STENCIL,                                NULL                }, WINED3D_GL_EXT_NONE             },
+    { STATE_DEPTH_BOUNDS,                                 { STATE_DEPTH_BOUNDS,                                 depth_bounds        }, EXT_DEPTH_BOUNDS_TEST           },
+    { STATE_DEPTH_BOUNDS,                                 { STATE_DEPTH_BOUNDS,                                 depth_bounds_w      }, WINED3D_GL_EXT_NONE             },
     { STATE_STREAMSRC,                                    { STATE_STREAMSRC,                                    streamsrc           }, WINED3D_GL_EXT_NONE             },
     { STATE_VDECL,                                        { STATE_VDECL,                                        vdecl_miscpart      }, WINED3D_GL_EXT_NONE             },
     { STATE_RASTERIZER,                                   { STATE_RASTERIZER,                                   rasterizer_cc       }, ARB_CLIP_CONTROL                },
@@ -4795,7 +4791,6 @@ const struct wined3d_state_entry_template misc_state_template_gl[] =
     { STATE_RENDER(WINED3D_RS_ADAPTIVETESS_Y),            { STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),NULL                }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_ADAPTIVETESS_Z),            { STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),NULL                }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_ADAPTIVETESS_W),            { STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),{ STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),state_nvdb          }, EXT_DEPTH_BOUNDS_TEST           },
     { STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),{ STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),state_tessellation  }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),      { STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),      state_msaa          }, ARB_MULTISAMPLE                 },
     { STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),      { STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),      state_msaa_w        }, WINED3D_GL_EXT_NONE             },
@@ -5537,7 +5532,8 @@ static void prune_invalid_states(struct wined3d_state_entry *state_table, const 
         state_table[i].apply = state_undefined;
     }
 
-    start = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(d3d_info->limits.ffp_vertex_blend_matrices));
+    start = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(max(d3d_info->limits.ffp_vertex_blend_matrices,
+            d3d_info->limits.ffp_max_vertex_blend_matrix_index + 1)));
     last = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(255));
     for (i = start; i <= last; ++i)
     {

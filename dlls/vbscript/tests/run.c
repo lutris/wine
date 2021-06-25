@@ -183,6 +183,11 @@ static const char *vt2a(VARIANT *v)
         sprintf(buf, "%s*", vt2a(V_BYREF(v)));
         return buf;
     }
+    else if(V_VT(v) == (VT_BYREF|VT_VARIANT|VT_ARRAY)) {
+        static char buf[64];
+        sprintf(buf, "%s*", vt2a(V_BYREF(v)));
+        return buf;
+    }
 
     switch(V_VT(v)) {
     case VT_EMPTY:

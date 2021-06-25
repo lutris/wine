@@ -14,3 +14,5 @@
 @ stdcall K32QueryWorkingSet(long ptr long) kernel32.K32QueryWorkingSet
 @ stdcall K32QueryWorkingSetEx(long ptr long) kernel32.K32QueryWorkingSetEx
 @ stdcall QueryFullProcessImageNameW(ptr long ptr ptr) kernel32.QueryFullProcessImageNameW
+@ stdcall K32GetModuleBaseNameW(long long ptr long) kernel32.K32GetModuleBaseNameW
+@ stdcall K32GetModuleInformation(long long ptr long) kernel32.K32GetModuleInformation
