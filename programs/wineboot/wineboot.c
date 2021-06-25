@@ -77,6 +77,7 @@
 #include <shlwapi.h>
 #include <shellapi.h>
 #include <setupapi.h>
+#include <wininet.h>
 #include <newdev.h>
 #include "resource.h"
 
@@ -748,16 +749,116 @@ static void create_hardware_registry_keys(void)
     HeapFree( GetProcessHeap(), 0, power_info );
 }
 
+struct dyndata_enum_key{
+    WCHAR id[9];
+    WCHAR hardwarekey[64];
+    char  problem[4];
+    char  status[4];
+    char  allocation[12];
+    char  child[4];
+    char  sibling[4];
+    char  parent[4];
+};
+
+static struct dyndata_enum_key predefined_enums[] =
+{
+    {
+        {'C','2','9','A','2','3','D','0',0},
+        {'H','T','R','E','E','\\','R','O','O','T','\\','0',0},
+        {0x00, 0x00, 0x00, 0x00},
+        {0x4e, 0x08, 0x08, 0x1a},
+        {0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x40, 0x5a, 0x9a, 0xc2},
+        {0x00, 0x00, 0x00, 0x00},
+        {0x00, 0x00, 0x00, 0x00}
+    },
+    {
+        {'C','2','9','A','5','A','4','0',0},
+        {'H','T','R','E','E','\\','R','E','S','E','R','V','E','D','\\','0',0},
+        {0x00, 0x00, 0x00, 0x00},
+        {0x4e, 0x08, 0x08, 0x18},
+        {0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x00, 0x00, 0x00, 0x00},
+        {0x60, 0x5c, 0x9a, 0xc2},
+        {0xd0, 0x23, 0x9a, 0xc2}
+    },
+    {
+        {'C','2','9','A','5','C','6','0',0},
+        {'R','O','O','T','\\','N','E','T','\\','0','0','0','0',0},
+        {0x00, 0x00, 0x00, 0x00},
+        {0x4f, 0x6a, 0x08, 0x18},
+        {0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0xf0, 0x93, 0x9b, 0xc2},
+        {0xc0, 0x5d, 0x9a, 0xc2},
+        {0xd0, 0x23, 0x9a, 0xc2}
+    },
+    {
+        {'C','2','9','A','5','D','C','0',0},
+        {'R','O','O','T','\\','P','R','O','C','E','S','S','O','R','_','U','P','D','A','T','E','\\','0','0','0','0',0},
+        {0x00, 0x00, 0x00, 0x00},
+        {0xcf, 0x6a, 0x88, 0x19},
+        {0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x00, 0x00, 0x00, 0x00},
+        {0x20, 0x5f, 0x9a, 0xc2},
+        {0xd0, 0x23, 0x9a, 0xc2}
+    },
+    {
+        {'C','2','9','A','5','F','2','0',0},
+        {'R','O','O','T','\\','S','W','E','N','U','M','\\','0','0','0','0',0},
+        {0x00, 0x00, 0x00, 0x00},
+        {0xcf, 0x6a, 0x88, 0x19},
+        {0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x00, 0x00, 0x00, 0x00},
+        {0x20, 0x5f, 0x9a, 0xc2},
+        {0xd0, 0x23, 0x9a, 0xc2}
+    }
+};
+
+/* add entry to HKEY_DYN_DATA\Config Manager\Enum */
+static void add_dynamic_enum_keys(HKEY key, struct dyndata_enum_key *entry)
+{
+    static const WCHAR HardWareKeyW[] = {'H','a','r','d','W','a','r','e','K','e','y',0};
+    static const WCHAR ProblemW[]     = {'P','r','o','b','l','e','m',0};
+    static const WCHAR StatusW[]      = {'S','t','a','t','u','s',0};
+    static const WCHAR AllocationW[]  = {'A','l','l','o','c','a','t','i','o','n',0};
+    static const WCHAR ChildW[]       = {'C','h','i','l','d',0};
+    static const WCHAR SiblingW[]     = {'S','i','b','l','i','n','g',0};
+    static const WCHAR ParentW[]      = {'P','a','r','e','n','t',0};
+
+    HKEY subkey;
+
+    if (!entry)
+        return;
+
+    if (RegCreateKeyExW( key, entry->id, 0, NULL, 0, KEY_WRITE, NULL, &subkey, NULL ))
+        return;
+
+    set_reg_value( subkey, HardWareKeyW, entry->hardwarekey );
+    RegSetValueExW( subkey, ProblemW,    0, REG_BINARY, (const BYTE *)entry->problem,    sizeof(entry->problem) );
+    RegSetValueExW( subkey, StatusW,     0, REG_BINARY, (const BYTE *)entry->status,     sizeof(entry->status) );
+    RegSetValueExW( subkey, AllocationW, 0, REG_BINARY, (const BYTE *)entry->allocation, sizeof(entry->allocation) );
+    RegSetValueExW( subkey, ChildW,      0, REG_BINARY, (const BYTE *)entry->child,      sizeof(entry->child) );
+    RegSetValueExW( subkey, SiblingW,    0, REG_BINARY, (const BYTE *)entry->sibling,    sizeof(entry->sibling) );
+    RegSetValueExW( subkey, ParentW,     0, REG_BINARY, (const BYTE *)entry->parent,     sizeof(entry->parent) );
+
+    RegCloseKey( subkey );
+}
 
 /* create the DynData registry keys */
 static void create_dynamic_registry_keys(void)
 {
     HKEY key;
+    int entry;
 
     if (!RegCreateKeyExW( HKEY_DYN_DATA, L"PerfStats\\StatData", 0, NULL, 0, KEY_WRITE, NULL, &key, NULL ))
         RegCloseKey( key );
     if (!RegCreateKeyExW( HKEY_DYN_DATA, L"Config Manager\\Enum", 0, NULL, 0, KEY_WRITE, NULL, &key, NULL ))
+    {
+        for (entry = 0; entry < sizeof(predefined_enums) / sizeof(predefined_enums[0]); entry++)
+            add_dynamic_enum_keys( key, &predefined_enums[entry] );
+
         RegCloseKey( key );
+    }
 }
 
 /* create the platform-specific environment registry keys */
@@ -900,6 +1001,13 @@ static void create_volatile_environment_registry_key(void)
 
     set_reg_value( hkey, L"SESSIONNAME", L"Console" );
     RegCloseKey( hkey );
+}
+
+static void create_proxy_settings(void)
+{
+    HINTERNET inet;
+    inet = InternetOpenA( "Wine", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0 );
+    if (inet) InternetCloseHandle( inet );
 }
 
 /* Performs the rename operations dictated in %SystemRoot%\Wininit.ini.
@@ -1713,6 +1821,7 @@ int __cdecl main( int argc, char *argv[] )
     if (init || update) update_wineprefix( update );
 
     create_volatile_environment_registry_key();
+    create_proxy_settings();
 
     ProcessRunKeys( HKEY_LOCAL_MACHINE, L"RunOnce", TRUE, TRUE );
 

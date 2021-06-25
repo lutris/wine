@@ -92,3 +92,13 @@ interface IWineDXGIAdapter : IDXGIAdapter4
 interface IWineDXGIFactory : IDXGIFactory7
 {
 }
+
+[
+    object,
+    local,
+    uuid(18044258-baef-418b-9c2e-0eeca45b31f5)
+]
+interface IWineD3DDeviceContext : IUnknown
+{
+    struct wined3d_device_context *get_wined3d_device_context();
+}
