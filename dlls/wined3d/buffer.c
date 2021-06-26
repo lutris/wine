@@ -826,6 +826,19 @@ struct wined3d_resource * CDECL wined3d_buffer_get_resource(struct wined3d_buffe
     return &buffer->resource;
 }
 
+static HRESULT buffer_resource_sub_resource_get_size(struct wined3d_resource *resource,
+        unsigned int sub_resource_idx, unsigned int *size, unsigned int *row_pitch, unsigned int *slice_pitch)
+{
+    if (sub_resource_idx)
+    {
+        WARN("Invalid sub_resource_idx %u.\n", sub_resource_idx);
+        return E_INVALIDARG;
+    }
+
+    *size = *row_pitch = *slice_pitch = resource->size;
+    return S_OK;
+}
+
 static HRESULT buffer_resource_sub_resource_map(struct wined3d_resource *resource, unsigned int sub_resource_idx,
         struct wined3d_map_desc *map_desc, const struct wined3d_box *box, uint32_t flags)
 {
@@ -1084,6 +1097,7 @@ static const struct wined3d_resource_ops buffer_resource_ops =
     buffer_resource_decref,
     buffer_resource_preload,
     buffer_resource_unload,
+    buffer_resource_sub_resource_get_size,
     buffer_resource_sub_resource_map,
     buffer_resource_sub_resource_unmap,
 };

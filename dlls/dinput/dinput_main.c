@@ -39,6 +39,7 @@
 #define NONAMELESSUNION
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/unicode.h"
 #include "wine/asm.h"
 #include "windef.h"
