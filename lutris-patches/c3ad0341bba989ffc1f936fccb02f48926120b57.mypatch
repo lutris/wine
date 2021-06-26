@@ -1,0 +1,76 @@
+From c3ad0341bba989ffc1f936fccb02f48926120b57 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Thu, 11 Feb 2021 15:00:53 +0100
+Subject: [PATCH] winex11.drv: Send message from X11DRV_DisplayDevices_Update.
+
+When not in desktop thread, instead of calling X11DRV_resize_desktop
+every time.
+---
+ dlls/winex11.drv/desktop.c | 27 ++++++++++-----------------
+ dlls/winex11.drv/display.c |  6 ++++--
+ 2 files changed, 14 insertions(+), 19 deletions(-)
+
+diff --git a/dlls/winex11.drv/desktop.c b/dlls/winex11.drv/desktop.c
+index a3b1b4087c7..0d176ad5b20 100644
+--- a/dlls/winex11.drv/desktop.c
++++ b/dlls/winex11.drv/desktop.c
+@@ -425,23 +425,16 @@ void X11DRV_resize_desktop( BOOL send_display_change )
+     width = primary_rect.right;
+     height = primary_rect.bottom;
+ 
+-    if (GetWindowThreadProcessId( hwnd, NULL ) != GetCurrentThreadId())
++    TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
++    update_desktop_fullscreen( width, height );
++    SetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top,
++                  virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
++                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
++    ungrab_clipping_window();
++
++    if (send_display_change)
+     {
+-        SendMessageW( hwnd, WM_X11DRV_RESIZE_DESKTOP, 0, (LPARAM)send_display_change );
+-    }
+-    else
+-    {
+-        TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
+-        update_desktop_fullscreen( width, height );
+-        SetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top,
+-                      virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
+-                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
+-        ungrab_clipping_window();
+-
+-        if (send_display_change)
+-        {
+-            SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp, MAKELPARAM( width, height ),
+-                                 SMTO_ABORTIFHUNG, 2000, NULL );
+-        }
++        SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp, MAKELPARAM( width, height ),
++                             SMTO_ABORTIFHUNG, 2000, NULL );
+     }
+ }
+diff --git a/dlls/winex11.drv/display.c b/dlls/winex11.drv/display.c
+index 9d1f59fa333..1b37b572dd5 100644
+--- a/dlls/winex11.drv/display.c
++++ b/dlls/winex11.drv/display.c
+@@ -448,7 +448,7 @@ void X11DRV_DisplayDevices_Update(BOOL send_display_change)
+ {
+     RECT old_virtual_rect, new_virtual_rect;
+     DWORD tid, pid;
+-    HWND foreground;
++    HWND foreground, desktop = GetDesktopWindow();
+     UINT mask = 0;
+ 
+     old_virtual_rect = get_virtual_screen_rect();
+@@ -461,9 +461,11 @@ void X11DRV_DisplayDevices_Update(BOOL send_display_change)
+     if (old_virtual_rect.top != new_virtual_rect.top)
+         mask |= CWY;
+ 
+-    X11DRV_resize_desktop(send_display_change);
+     EnumWindows(update_windows_on_display_change, (LPARAM)mask);
+ 
++    if (GetWindowThreadProcessId( desktop, NULL ) != GetCurrentThreadId())
++        SendMessageW( desktop, WM_X11DRV_RESIZE_DESKTOP, 0, (LPARAM)send_display_change );
++
+     /* forward clip_fullscreen_window request to the foreground window */
+     if ((foreground = GetForegroundWindow()) && (tid = GetWindowThreadProcessId( foreground, &pid )) && pid == GetCurrentProcessId())
+     {

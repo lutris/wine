@@ -2233,6 +2233,11 @@ int WINAPI WS_connect( SOCKET s, const struct WS_sockaddr *addr, int len )
         if (WaitForSingleObject( sync_event, INFINITE ) == WAIT_FAILED) return -1;
         status = io.u.Status;
     }
+    if (status == STATUS_ADDRESS_ALREADY_ASSOCIATED)
+    {
+        SetLastError( WSAEALREADY );
+        return -1;
+    }
     if (status)
     {
         SetLastError( NtStatusToWSAError( status ) );

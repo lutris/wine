@@ -1,0 +1,31 @@
+From e9929f030cad2b93e1ebbebe5fa4b9ad29236bea Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Thu, 11 Feb 2021 15:54:58 +0100
+Subject: [PATCH] winex11.drv: Re-apply current display mode on desktop resize.
+
+So that fshack internal modes are updated in the desktop process too,
+from the current modes that have been written in the registry.
+---
+ dlls/winex11.drv/desktop.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/dlls/winex11.drv/desktop.c b/dlls/winex11.drv/desktop.c
+index 0d176ad5b20..f465ed564be 100644
+--- a/dlls/winex11.drv/desktop.c
++++ b/dlls/winex11.drv/desktop.c
+@@ -418,6 +418,7 @@ void X11DRV_resize_desktop( BOOL send_display_change )
+ {
+     RECT primary_rect, virtual_rect;
+     HWND hwnd = GetDesktopWindow();
++    DEVMODEW current_mode;
+     INT width, height;
+ 
+     virtual_rect = get_virtual_screen_rect();
+@@ -437,4 +438,7 @@ void X11DRV_resize_desktop( BOOL send_display_change )
+         SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp, MAKELPARAM( width, height ),
+                              SMTO_ABORTIFHUNG, 2000, NULL );
+     }
++
++    EnumDisplaySettingsW( NULL, ENUM_CURRENT_SETTINGS, &current_mode );
++    ChangeDisplaySettingsExW( NULL, &current_mode, NULL, 0, NULL );
+ }

@@ -317,7 +317,7 @@ FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX    "Staging settings",IDC_STATIC,8,4,244,210
     LTEXT       "The following settings are experimental and may break stuff!\nMake sure to reset them again in case of a problem.",IDC_STATIC,16,16,230,16
-    CONTROL     "Enable &CSMT for better graphic performance (deprecated)",IDC_ENABLE_CSMT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,16,40,230,8
+    CONTROL     "Disable upstream &CSMT (not recommended)",IDC_DISABLE_CSMT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,16,40,230,8
     CONTROL     "Enable &VAAPI as backend for DXVA2 GPU decoding",IDC_ENABLE_VAAPI,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,16,55,230,8
     CONTROL     "Enable Environmental Audio E&xtensions (EAX)",IDC_ENABLE_EAX,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,16,70,230,8
     CONTROL     "&Hide Wine version from applications",IDC_ENABLE_HIDEWINE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,16,85,230,8
