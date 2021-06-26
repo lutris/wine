@@ -37,6 +37,7 @@
 #include "thread.h"
 #include "request.h"
 #include "unicode.h"
+#include "esync.h"
 
 /* command-line options */
 int debug_level = 0;
@@ -141,8 +142,12 @@ int main( int argc, char *argv[] )
     sock_init();
     open_master_socket();
 
+    if (do_esync())
+        esync_init();
+
     if (debug_level) fprintf( stderr, "wineserver: starting (pid=%ld)\n", (long) getpid() );
     set_current_time();
+    init_scheduler();
     init_signals();
     init_directories( load_intl_file() );
     init_registry();

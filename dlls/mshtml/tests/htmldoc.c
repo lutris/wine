@@ -5963,6 +5963,56 @@ static void test_Persist(IHTMLDocument2 *doc, IMoniker *mon)
     }
 }
 
+static void test_put_hash(IHTMLDocument2 *doc, const WCHAR *new_hash)
+{
+    static WCHAR nav_url_buff[256];
+    IHTMLLocation *location;
+    BSTR str;
+    WCHAR *psharp;
+    HRESULT hres;
+
+    trace("put_hash, url = %s, new hash = %s\n", debugstr_w(nav_url), debugstr_w(new_hash));
+
+    location = NULL;
+    hres = IHTMLDocument2_get_location(doc, &location);
+    ok(hres == S_OK, "get_location failed: %08x\n", hres);
+    ok(location != NULL, "location == NULL\n");
+
+    SET_EXPECT(TranslateUrl);
+    SET_EXPECT(Exec_ShellDocView_67);
+    SET_EXPECT(FireBeforeNavigate2);
+    SET_EXPECT(FireDocumentComplete);
+    SET_EXPECT(FireNavigateComplete2);
+
+    /* Edit nav_url */
+    wcscpy(nav_url_buff, nav_url);
+    psharp = wcschr(nav_url_buff, '#');
+    if (psharp)
+        *psharp = '\0';
+    wcscat(nav_url_buff, new_hash);
+    nav_url = nav_url_buff;
+
+    str = SysAllocString(new_hash);
+    hres = IHTMLLocation_put_hash(location, str);
+    ok (hres == S_OK, "put_hash failed: %08x\n", hres);
+    SysFreeString(str);
+
+    CHECK_CALLED(TranslateUrl);
+    CHECK_CALLED_BROKEN(Exec_ShellDocView_67); /* Broken on Win7 and 8 */
+    CHECK_CALLED(FireBeforeNavigate2);
+    CHECK_CALLED(FireDocumentComplete);
+    CHECK_CALLED(FireNavigateComplete2);
+
+
+    /* Check the result */
+    hres = IHTMLLocation_get_hash(location, &str);
+    ok(hres == S_OK, "get_hash failed: %08x\n", hres);
+    ok(!wcscmp(str, new_hash), "expected %s, got %s\n", debugstr_w(new_hash), debugstr_w(str));
+    SysFreeString(str);
+
+    IHTMLLocation_Release(location);
+}
+
 static void test_put_href(IHTMLDocument2 *doc, BOOL use_replace, const WCHAR *href, const WCHAR *new_nav_url, BOOL is_js,
         BOOL is_hash, DWORD dwl_flags)
 {
@@ -6148,7 +6198,7 @@ static void test_load_history(IHTMLDocument2 *doc)
     ok(hres == S_OK, "Could not get IPersistHistory iface: %08x\n", hres);
 
     prev_url = nav_url;
-    nav_url = L"http://test.winehq.org/tests/winehq_snapshot/#test";
+    nav_url = L"http://test.winehq.org/tests/winehq_snapshot/#hash_test";
     nav_serv_url = L"http://test.winehq.org/tests/winehq_snapshot/";
 
     SET_EXPECT(Exec_ShellDocView_138);
@@ -8017,6 +8067,7 @@ static void test_HTMLDocument_http(BOOL with_wbapp)
     nav_url = nav_serv_url = L"http://test.winehq.org/tests/winehq_snapshot/"; /* for valid prev nav_url */
     if(support_wbapp) {
         test_put_href(doc, FALSE, L"#test", L"http://test.winehq.org/tests/winehq_snapshot/#test", FALSE, TRUE, 0);
+        test_put_hash(doc, L"#hash_test");
         test_travellog(doc);
         test_refresh(doc);
     }

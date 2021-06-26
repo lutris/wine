@@ -798,6 +798,21 @@ static inline void release_sock_fd( SOCKET s, int fd )
     close( fd );
 }
 
+static DWORD _get_connect_time(SOCKET s)
+{
+    NTSTATUS status;
+    DWORD connect_time = ~0u;
+    SERVER_START_REQ( get_socket_info )
+    {
+        req->handle  = wine_server_obj_handle( SOCKET2HANDLE(s) );
+        status = wine_server_call( req );
+        if (!status)
+            connect_time = reply->connect_time / -10000000;
+    }
+    SERVER_END_REQ;
+    return connect_time;
+}
+
 static void _get_sock_errors(SOCKET s, int *events)
 {
     SERVER_START_REQ( get_socket_event )
@@ -2507,6 +2522,14 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
                 SetLastError(wsaErrno());
                 ret = SOCKET_ERROR;
             }
+        #ifdef __linux__
+            else if (optname == SO_RCVBUF || optname == SO_SNDBUF)
+            {
+                /* For SO_RCVBUF / SO_SNDBUF, the Linux kernel always sets twice the value.
+                 * Divide by two to ensure applications do not get confused by the result. */
+                *(int *)optval /= 2;
+            }
+        #endif
             release_sock_fd( s, fd );
             return ret;
         case WS_SO_ACCEPTCONN:
@@ -2626,7 +2649,6 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
 
         case WS_SO_CONNECT_TIME:
         {
-            static int pretendtime = 0;
             struct WS_sockaddr addr;
             int len = sizeof(addr);
 
@@ -2638,10 +2660,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if (WS_getpeername(s, &addr, &len) == SOCKET_ERROR)
                 *(DWORD *)optval = ~0u;
             else
-            {
-                if (!pretendtime) FIXME("WS_SO_CONNECT_TIME - faking results\n");
-                *(DWORD *)optval = pretendtime++;
-            }
+                *(DWORD *)optval = _get_connect_time(s);
             *optlen = sizeof(DWORD);
             return ret;
         }

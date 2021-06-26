@@ -910,7 +910,7 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     dump_buffer_desc(pInput);
     dump_buffer_desc(pOutput);
 
-    if (!phContext)
+    if (!phContext || (phNewContext && !pInput))
     {
         ULONG_PTR handle;
 
