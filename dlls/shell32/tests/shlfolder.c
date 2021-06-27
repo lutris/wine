@@ -4199,12 +4199,34 @@ static void test_ShellItemArrayGetAttributes(void)
     Cleanup();
 }
 
+static WCHAR *get_empty_cddrive(void)
+{
+    static WCHAR cdrom_drive[] = {'A',':','\\',0};
+    DWORD drives = GetLogicalDrives();
+
+    cdrom_drive[0] = 'A';
+    while (drives)
+    {
+        if ((drives & 1) &&
+            GetDriveTypeW(cdrom_drive) == DRIVE_CDROM &&
+            GetFileAttributesW(cdrom_drive) == INVALID_FILE_ATTRIBUTES)
+        {
+            return cdrom_drive;
+        }
+
+        drives = drives >> 1;
+        cdrom_drive[0]++;
+    }
+    return NULL;
+}
+
 static void test_SHParseDisplayName(void)
 {
     LPITEMIDLIST pidl1, pidl2;
     IShellFolder *desktop;
     WCHAR dirW[MAX_PATH];
     WCHAR nameW[10];
+    WCHAR *cdrom;
     HRESULT hr;
     BOOL ret, is_wow64;
 
@@ -4270,6 +4292,16 @@ if (0)
     }
 
     IShellFolder_Release(desktop);
+
+    cdrom = get_empty_cddrive();
+    if (!cdrom)
+        skip("No empty cdrom drive found, skipping test\n");
+    else
+    {
+        hr = SHParseDisplayName(cdrom, NULL, &pidl1, 0, NULL);
+        ok(hr == S_OK, "failed %08x\n", hr);
+        if (SUCCEEDED(hr)) ILFree(pidl1);
+    }
 }
 
 static void test_desktop_IPersist(void)

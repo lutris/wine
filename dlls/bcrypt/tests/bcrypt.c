@@ -2248,7 +2248,7 @@ static void test_ECDH(void)
         goto raw_secret_end;
     }
 
-    todo_wine ok(status == STATUS_SUCCESS, "got %08x\n", status);
+    ok(status == STATUS_SUCCESS, "got %08x\n", status);
 
     if (status != STATUS_SUCCESS)
     {
@@ -2265,7 +2265,7 @@ static void test_ECDH(void)
     raw_secret_end:
 
     status = pBCryptDeriveKey(secret, BCRYPT_KDF_HASH, &hash_params, NULL, 0, &size, 0);
-    todo_wine ok (status == STATUS_SUCCESS, "got %08x\n", status);
+    ok (status == STATUS_SUCCESS, "got %08x\n", status);
 
     if (status != STATUS_SUCCESS)
     {
@@ -2801,7 +2801,6 @@ static void test_SecretAgreement(void)
     ok(status == STATUS_INVALID_PARAMETER, "got %08x\n", status);
 
     status = pBCryptDeriveKey(secret, L"HASH", NULL, NULL, 0, &size, 0);
-    todo_wine
     ok(status == STATUS_SUCCESS, "got %08x\n", status);
 
     status = pBCryptDestroyHash(secret);

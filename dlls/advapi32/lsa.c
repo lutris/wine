@@ -739,7 +739,7 @@ NTSTATUS WINAPI LsaOpenPolicy(
           ObjectAttributes, DesiredAccess, PolicyHandle);
 
     ADVAPI_ForceLocalComputer(SystemName ? SystemName->Buffer : NULL,
-                              STATUS_ACCESS_VIOLATION);
+                              RPC_NT_SERVER_UNAVAILABLE);
     dumpLsaAttributes(ObjectAttributes);
 
     if(PolicyHandle) *PolicyHandle = (LSA_HANDLE)0xcafe;

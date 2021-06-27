@@ -1338,6 +1338,7 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Get the Unix name from a file handle */
 @REQ(get_handle_unix_name)
     obj_handle_t   handle;      /* file handle */
+    int            nofollow;    /* do not follow symlinks (return the link) */
 @REPLY
     data_size_t    name_len;    /* unix name length */
     VARARG(name,string);        /* unix name */
@@ -1357,6 +1358,7 @@ enum server_fd_type
 {
     FD_TYPE_INVALID,  /* invalid file (no associated fd) */
     FD_TYPE_FILE,     /* regular file */
+    FD_TYPE_SYMLINK,  /* symbolic link */
     FD_TYPE_DIR,      /* directory */
     FD_TYPE_SOCKET,   /* socket */
     FD_TYPE_SERIAL,   /* serial port */
@@ -1453,6 +1455,7 @@ enum server_fd_type
     int family;                 /* family, see socket manpage */
     int type;                   /* type, see socket manpage */
     int protocol;               /* protocol, see socket manpage */
+    timeout_t connect_time;     /* time the socket was connected (relative) */
 @END
 
 
@@ -2072,6 +2075,7 @@ enum message_type
     VARARG(keystate,bytes);    /* global state array for all the keys */
 @END
 #define SEND_HWMSG_INJECTED    0x01
+#define SEND_HWMSG_RAWINPUT    0x02
 
 
 /* Get a message from the current queue */
@@ -2519,6 +2523,13 @@ enum coords_relative
 @REQ(set_window_region)
     user_handle_t  window;        /* handle to the window */
     int            redraw;        /* redraw the window? */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
+@END
+
+
+/* Set the layer region */
+@REQ(set_layer_region)
+    user_handle_t  window;        /* handle to the window */
     VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
 @END
 
@@ -3572,6 +3583,13 @@ struct handle_info
 @END
 
 
+/* set fd eof information */
+@REQ(set_fd_eof_info)
+    obj_handle_t handle;        /* handle to a file or directory */
+    file_pos_t   eof;           /* offset of eof of file */
+@END
+
+
 /* Retrieve layered info for a window */
 @REQ(get_window_layered_info)
     user_handle_t  handle;        /* handle to the window */
@@ -3734,7 +3752,6 @@ struct handle_info
     obj_handle_t handle;       /* process handle */
 @END
 
-
 /* Iterate thread list for process */
 @REQ(get_next_thread)
     obj_handle_t process;      /* process handle */
@@ -3744,4 +3761,57 @@ struct handle_info
     unsigned int flags;        /* controls iteration direction */
 @REPLY
     obj_handle_t handle;       /* next thread handle */
+@END
+
+enum esync_type
+{
+    ESYNC_SEMAPHORE = 1,
+    ESYNC_AUTO_EVENT,
+    ESYNC_MANUAL_EVENT,
+    ESYNC_MUTEX,
+    ESYNC_AUTO_SERVER,
+    ESYNC_MANUAL_SERVER,
+    ESYNC_QUEUE,
+};
+
+/* Create a new eventfd-based synchronization object */
+@REQ(create_esync)
+    unsigned int access;        /* wanted access rights */
+    int          initval;       /* initial value */
+    int          type;          /* type of esync object */
+    int          max;           /* maximum count on a semaphore */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the object */
+    int          type;          /* actual type (may be different for events) */
+    unsigned int shm_idx;
+@END
+
+@REQ(open_esync)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    int          type;          /* type of esync object (above) */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+    int          type;          /* type of esync object (above) */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Retrieve the esync fd for an object. */
+@REQ(get_esync_fd)
+    obj_handle_t handle;        /* handle to the object */
+@REPLY
+    int          type;
+    unsigned int shm_idx;
+@END
+
+/* Notify the server that we are doing a message wait or done with one. */
+@REQ(esync_msgwait)
+    int          in_msgwait;    /* are we in a message wait? */
+@END
+
+/* Retrieve the fd to wait on for user APCs. */
+@REQ(get_esync_apc_fd)
 @END

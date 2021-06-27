@@ -122,8 +122,16 @@ static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, LPVOID event_
 
 static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
 {
+    static const WCHAR ntoskrnlW[] = L"C:\\windows\\system32\\ntoskrnl.exe";
+    static const WCHAR win32kW[]   = L"C:\\windows\\system32\\win32k.sys";
+    static const WCHAR dxgkrnlW[]  = L"C:\\windows\\system32\\drivers\\dxgkrnl.sys";
+    static const WCHAR dxgmms1W[]  = L"C:\\windows\\system32\\drivers\\dxgmms1.sys";
+    static const WCHAR *stubs[] = { win32kW, dxgkrnlW, dxgmms1W };
     WCHAR driver_dir[MAX_PATH];
     const WCHAR *service_group = (argc >= 2) ? argv[1] : argv[0];
+    LDR_DATA_TABLE_ENTRY *ldr;
+    ULONG_PTR magic;
+    int i;
 
     if (!(stop_event = CreateEventW( NULL, TRUE, FALSE, NULL )))
         return;
@@ -135,6 +143,24 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
     GetSystemDirectoryW( driver_dir, MAX_PATH );
     wcscat( driver_dir, L"\\drivers" );
     AddDllDirectory( driver_dir );
+
+    /* Load some default drivers (required by anticheat drivers) */
+    for (i = 0; i < sizeof(stubs)/sizeof(stubs[0]); i++)
+    {
+        if (!LoadLibraryW( stubs[i] ))
+            ERR( "Failed to load %s\n", debugstr_w( stubs[i] ) );
+    }
+
+    /* ntoskrnl.exe must be the first module */
+    LdrLockLoaderLock( 0, NULL, &magic );
+    if (!LdrFindEntryForAddress( GetModuleHandleW( ntoskrnlW ), &ldr ))
+    {
+        RemoveEntryList( &ldr->InLoadOrderLinks );
+        InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList, &ldr->InLoadOrderLinks );
+        RemoveEntryList( &ldr->InMemoryOrderLinks );
+        InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList, &ldr->InMemoryOrderLinks );
+    }
+    LdrUnlockLoaderLock( 0, magic );
 
     TRACE( "starting service group %s\n", wine_dbgstr_w(service_group) );
     set_service_status( service_handle, SERVICE_RUNNING,
