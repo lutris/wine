@@ -305,6 +305,21 @@ static HRESULT SHELL_GetPathFromIDListForExecuteW(LPCITEMIDLIST pidl, LPWSTR psz
     return hr;
 }
 
+static HANDLE get_admin_token(void)
+{
+    TOKEN_ELEVATION_TYPE type;
+    TOKEN_LINKED_TOKEN linked;
+    DWORD size;
+
+    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenElevationType, &type, sizeof(type), &size)
+            || type == TokenElevationTypeFull)
+        return NULL;
+
+    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenLinkedToken, &linked, sizeof(linked), &size))
+        return NULL;
+    return linked.LinkedToken;
+}
+
 /*************************************************************************
  *	SHELL_ExecuteW [Internal]
  *
@@ -312,6 +327,7 @@ static HRESULT SHELL_GetPathFromIDListForExecuteW(LPCITEMIDLIST pidl, LPWSTR psz
 static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
 			    const SHELLEXECUTEINFOW *psei, LPSHELLEXECUTEINFOW psei_out)
 {
+    static const WCHAR runasW[] = {'r','u','n','a','s',0};
     STARTUPINFOW  startup;
     PROCESS_INFORMATION info;
     UINT_PTR retval = SE_ERR_NOASSOC;
@@ -319,6 +335,7 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     WCHAR curdir[MAX_PATH];
     DWORD dwCreationFlags;
     const WCHAR *lpDirectory = NULL;
+    HANDLE token = NULL;
 
     TRACE("Execute %s from directory %s\n", debugstr_w(lpCmd), debugstr_w(psei->lpDirectory));
 
@@ -344,8 +361,12 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     dwCreationFlags = CREATE_UNICODE_ENVIRONMENT;
     if (!(psei->fMask & SEE_MASK_NO_CONSOLE))
         dwCreationFlags |= CREATE_NEW_CONSOLE;
-    if (CreateProcessW(NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE, dwCreationFlags, env,
-                       lpDirectory, &startup, &info))
+
+    if (psei->lpVerb && !strcmpiW(psei->lpVerb, runasW))
+        token = get_admin_token();
+
+    if (CreateProcessAsUserW(token, NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE,
+            dwCreationFlags, env, lpDirectory, &startup, &info))
     {
         /* Give 30 seconds to the app to come up, if desired. Probably only needed
            when starting app immediately before making a DDE connection. */
@@ -364,6 +385,8 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
         TRACE("CreateProcess returned error %ld\n", retval);
         retval = ERROR_BAD_FORMAT;
     }
+
+    CloseHandle(token);
 
     TRACE("returning %lu\n", retval);
 

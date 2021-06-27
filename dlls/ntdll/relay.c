@@ -691,8 +691,12 @@ static LONGLONG WINAPI relay_call( struct relay_descr *descr, unsigned int idx, 
 {
     unsigned int nb_args;
     void *func = relay_trace_entry( descr, idx, stack, &nb_args );
+    void *teb;
     LONGLONG ret = call_entry_point( func, nb_args, stack );
     relay_trace_exit( descr, idx, stack[-1], ret );
+    teb = NtCurrentTeb();
+    /* Restore the TEB pointer, in case the builtin call clobbered it. */
+    __asm__ __volatile__( "mov x18, %0" : : "r" (teb) );
     return ret;
 }
 

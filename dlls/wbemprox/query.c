@@ -1305,6 +1305,9 @@ HRESULT to_longlong( VARIANT *var, LONGLONG *val, CIMTYPE *type )
         *val = 0;
         return S_OK;
     }
+    if (V_VT( var ) & VT_BYREF)
+        var = V_VARIANTREF( var );
+
     if (V_VT( var ) & VT_ARRAY)
     {
         *val = (INT_PTR)to_array( var, type );

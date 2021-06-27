@@ -199,7 +199,7 @@ typedef struct {
 
 static inline BitmapDecoderInfo *impl_from_IWICBitmapDecoderInfo(IWICBitmapDecoderInfo *iface)
 {
-    return CONTAINING_RECORD(iface, BitmapDecoderInfo, base.IWICComponentInfo_iface);
+    return CONTAINING_RECORD((IWICComponentInfo*)iface, BitmapDecoderInfo, base.IWICComponentInfo_iface);
 }
 
 static HRESULT WINAPI BitmapDecoderInfo_QueryInterface(IWICBitmapDecoderInfo *iface, REFIID iid,
@@ -682,7 +682,7 @@ typedef struct {
 
 static inline BitmapEncoderInfo *impl_from_IWICBitmapEncoderInfo(IWICBitmapEncoderInfo *iface)
 {
-    return CONTAINING_RECORD(iface, BitmapEncoderInfo, base.IWICComponentInfo_iface);
+    return CONTAINING_RECORD((IWICComponentInfo*)iface, BitmapEncoderInfo, base.IWICComponentInfo_iface);
 }
 
 static HRESULT WINAPI BitmapEncoderInfo_QueryInterface(IWICBitmapEncoderInfo *iface, REFIID iid,
@@ -973,7 +973,7 @@ typedef struct {
 
 static inline FormatConverterInfo *impl_from_IWICFormatConverterInfo(IWICFormatConverterInfo *iface)
 {
-    return CONTAINING_RECORD(iface, FormatConverterInfo, base.IWICComponentInfo_iface);
+    return CONTAINING_RECORD((IWICComponentInfo*)iface, FormatConverterInfo, base.IWICComponentInfo_iface);
 }
 
 static HRESULT WINAPI FormatConverterInfo_QueryInterface(IWICFormatConverterInfo *iface, REFIID iid,
@@ -1186,7 +1186,7 @@ typedef struct {
 
 static inline PixelFormatInfo *impl_from_IWICPixelFormatInfo2(IWICPixelFormatInfo2 *iface)
 {
-    return CONTAINING_RECORD(iface, PixelFormatInfo, base.IWICComponentInfo_iface);
+    return CONTAINING_RECORD((IWICComponentInfo*)iface, PixelFormatInfo, base.IWICComponentInfo_iface);
 }
 
 static HRESULT WINAPI PixelFormatInfo_QueryInterface(IWICPixelFormatInfo2 *iface, REFIID iid,
@@ -1496,7 +1496,7 @@ static struct metadata_container *get_metadata_container(MetadataReaderInfo *inf
 
 static inline MetadataReaderInfo *impl_from_IWICMetadataReaderInfo(IWICMetadataReaderInfo *iface)
 {
-    return CONTAINING_RECORD(iface, MetadataReaderInfo, base.IWICComponentInfo_iface);
+    return CONTAINING_RECORD((IWICComponentInfo*)iface, MetadataReaderInfo, base.IWICComponentInfo_iface);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_QueryInterface(IWICMetadataReaderInfo *iface,
