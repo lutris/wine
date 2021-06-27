@@ -39,6 +39,7 @@
 #include "wine/exception.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
+#include "intrin.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
@@ -375,11 +376,42 @@ LONGLONG WINAPI RtlGetSystemTimePrecise( void )
     return unix_funcs->RtlGetSystemTimePrecise();
 }
 
+/* 128-bit multiply a by b and return the high 64 bits, same as __umulh */
+static UINT64 multiply_tsc(UINT64 a, UINT64 b)
+{
+    UINT64 ah = a >> 32, al = (UINT32)a, bh = b >> 32, bl = (UINT32)b, m;
+    m = (ah * bl) + (bh * al) + ((al * bl) >> 32);
+    return (ah * bh) + (m >> 32);
+}
+
 /******************************************************************************
  *  RtlQueryPerformanceCounter   [NTDLL.@]
  */
 BOOL WINAPI DECLSPEC_HOTPATCH RtlQueryPerformanceCounter( LARGE_INTEGER *counter )
 {
+    if (user_shared_data->u3.QpcBypassEnabled & SHARED_GLOBAL_FLAGS_QPC_BYPASS_ENABLED)
+    {
+        unsigned __int64 tsc;
+        unsigned int aux;
+
+        if (user_shared_data->u3.QpcBypassEnabled & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_RDTSCP)
+            tsc = __rdtscp(&aux);
+        else
+        {
+            if (user_shared_data->u3.QpcBypassEnabled & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_MFENCE)
+                __asm__ __volatile__ ( "mfence" : : : "memory" );
+            if (user_shared_data->u3.QpcBypassEnabled & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_LFENCE)
+                __asm__ __volatile__ ( "lfence" : : : "memory" );
+            tsc = __rdtsc();
+        }
+
+        if (user_shared_data->u3.QpcBypassEnabled & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE)
+            tsc = multiply_tsc(tsc, hypervisor_shared_data->QpcMultiplier) + hypervisor_shared_data->QpcBias;
+
+        counter->QuadPart = (tsc + user_shared_data->QpcBias) >> user_shared_data->u3.QpcShift;
+        return TRUE;
+    }
+
     NtQueryPerformanceCounter( counter, NULL );
     return TRUE;
 }
@@ -389,7 +421,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH RtlQueryPerformanceCounter( LARGE_INTEGER *counter
  */
 BOOL WINAPI DECLSPEC_HOTPATCH RtlQueryPerformanceFrequency( LARGE_INTEGER *frequency )
 {
-    frequency->QuadPart = TICKSPERSEC;
+    frequency->QuadPart = user_shared_data->QpcFrequency;
     return TRUE;
 }
 

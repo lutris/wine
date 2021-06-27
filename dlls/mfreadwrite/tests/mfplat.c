@@ -508,6 +508,7 @@ static IMFMediaSource *create_test_source(int stream_count)
 {
     struct test_source *source;
     int i;
+    PROPVARIANT pos;
 
     source = heap_alloc_zero(sizeof(*source));
     source->IMFMediaSource_iface.lpVtbl = &test_source_vtbl;
@@ -918,6 +919,11 @@ static void test_source_reader_from_media_source(void)
 
     hr = IMFSourceReader_SetStreamSelection(reader, 1, TRUE);
     ok(hr == S_OK, "Failed to select a stream, hr %#x.\n", hr);
+
+    pos.vt = VT_I8;
+    pos.hVal.QuadPart = 0;
+    hr = IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &pos);
+    ok(hr == S_OK, "Failed to seek to beginning of stream, hr %#x.\n", hr);
 
     pos.vt = VT_I8;
     pos.hVal.QuadPart = 0;
