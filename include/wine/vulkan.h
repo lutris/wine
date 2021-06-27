@@ -458,26 +458,26 @@
 #define VK_USE_64_BIT_PTR_DEFINES 0
 
 #ifndef VK_DEFINE_NON_DISPATCHABLE_HANDLE
-#if (VK_USE_64_BIT_PTR_DEFINES==1)
-#if __cplusplus >= 201103L || (defined(_MSVC_LANG) && (_MSVC_LANG >= 201103L))
-#define VK_NULL_HANDLE nullptr
-#else
-#define VK_NULL_HANDLE ((void*)0)
-#endif
-#else
-#define VK_NULL_HANDLE 0ULL
-#endif
+    #if (VK_USE_64_BIT_PTR_DEFINES==1)
+        #if __cplusplus >= 201103L || (defined(_MSVC_LANG) && (_MSVC_LANG >= 201103L))
+            #define VK_NULL_HANDLE nullptr
+        #else
+            #define VK_NULL_HANDLE ((void*)0)
+        #endif
+    #else
+        #define VK_NULL_HANDLE 0ULL
+    #endif
 #endif
 #ifndef VK_NULL_HANDLE
-#define VK_NULL_HANDLE 0
+    #define VK_NULL_HANDLE 0
 #endif
 
 #ifndef VK_DEFINE_NON_DISPATCHABLE_HANDLE
-#if (VK_USE_64_BIT_PTR_DEFINES==1)
-#define VK_DEFINE_NON_DISPATCHABLE_HANDLE(object) typedef struct object##_T *object;
-#else
-#define VK_DEFINE_NON_DISPATCHABLE_HANDLE(object) typedef uint64_t object;
-#endif
+    #if (VK_USE_64_BIT_PTR_DEFINES==1)
+        #define VK_DEFINE_NON_DISPATCHABLE_HANDLE(object) typedef struct object##_T *object;
+    #else
+        #define VK_DEFINE_NON_DISPATCHABLE_HANDLE(object) typedef uint64_t object;
+    #endif
 #endif
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkAccelerationStructureKHR)
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkAccelerationStructureNV)

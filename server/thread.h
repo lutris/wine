@@ -56,6 +56,8 @@ struct thread
     struct list            mutex_list;    /* list of currently owned mutexes */
     int                    esync_fd;      /* esync file descriptor (signalled on exit) */
     int                    esync_apc_fd;  /* esync apc fd (signalled when APCs are present) */
+    unsigned int           fsync_idx;
+    unsigned int           fsync_apc_idx;
     unsigned int           system_regs;   /* which system regs have been set */
     struct msg_queue      *queue;         /* message queue */
     struct thread_wait    *wait;          /* current wait condition if sleeping */
@@ -109,7 +111,6 @@ extern struct thread *get_wait_queue_thread( struct wait_queue_entry *entry );
 extern enum select_op get_wait_queue_select_op( struct wait_queue_entry *entry );
 extern client_ptr_t get_wait_queue_key( struct wait_queue_entry *entry );
 extern void make_wait_abandoned( struct wait_queue_entry *entry );
-extern void set_wait_status( struct wait_queue_entry *entry, int status );
 extern void stop_thread( struct thread *thread );
 extern int wake_thread( struct thread *thread );
 extern int wake_thread_queue_entry( struct wait_queue_entry *entry );

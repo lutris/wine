@@ -1,0 +1,12 @@
+--- a/dlls/winex11.drv/window.c
++++ b/dlls/winex11.drv/window.c
+@@ -983,7 +983,8 @@
+         new_state |= (1 << NET_WM_STATE_MAXIMIZED);
+
+     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
+-    if (ex_style & WS_EX_TOPMOST)
++    if ((ex_style & WS_EX_TOPMOST) &&
++            !(new_state & (1 << NET_WM_STATE_FULLSCREEN)))
+         new_state |= (1 << NET_WM_STATE_ABOVE);
+     if (ex_style & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE))
+         new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
