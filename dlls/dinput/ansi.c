@@ -840,11 +840,37 @@ static HRESULT WINAPI dinput8_a_ConfigureDevices( IDirectInput8A *iface_a, LPDIC
     {
         hr = diactionformat_atow( format_a, &format_w, TRUE );
         params_w.lprgFormats = &format_w;
+        params_w.dwcUsers = params_a->dwcUsers;
+
+        if (params_a->lptszUserNames) {
+            char *start = params_a->lptszUserNames;
+            WCHAR *to = NULL;
+            int total_len = 0;
+            for (i = 0; i < params_a->dwcUsers; i++)
+            {
+                char *end = start + 1;
+                int len;
+                while (*(end++));
+                len = MultiByteToWideChar(CP_ACP, 0, start, end - start, NULL, 0);
+                total_len += len + 2; /* length of string and two null char */
+                if (to)
+                    to = HeapReAlloc(GetProcessHeap(), 0, to, sizeof(WCHAR) * total_len);
+                else
+                    to = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR) * total_len);
+
+                MultiByteToWideChar(CP_ACP, 0, start, end - start, to + (total_len - len - 2), len);
+                to[total_len] = 0;
+                to[total_len - 1] = 0;
+            }
+            params_w.lptszUserNames = to;
+        }
 
         if (SUCCEEDED(hr)) hr = IDirectInput8_ConfigureDevices( iface_w, callback, &params_w, flags, ref );
 
         if (!format_w.hInstString) for (i = 0; i < format_w.dwNumActions; ++i) HeapFree( GetProcessHeap(), 0, (void *)format_w.rgoAction[i].lptszActionName );
         HeapFree( GetProcessHeap(), 0, format_w.rgoAction );
+        HeapFree( GetProcessHeap(), 0, params_w.lptszUserNames);
+
     }
 
     HeapFree( GetProcessHeap(), 0, params_w.lptszUserNames );

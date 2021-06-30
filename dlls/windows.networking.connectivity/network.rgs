@@ -1,0 +1,19 @@
+HKLM
+{
+    NoRemove Software
+    {
+        NoRemove Microsoft
+        {
+            NoRemove WindowsRuntime
+            {
+                NoRemove ActivatableClassId
+                {
+                    ForceRemove Windows.Networking.Connectivity.NetworkInformation
+                    {
+                        val 'DllPath' = s '%MODULE%'
+                    }
+                }
+            }
+        }
+    }
+}

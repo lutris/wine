@@ -3579,6 +3579,7 @@ HRESULT WINAPI UrlCanonicalizeW(const WCHAR *src_url, WCHAR *canonicalized, DWOR
      *         4   have //  5,3
      *         5   have 1[+] alnum  6,3
      *         6   have location (found /) save root location
+     *         7   have ./
      */
 
     wk1 = url;
@@ -3603,6 +3604,11 @@ HRESULT WINAPI UrlCanonicalizeW(const WCHAR *src_url, WCHAR *canonicalized, DWOR
     else if (url[0] == '/')
     {
         state = 5;
+        is_file_url = TRUE;
+    }
+    else if (url[0] == '.' && url[1] == '/')
+    {
+        state = 7;
         is_file_url = TRUE;
     }
 
@@ -3808,6 +3814,15 @@ HRESULT WINAPI UrlCanonicalizeW(const WCHAR *src_url, WCHAR *canonicalized, DWOR
                 }
             }
             *wk2 = '\0';
+            break;
+        case 7:
+            if (flags & URL_DONT_SIMPLIFY)
+            {
+                state = 3;
+                break;
+            }
+            wk1 += 2;
+            state = 6;
             break;
         default:
             FIXME("how did we get here - state=%d\n", state);
@@ -4929,7 +4944,10 @@ HRESULT WINAPI UrlCombineW(const WCHAR *baseW, const WCHAR *relativeW, WCHAR *co
         work = preliminary + base.cchProtocol + 1 + base.cchSuffix - 1;
         if (*work++ != '/')
             *(work++) = '/';
-        lstrcpyW(work, relative.pszSuffix);
+        if (relative.pszSuffix[0] == '.' && relative.pszSuffix[1] == 0)
+            *work = 0;
+        else
+            lstrcpyW(work, relative.pszSuffix);
         break;
 
     default:
