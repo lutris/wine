@@ -63,6 +63,7 @@ static const char usage[] =
 "   --nostdinc         Do not search the standard include path\n"
 "   --ns_prefix        Prefix namespaces with ABI namespace\n"
 "   --oldnames         Use old naming conventions\n"
+"   --oldtlb           Use old typelib (SLTG) format\n"
 "   -o, --output=NAME  Set the output file name\n"
 "   -Otype             Type of stubs to generate (-Os, -Oi, -Oif)\n"
 "   -p                 Generate proxy\n"
@@ -117,6 +118,7 @@ int do_everything = 1;
 static int preprocess_only = 0;
 int do_header = 0;
 int do_typelib = 0;
+int do_old_typelib = 0;
 int do_proxies = 0;
 int do_client = 0;
 int do_server = 0;
@@ -170,6 +172,7 @@ enum {
     DLLDATA_ONLY_OPTION,
     LOCAL_STUBS_OPTION,
     NOSTDINC_OPTION,
+    OLD_TYPELIB_OPTION,
     PREFIX_ALL_OPTION,
     PREFIX_CLIENT_OPTION,
     PREFIX_SERVER_OPTION,
@@ -196,6 +199,7 @@ static const struct option long_options[] = {
     { "nostdinc", 0, NULL, NOSTDINC_OPTION },
     { "ns_prefix", 0, NULL, RT_NS_PREFIX },
     { "oldnames", 0, NULL, OLDNAMES_OPTION },
+    { "oldtlb", 0, NULL, OLD_TYPELIB_OPTION },
     { "output", 0, NULL, 'o' },
     { "prefix-all", 1, NULL, PREFIX_ALL_OPTION },
     { "prefix-client", 1, NULL, PREFIX_CLIENT_OPTION },
@@ -359,6 +363,7 @@ static void set_everything(int x)
 {
   do_header = x;
   do_typelib = x;
+  do_old_typelib = x;
   do_proxies = x;
   do_client = x;
   do_server = x;
@@ -775,6 +780,9 @@ int main(int argc,char *argv[])
     case 't':
       do_everything = 0;
       do_typelib = 1;
+      break;
+    case OLD_TYPELIB_OPTION:
+      do_old_typelib = 1;
       break;
     case 'T':
       typelib_name = xstrdup(optarg);

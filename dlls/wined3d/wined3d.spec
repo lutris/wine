@@ -123,6 +123,7 @@
 @ cdecl wined3d_device_context_resolve_sub_resource(ptr ptr long ptr long long)
 @ cdecl wined3d_device_context_set_blend_state(ptr ptr ptr long)
 @ cdecl wined3d_device_context_set_constant_buffer(ptr long long ptr)
+@ cdecl wined3d_device_context_set_depth_bounds(ptr long float float)
 @ cdecl wined3d_device_context_set_depth_stencil_state(ptr ptr long)
 @ cdecl wined3d_device_context_set_depth_stencil_view(ptr ptr)
 @ cdecl wined3d_device_context_set_index_buffer(ptr ptr long long)

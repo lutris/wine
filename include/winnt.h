@@ -827,8 +827,14 @@ typedef struct DECLSPEC_ALIGN(8) MEM_EXTENDED_PARAMETER {
 #define RTL_FIELD_SIZE(type, field) (sizeof(((type *)0)->field))
 #define RTL_SIZEOF_THROUGH_FIELD(type, field) (FIELD_OFFSET(type, field) + RTL_FIELD_SIZE(type, field))
 
-#define CONTAINING_RECORD(address, type, field) \
-  ((type *)((PCHAR)(address) - offsetof(type, field)))
+#ifdef __GNUC__
+# define CONTAINING_RECORD(address, type, field) ({     \
+   const typeof(((type *)0)->field) *__ptr = (address); \
+   (type *)((PCHAR)__ptr - offsetof(type, field)); })
+#else
+# define CONTAINING_RECORD(address, type, field) \
+   ((type *)((PCHAR)(address) - offsetof(type, field)))
+#endif
 
 #define ARRAYSIZE(x) (sizeof(x) / sizeof((x)[0]))
 #ifdef __WINESRC__
@@ -2226,6 +2232,7 @@ extern struct _TEB * WINAPI NtCurrentTeb(void);
 #define IO_REPARSE_TAG_CLOUD_MASK       __MSABI_LONG(0x0000F000)
 #define IO_REPARSE_TAG_APPEXECLINK      __MSABI_LONG(0x8000001B)
 #define IO_REPARSE_TAG_GVFS             __MSABI_LONG(0x9000001C)
+#define IO_REPARSE_TAG_LX_SYMLINK       __MSABI_LONG(0xA000001D)
 #define IO_REPARSE_TAG_STORAGE_SYNC     __MSABI_LONG(0x8000001E)
 #define IO_REPARSE_TAG_WCI_TOMBSTONE    __MSABI_LONG(0xA000001F)
 #define IO_REPARSE_TAG_UNHANDLED        __MSABI_LONG(0x80000020)
