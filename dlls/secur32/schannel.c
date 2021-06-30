@@ -985,6 +985,7 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
         unsigned char *ptr;
 
         ctx = schan_get_object(phContext->dwLower, SCHAN_HANDLE_CTX);
+        if (!ctx) return SEC_E_INVALID_HANDLE;
         if (pInput)
         {
             idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN);

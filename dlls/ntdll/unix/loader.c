@@ -87,6 +87,7 @@
 #include "winternl.h"
 #include "unix_private.h"
 #include "esync.h"
+#include "fsync.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
@@ -1840,6 +1841,26 @@ static struct unix_funcs unix_funcs =
     __wine_dbg_header,
 };
 
+BOOL ac_odyssey;
+
+static void hacks_init(void)
+{
+    static const char ac_odyssey_exe[] = "ACOdyssey.exe";
+    char cur_exe[MAX_PATH];
+    DWORD cur_exe_len;
+    int fd;
+
+    fd = open("/proc/self/comm", O_RDONLY);
+    cur_exe_len = read(fd, cur_exe, sizeof(cur_exe));
+    close(fd);
+    cur_exe[cur_exe_len - 1] = 0;
+
+    if (!strcasecmp(cur_exe, ac_odyssey_exe))
+    {
+        ERR("HACK: AC Odyssey sync tweak on.\n");
+        ac_odyssey = TRUE;
+    }
+}
 
 /***********************************************************************
  *           start_main_thread
@@ -1854,8 +1875,11 @@ static void start_main_thread(void)
     signal_init_thread( teb );
     dbg_init();
     startup_info_size = server_init_process();
+    hacks_init();
+    fsync_init();
     esync_init();
     virtual_map_user_shared_data();
+    virtual_map_hypervisor_shared_data();
     init_cpu_info();
     init_files();
     load_libwine();

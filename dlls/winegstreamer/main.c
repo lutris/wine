@@ -39,6 +39,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
     {
         DisableThreadLibraryCalls(instance);
         __wine_init_unix_lib(instance, reason, NULL, &unix_funcs);
+        init_gstreamer();
     }
     return TRUE;
 }

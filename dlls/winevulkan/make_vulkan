@@ -94,7 +94,6 @@ UNSUPPORTED_EXTENSIONS = [
 
     # Device extensions
     "VK_AMD_display_native_hdr",
-    "VK_EXT_full_screen_exclusive",
     "VK_EXT_hdr_metadata", # Needs WSI work.
     "VK_EXT_pipeline_creation_feedback",
     "VK_GOOGLE_display_timing",
@@ -129,6 +128,11 @@ CORE_EXTENSIONS = [
     "VK_KHR_surface",
     "VK_KHR_swapchain",
     "VK_KHR_win32_surface",
+    "VK_KHR_get_surface_capabilities2",
+]
+
+FAKED_EXTENSIONS = [
+    {"name": "VK_EXT_full_screen_exclusive", "version": 4}
 ]
 
 # Some experimental extensions are used by shipping applications so their API is extremely unlikely
@@ -198,7 +202,7 @@ FUNCTION_OVERRIDES = {
     "vkGetPhysicalDeviceSurfaceSupportKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
     "vkGetPhysicalDeviceSurfaceCapabilitiesKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PRIVATE},
     "vkGetPhysicalDeviceSurfaceFormatsKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
-    "vkGetPhysicalDeviceSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
+    "vkGetPhysicalDeviceSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PRIVATE},
 
     # VK_KHR_get_surface_capabilities2
     "vkGetPhysicalDeviceSurfaceCapabilities2KHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PRIVATE},
@@ -209,10 +213,12 @@ FUNCTION_OVERRIDES = {
     "vkGetPhysicalDeviceWin32PresentationSupportKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
 
     # VK_KHR_swapchain
-    "vkCreateSwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
-    "vkDestroySwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
-    "vkGetSwapchainImagesKHR": {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
-    "vkQueuePresentKHR": {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
+    "vkAcquireNextImageKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
+    "vkAcquireNextImage2KHR": {"dispatch" : True, "driver" : True, "thunk" : ThunkType.NONE},
+    "vkCreateSwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.NONE},
+    "vkDestroySwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.NONE},
+    "vkGetSwapchainImagesKHR": {"dispatch" : True, "driver" : True, "thunk" : ThunkType.NONE},
+    "vkQueuePresentKHR": {"dispatch" : True, "driver" : True, "thunk" : ThunkType.NONE},
 
     # VK_KHR_external_fence_capabilities
     "vkGetPhysicalDeviceExternalFencePropertiesKHR" : {"dispatch" : False, "driver" : False, "thunk" : ThunkType.NONE},
@@ -228,8 +234,14 @@ FUNCTION_OVERRIDES = {
     "vkEnumeratePhysicalDeviceGroupsKHR" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
 
     # VK_KHR_device_group
-    "vkGetDeviceGroupSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
+    "vkGetDeviceGroupSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PRIVATE},
     "vkGetPhysicalDevicePresentRectanglesKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
+
+    # VK_EXT_full_screen_exclusive
+    "vkGetPhysicalDeviceSurfacePresentModes2EXT" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
+    "vkGetDeviceGroupSurfacePresentModes2EXT" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
+    "vkAcquireFullScreenExclusiveModeEXT" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
+    "vkReleaseFullScreenExclusiveModeEXT" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
 
     # VK_EXT_private_data
     "vkGetPrivateDataEXT" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE},
@@ -1038,6 +1050,8 @@ class VkHandle(object):
     def native_handle(self, name):
         """ Provide access to the native handle of a wrapped object. """
 
+        if self.name == "VkSwapchainKHR":
+            return "((struct VkSwapchainKHR_T *)(uintptr_t) ({0}))->swapchain".format(name)
         if self.name == "VkCommandPool":
             return "wine_cmd_pool_from_handle({0})->command_pool".format(name)
         if self.name == "VkDebugUtilsMessengerEXT":
@@ -2675,6 +2689,12 @@ class VkGenerator(object):
             f.write("    \"{0}\",\n".format(ext["name"]))
         f.write("};\n\n")
 
+        # Create array of faked device extensions.
+        f.write("static const VkExtensionProperties vk_device_extension_discards[] =\n{\n")
+        for ext in FAKED_EXTENSIONS:
+            f.write("    {{\"{0}\", {1}}},\n".format(ext["name"], ext["version"]))
+        f.write("};\n\n")
+
         # Create array of instance extensions.
         f.write("static const char * const vk_instance_extensions[] =\n{\n")
         for ext in self.registry.extensions:
@@ -2693,6 +2713,27 @@ class VkGenerator(object):
         f.write("            return TRUE;\n")
         f.write("    }\n")
         f.write("    return FALSE;\n")
+        f.write("}\n\n")
+
+        f.write("BOOL wine_vk_device_extension_faked(const char *name)\n")
+        f.write("{\n")
+        f.write("    unsigned int i;\n")
+        f.write("    for (i = 0; i < ARRAY_SIZE(vk_device_extension_discards); i++)\n")
+        f.write("    {\n")
+        f.write("        if (strcmp(vk_device_extension_discards[i].extensionName, name) == 0)\n")
+        f.write("            return TRUE;\n")
+        f.write("    }\n")
+        f.write("    return FALSE;\n")
+        f.write("}\n\n")
+
+        f.write("unsigned int wine_vk_device_extension_faked_count(void)\n")
+        f.write("{\n")
+        f.write("    return ARRAY_SIZE(vk_device_extension_discards);\n")
+        f.write("}\n\n")
+
+        f.write("const VkExtensionProperties* wine_vk_device_extension_faked_idx(unsigned int idx)\n")
+        f.write("{\n")
+        f.write("    return &vk_device_extension_discards[idx];\n")
         f.write("}\n\n")
 
         f.write("BOOL wine_vk_instance_extension_supported(const char *name)\n")
@@ -3071,6 +3112,12 @@ class VkGenerator(object):
         f.write("\n")
         f.write("    /* winevulkan specific functions */\n")
         f.write("    VkSurfaceKHR (*p_wine_get_native_surface)(VkSurfaceKHR);\n")
+        f.write("\n    /* Optional. Returns TRUE if FS hack is active, otherwise returns FALSE. If\n")
+        f.write("     * it returns TRUE, then real_sz will contain the actual display\n")
+        f.write("     * resolution; user_sz will contain the app's requested mode; and dst_blit\n")
+        f.write("     * will contain the area to blit the user image to in real coordinates.\n")
+        f.write("     * All parameters are optional. */\n")
+        f.write("    VkBool32 (*query_fs_hack)(VkSurfaceKHR surface, VkExtent2D *real_sz, VkExtent2D *user_sz, VkRect2D *dst_blit, VkFilter *filter);\n")
         f.write("};\n\n")
 
         f.write("extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver(HDC hdc, UINT version);\n\n")

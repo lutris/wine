@@ -1,6 +1,7 @@
 EXTRADEFS = -DUSE_WS_PREFIX
 MODULE    = ws2_32.dll
 IMPORTLIB = ws2_32
+IMPORTS = kernelbase
 DELAYIMPORTS = iphlpapi user32
 EXTRALIBS = $(POLL_LIBS)
 
