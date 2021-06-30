@@ -1,0 +1,35 @@
+From: Zhiyi Zhang <zzhang@codeweavers.com>
+Subject: [PATCH] winex11.drv: Call XIconifyWindow() after XMapWindow() with a minimized window.
+Message-Id: <ad8810ff-55d8-bb8d-a708-73fa0f705a47@codeweavers.com>
+Date: Fri, 13 Nov 2020 15:52:04 +0800
+
+Mutter always unminimizes a window when handling map requests. So a window could be in
+normal state as far as Mutter concerns while Wine mistakenly considers it still minimized.
+
+Fix Disgaea PC black screen after Alt+Tab in fullscreen mode.
+
+Signed-off-by: Zhiyi Zhang <zzhang@codeweavers.com>
+---
+Also see https://gitlab.gnome.org/GNOME/mutter/-/blob/master/src/x11/events.c#L1430
+
+ dlls/winex11.drv/window.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/dlls/winex11.drv/window.c b/dlls/winex11.drv/window.c
+index 457173964eb..03eed3ce091 100644
+--- a/dlls/winex11.drv/window.c
++++ b/dlls/winex11.drv/window.c
+@@ -1128,6 +1128,9 @@ static void map_window( HWND hwnd, DWORD new_style )
+ 
+         data->mapped = TRUE;
+         data->iconic = (new_style & WS_MINIMIZE) != 0;
++        /* Mutter always unminimizes windows when handling map requests. Restore iconic state here */
++        if (data->iconic)
++            XIconifyWindow( data->display, data->whole_window, data->vis.screen );
+     }
+     release_win_data( data );
+ }
+
+-- 
+2.27.0
+

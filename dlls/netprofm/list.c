@@ -1015,6 +1015,7 @@ static HRESULT WINAPI connections_enum_Next(
         i++;
     }
     if (fetched) *fetched = i;
+    if (!i) ret[0] = NULL;
 
     return i < count ? S_FALSE : S_OK;
 }

@@ -400,12 +400,14 @@ void X11DRV_XDND_PositionEvent( HWND hWnd, XClientMessageEvent *event )
     XSendEvent(event->display, event->data.l[0], False, NoEventMask, (XEvent*)&e);
 }
 
+static XClientMessageEvent dropEvent;
+
 /**************************************************************************
- * X11DRV_XDND_DropEvent
+ * X11DRV_XDND_DropEventProcess
  *
  * Handle an XdndDrop event.
  */
-void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event )
+void X11DRV_XDND_DropEventProcess( HWND hWnd )
 {
     XClientMessageEvent e;
     IDropTarget *dropTarget;
@@ -481,17 +483,28 @@ void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event )
     /* Tell the target we are finished. */
     memset(&e, 0, sizeof(e));
     e.type = ClientMessage;
-    e.display = event->display;
-    e.window = event->data.l[0];
+    e.display = dropEvent.display;
+    e.window = dropEvent.data.l[0];
     e.message_type = x11drv_atom(XdndFinished);
     e.format = 32;
-    e.data.l[0] = event->window;
+    e.data.l[0] = dropEvent.window;
     e.data.l[1] = accept;
     if (accept)
         e.data.l[2] = X11DRV_XDND_DROPEFFECTToXdndAction(effect);
     else
         e.data.l[2] = None;
-    XSendEvent(event->display, event->data.l[0], False, NoEventMask, (XEvent*)&e);
+    XSendEvent(dropEvent.display, dropEvent.data.l[0], False, NoEventMask, (XEvent*)&e);
+}
+
+/**************************************************************************
+ * X11DRV_XDND_DropEvent
+ *
+ * Notify a XdndDrop event.
+ */
+void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event )
+{
+    memcpy(&dropEvent, event, sizeof(*event));
+    PostMessageW(hWnd, WM_X11DRV_DROPEVENT, 0, 0);
 }
 
 /**************************************************************************

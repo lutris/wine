@@ -1,0 +1,105 @@
+From: "Roman Pišl" <rpisl@seznam.cz>
+Subject: [PATCH] winex11.drv: Don't hard-lock when dropping from native into Wine application that shows modal dialog.
+Message-Id: <20200220213252.14986-1-rpisl@seznam.cz>
+Date: Thu, 20 Feb 2020 22:32:52 +0100
+
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=46522
+Wine-Bug: https://bugs.winehq.org/show_bug.cgi?id=46452
+
+Signed-off-by: Roman Pišl <rpisl@seznam.cz>
+---
+ dlls/winex11.drv/window.c |  3 +++
+ dlls/winex11.drv/x11drv.h |  4 +++-
+ dlls/winex11.drv/xdnd.c   | 25 +++++++++++++++++++------
+ 3 files changed, 25 insertions(+), 7 deletions(-)
+
+diff --git a/dlls/winex11.drv/window.c b/dlls/winex11.drv/window.c
+index 55756c16b6e..5ff994a996e 100644
+--- a/dlls/winex11.drv/window.c
++++ b/dlls/winex11.drv/window.c
+@@ -2863,6 +2863,9 @@ LRESULT CDECL X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
+         return clip_cursor_notify( hwnd, (HWND)wp, (HWND)lp );
+     case WM_X11DRV_CLIP_CURSOR_REQUEST:
+         return clip_cursor_request( hwnd, (BOOL)wp, (BOOL)lp );
++    case WM_X11DRV_DROPEVENT:
++        X11DRV_XDND_DropEventProcess( hwnd );
++        return 0;
+     default:
+         FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
+         return 0;
+diff --git a/dlls/winex11.drv/x11drv.h b/dlls/winex11.drv/x11drv.h
+index bfeec97f567..c506a0da779 100644
+--- a/dlls/winex11.drv/x11drv.h
++++ b/dlls/winex11.drv/x11drv.h
+@@ -247,6 +247,7 @@ extern void IME_SetResultString(LPWSTR lpResult, DWORD dwResultlen) DECLSPEC_HID
+ 
+ extern void X11DRV_XDND_EnterEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
+ extern void X11DRV_XDND_PositionEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
++extern void X11DRV_XDND_DropEventProcess( HWND hWnd );
+ extern void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
+ extern void X11DRV_XDND_LeaveEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
+ extern void X11DRV_CLIPBOARD_ImportSelection( Display *display, Window win, Atom selection,
+@@ -545,7 +546,8 @@ enum x11drv_window_messages
+     WM_X11DRV_RESIZE_DESKTOP,
+     WM_X11DRV_SET_CURSOR,
+     WM_X11DRV_CLIP_CURSOR_NOTIFY,
+-    WM_X11DRV_CLIP_CURSOR_REQUEST
++    WM_X11DRV_CLIP_CURSOR_REQUEST,
++    WM_X11DRV_DROPEVENT,
+ };
+ 
+ /* _NET_WM_STATE properties that we keep track of */
+diff --git a/dlls/winex11.drv/xdnd.c b/dlls/winex11.drv/xdnd.c
+index 0cd2ad88924..49a2b7650ac 100644
+--- a/dlls/winex11.drv/xdnd.c
++++ b/dlls/winex11.drv/xdnd.c
+@@ -400,12 +400,14 @@ void X11DRV_XDND_PositionEvent( HWND hWnd, XClientMessageEvent *event )
+     XSendEvent(event->display, event->data.l[0], False, NoEventMask, (XEvent*)&e);
+ }
+ 
++static XClientMessageEvent dropEvent;
++
+ /**************************************************************************
+- * X11DRV_XDND_DropEvent
++ * X11DRV_XDND_DropEventProcess
+  *
+  * Handle an XdndDrop event.
+  */
+-void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event )
++void X11DRV_XDND_DropEventProcess( HWND hWnd )
+ {
+     XClientMessageEvent e;
+     IDropTarget *dropTarget;
+@@ -481,17 +483,28 @@ void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event )
+     /* Tell the target we are finished. */
+     memset(&e, 0, sizeof(e));
+     e.type = ClientMessage;
+-    e.display = event->display;
+-    e.window = event->data.l[0];
++    e.display = dropEvent.display;
++    e.window = dropEvent.data.l[0];
+     e.message_type = x11drv_atom(XdndFinished);
+     e.format = 32;
+-    e.data.l[0] = event->window;
++    e.data.l[0] = dropEvent.window;
+     e.data.l[1] = accept;
+     if (accept)
+         e.data.l[2] = X11DRV_XDND_DROPEFFECTToXdndAction(effect);
+     else
+         e.data.l[2] = None;
+-    XSendEvent(event->display, event->data.l[0], False, NoEventMask, (XEvent*)&e);
++    XSendEvent(dropEvent.display, dropEvent.data.l[0], False, NoEventMask, (XEvent*)&e);
++}
++
++/**************************************************************************
++ * X11DRV_XDND_DropEvent
++ *
++ * Notify a XdndDrop event.
++ */
++void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event )
++{
++    memcpy(&dropEvent, event, sizeof(*event));
++    PostMessageW(hWnd, WM_X11DRV_DROPEVENT, 0, 0);
+ }
+ 
+ /**************************************************************************

@@ -37,8 +37,10 @@
 #include <assert.h>
 #include <wchar.h>
 
+#define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
+#include "initguid.h"
 #include "winreg.h"
 #include "winuser.h"
 #include "wininet.h"
@@ -51,6 +53,7 @@
 #include "winternl.h"
 #include "iphlpapi.h"
 #include "dhcpcsdk.h"
+#include "netlistmgr.h"
 
 #include "wine/exception.h"
 
@@ -1191,25 +1194,50 @@ BOOL WINAPI InternetGetConnectedState(LPDWORD lpdwStatus, DWORD dwReserved)
 BOOL WINAPI InternetGetConnectedStateExW(LPDWORD lpdwStatus, LPWSTR lpszConnectionName,
                                          DWORD dwNameLen, DWORD dwReserved)
 {
+    NLM_CONNECTIVITY connectivity;
+    INetworkListManager *mgr;
+    VARIANT_BOOL connected;
+    DWORD status;
+
     TRACE("(%p, %p, %d, 0x%08x)\n", lpdwStatus, lpszConnectionName, dwNameLen, dwReserved);
 
     /* Must be zero */
     if(dwReserved)
         return FALSE;
 
-    if (lpdwStatus) {
-        WARN("always returning LAN connection.\n");
-        *lpdwStatus = INTERNET_CONNECTION_LAN;
+    CoInitialize(NULL);
+
+    status = INTERNET_CONNECTION_CONFIGURED | INTERNET_CONNECTION_OFFLINE;
+
+    if (CoCreateInstance(&CLSID_NetworkListManager, NULL, CLSCTX_INPROC_SERVER,
+                          &IID_INetworkListManager, (void**)&mgr) == S_OK)
+    {
+        if (SUCCEEDED(INetworkListManager_IsConnectedToInternet(mgr, &connected)) &&
+            connected == VARIANT_TRUE &&
+            SUCCEEDED(INetworkListManager_GetConnectivity(mgr, &connectivity)) &&
+            connectivity != NLM_CONNECTIVITY_DISCONNECTED)
+        {
+            status &= ~INTERNET_CONNECTION_OFFLINE;
+
+            WARN("always returning LAN connection.\n");
+            status |= INTERNET_CONNECTION_LAN;
+        }
+        INetworkListManager_Release(mgr);
     }
+
+    CoUninitialize();
+
+    if (lpdwStatus) *lpdwStatus = status;
 
     /* When the buffer size is zero LoadStringW fills the buffer with a pointer to
      * the resource, avoid it as we must not change the buffer in this case */
     if(lpszConnectionName && dwNameLen) {
         *lpszConnectionName = '\0';
-        LoadStringW(WININET_hModule, IDS_LANCONNECTION, lpszConnectionName, dwNameLen);
+        if (status & INTERNET_CONNECTION_LAN)
+            LoadStringW(WININET_hModule, IDS_LANCONNECTION, lpszConnectionName, dwNameLen);
     }
 
-    return TRUE;
+    return !(status & INTERNET_CONNECTION_OFFLINE);
 }
 
 

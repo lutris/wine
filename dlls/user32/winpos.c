@@ -1112,6 +1112,9 @@ static BOOL show_window( HWND hwnd, INT cmd )
             goto done;
     }
 
+    if (showFlag && !wasVisible && ((style & (WS_CAPTION | WS_MAXIMIZE | WS_MAXIMIZE)) == WS_CAPTION))
+        swp |= SWP_FRAMECHANGED;
+
     if ((showFlag != wasVisible || cmd == SW_SHOWNA) && cmd != SW_SHOWMAXIMIZED && !(swp & SWP_STATECHANGED))
     {
         SendMessageW( hwnd, WM_SHOWWINDOW, showFlag, 0 );

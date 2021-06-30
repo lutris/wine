@@ -73,6 +73,7 @@ static const struct object_ops async_ops =
     remove_queue,              /* remove_queue */
     async_signaled,            /* signaled */
     NULL,                      /* get_esync_fd */
+    NULL,                      /* get_fsync_idx */
     async_satisfied,           /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
@@ -119,14 +120,14 @@ static void async_satisfied( struct object *obj, struct wait_queue_entry *entry 
         async->direct_result = 0;
     }
 
-    set_wait_status( entry, async->status );
-
     /* close wait handle here to avoid extra server round trip */
     if (async->wait_handle)
     {
         close_handle( async->thread->process, async->wait_handle );
         async->wait_handle = 0;
     }
+
+    if (async->status == STATUS_PENDING) make_wait_abandoned( entry );
 }
 
 static void async_destroy( struct object *obj )
@@ -496,6 +497,7 @@ static const struct object_ops iosb_ops =
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
     NULL,                     /* get_esync_fd */
+    NULL,                     /* get_fsync_idx */
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */

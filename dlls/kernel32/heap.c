@@ -44,6 +44,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(globalmem);
 
 static HANDLE systemHeap;   /* globally shared heap */
 
+extern BOOL CDECL __wine_needs_override_large_address_aware(void);
+
 
 /***********************************************************************
  *           HEAP_CreateSystemHeap
@@ -326,6 +328,8 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
        return 0;
    }
 
+    __TRY
+    {
    if(ISPOINTER(hmem))
    {
       retval=HeapSize(GetProcessHeap(), 0, hmem);
@@ -359,6 +363,14 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
       }
       RtlUnlockHeap(GetProcessHeap());
    }
+   }
+   __EXCEPT_PAGE_FAULT
+   {
+       SetLastError( ERROR_INVALID_HANDLE );
+       retval = 0;
+   }
+   __ENDTRY
+
    if (retval == ~(SIZE_T)0) retval = 0;
    return retval;
 }
@@ -546,6 +558,10 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 #ifndef _WIN64
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( GetModuleHandleW(0) );
 #endif
+    static int force_large_address_aware = -1;
+
+    if (force_large_address_aware == -1)
+        force_large_address_aware = __wine_needs_override_large_address_aware();
 
     /* Because GlobalMemoryStatus is identical to GlobalMemoryStatusEX save
        for one extra field in the struct, and the lack of a bug, we simply
@@ -584,7 +600,8 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 
     /* values are limited to 2Gb unless the app has the IMAGE_FILE_LARGE_ADDRESS_AWARE flag */
     /* page file sizes are not limited (Adobe Illustrator 8 depends on this) */
-    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE))
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) &&
+        !force_large_address_aware)
     {
         if (lpBuffer->dwTotalPhys > MAXLONG) lpBuffer->dwTotalPhys = MAXLONG;
         if (lpBuffer->dwAvailPhys > MAXLONG) lpBuffer->dwAvailPhys = MAXLONG;
@@ -596,12 +613,15 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
     if ( lpBuffer->dwAvailPhys +  lpBuffer->dwAvailPageFile >= 2U*1024*1024*1024)
          lpBuffer->dwAvailPageFile = 2U*1024*1024*1024 -  lpBuffer->dwAvailPhys - 1;
 
-    /* limit page file size for really old binaries */
+    /* limit value for really old binaries */
+    /* use MAXLONG/2, so that dwAvailPhys + dwAvailPageFile < MAXLONG */
     if (nt->OptionalHeader.MajorSubsystemVersion < 4 ||
         nt->OptionalHeader.MajorOperatingSystemVersion < 4)
     {
-        if (lpBuffer->dwTotalPageFile > MAXLONG) lpBuffer->dwTotalPageFile = MAXLONG;
-        if (lpBuffer->dwAvailPageFile > MAXLONG) lpBuffer->dwAvailPageFile = MAXLONG;
+        lpBuffer->dwTotalPhys = min(lpBuffer->dwTotalPhys, MAXLONG / 2);
+        lpBuffer->dwAvailPhys = min(lpBuffer->dwAvailPhys, MAXLONG / 2);
+        lpBuffer->dwTotalPageFile = min(lpBuffer->dwTotalPageFile, MAXLONG / 2);
+        lpBuffer->dwAvailPageFile = min(lpBuffer->dwAvailPageFile, MAXLONG / 2);
     }
 #endif
 

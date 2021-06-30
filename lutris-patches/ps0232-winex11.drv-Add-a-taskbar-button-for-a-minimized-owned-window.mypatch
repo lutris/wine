@@ -1,0 +1,54 @@
+From: Dmitry Timoshkov <dmitry@baikal.ru>
+Subject: [PATCH] winex11.drv: Add a taskbar button for a minimized owned window.
+Message-Id: <20201124152511.77631693e00acae8b87f4ee4@baikal.ru>
+Date: Tue, 24 Nov 2020 15:25:11 +0300
+
+Otherwise minimizing an owned window without WS_EX_APPWINDOW style (common
+for Delphi applications) leads to a window completely disappearing after being
+minimized.
+
+Before this patch: no taskbar window for a normal or minimized owned window.
+After this patch: no taskbar window for normal owned window, after a window
+being minimized a taskbar button appears, after a window being restored a taskbar
+button gets removed.
+
+Essentially this patch fixes a regression caused by
+
+commit 61e50e15ba45ad54655f98619f5ef33917033165
+Author: Alexandre Julliard <julliard@winehq.org>
+Date:   Fri May 28 12:14:43 2010 +0200
+
+    winex11: Map zero-size windows and set an empty window region for them.
+
+Signed-off-by: Dmitry Timoshkov <dmitry@baikal.ru>
+---
+ dlls/winex11.drv/window.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winex11.drv/window.c b/dlls/winex11.drv/window.c
+index 457173964e..f0a3f07f37 100644
+--- a/dlls/winex11.drv/window.c
++++ b/dlls/winex11.drv/window.c
+@@ -987,7 +987,7 @@ void update_net_wm_states( struct x11drv_win_data *data )
+         new_state |= (1 << NET_WM_STATE_ABOVE);
+     if (ex_style & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE))
+         new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
+-    if (!(ex_style & WS_EX_APPWINDOW) && GetWindow( data->hwnd, GW_OWNER ))
++    if (!(ex_style & WS_EX_APPWINDOW) && !(style & WS_MINIMIZE) && GetWindow( data->hwnd, GW_OWNER ))
+         new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR);
+ 
+     if (!data->mapped)  /* set the _NET_WM_STATE atom directly */
+@@ -2499,7 +2499,8 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
+         else
+         {
+             if (swp_flags & (SWP_FRAMECHANGED|SWP_STATECHANGED)) set_wm_hints( data );
+-            if (!event_type) update_net_wm_states( data );
++            if (!event_type || event_type == PropertyNotify)
++                update_net_wm_states( data );
+         }
+     }
+ 
+
+-- 
+2.29.2
+
